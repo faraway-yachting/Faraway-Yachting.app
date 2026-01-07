@@ -1,0 +1,537 @@
+'use client';
+
+import { useState, useMemo, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
+import { AppShell } from '@/components/accounting/AppShell';
+import { DataTable } from '@/components/accounting/DataTable';
+import ReimbursementApprovalModal from '@/components/petty-cash/ReimbursementApprovalModal';
+import {
+  ArrowLeft,
+  Clock,
+  CheckCircle,
+  XCircle,
+  Wallet,
+  Filter,
+  Building2,
+  User,
+  DollarSign,
+} from 'lucide-react';
+
+// Data imports
+import {
+  getAllReimbursements,
+  approveReimbursement,
+  processReimbursementPayment,
+  rejectReimbursement,
+} from '@/data/petty-cash/reimbursements';
+import { getExpenseById } from '@/data/petty-cash/expenses';
+import { getWalletById, addToWallet } from '@/data/petty-cash/wallets';
+import { getActiveCompanies } from '@/data/company/companies';
+import type { PettyCashReimbursement, PettyCashExpense } from '@/data/petty-cash/types';
+import {
+  formatCurrency,
+  formatDate,
+  getStatusLabel,
+  getStatusColor,
+} from '@/lib/petty-cash/utils';
+
+type StatusFilter = 'all' | 'pending' | 'approved' | 'paid' | 'rejected';
+type GroupBy = 'none' | 'company' | 'holder' | 'status';
+
+export default function ReimbursementsPage() {
+  const router = useRouter();
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+  const [companyFilter, setCompanyFilter] = useState<string>('all');
+  const [groupBy, setGroupBy] = useState<GroupBy>('company');
+
+  // Modal state
+  const [selectedReimbursement, setSelectedReimbursement] = useState<PettyCashReimbursement | null>(null);
+  const [selectedExpense, setSelectedExpense] = useState<PettyCashExpense | null>(null);
+  const [showApprovalModal, setShowApprovalModal] = useState(false);
+
+  // Get data
+  const companies = useMemo(() => getActiveCompanies(), []);
+  const allReimbursements = useMemo(
+    () => getAllReimbursements(),
+    [refreshKey]
+  );
+
+  // Apply filters
+  const filteredReimbursements = useMemo(() => {
+    let filtered = allReimbursements;
+
+    if (statusFilter !== 'all') {
+      filtered = filtered.filter((r) => r.status === statusFilter);
+    }
+
+    if (companyFilter !== 'all') {
+      filtered = filtered.filter((r) => r.companyId === companyFilter);
+    }
+
+    return filtered.sort(
+      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    );
+  }, [allReimbursements, statusFilter, companyFilter]);
+
+  // Group reimbursements
+  const groupedReimbursements = useMemo(() => {
+    if (groupBy === 'none') {
+      return { 'All Reimbursements': filteredReimbursements };
+    }
+
+    const groups: Record<string, PettyCashReimbursement[]> = {};
+
+    filteredReimbursements.forEach((r) => {
+      let key: string;
+      switch (groupBy) {
+        case 'company':
+          key = r.companyName;
+          break;
+        case 'holder':
+          key = r.walletHolderName;
+          break;
+        case 'status':
+          key = getStatusLabel(r.status);
+          break;
+        default:
+          key = 'Other';
+      }
+
+      if (!groups[key]) {
+        groups[key] = [];
+      }
+      groups[key].push(r);
+    });
+
+    return groups;
+  }, [filteredReimbursements, groupBy]);
+
+  // Calculate stats
+  const stats = useMemo(() => {
+    const pending = allReimbursements.filter((r) => r.status === 'pending');
+    const approved = allReimbursements.filter((r) => r.status === 'approved');
+    const paid = allReimbursements.filter((r) => r.status === 'paid');
+    const rejected = allReimbursements.filter((r) => r.status === 'rejected');
+
+    return {
+      pendingCount: pending.length,
+      pendingAmount: pending.reduce((sum, r) => sum + r.finalAmount, 0),
+      approvedCount: approved.length,
+      approvedAmount: approved.reduce((sum, r) => sum + r.finalAmount, 0),
+      paidCount: paid.length,
+      paidAmount: paid.reduce((sum, r) => sum + r.finalAmount, 0),
+      rejectedCount: rejected.length,
+    };
+  }, [allReimbursements]);
+
+  // Handlers
+  const handleReview = useCallback((reimbursement: PettyCashReimbursement) => {
+    const expense = getExpenseById(reimbursement.expenseId);
+    setSelectedReimbursement(reimbursement);
+    setSelectedExpense(expense || null);
+    setShowApprovalModal(true);
+  }, []);
+
+  const handleApprove = useCallback(
+    (
+      reimbursementId: string,
+      bankAccountId: string,
+      bankAccountName: string,
+      paymentDate: string,
+      adjustmentAmount?: number,
+      adjustmentReason?: string
+    ) => {
+      // First approve with bank account info
+      approveReimbursement(
+        reimbursementId,
+        'current-manager',
+        bankAccountId,
+        bankAccountName,
+        adjustmentAmount,
+        adjustmentReason
+      );
+
+      // Then process payment
+      const updatedReimbursement = processReimbursementPayment(
+        reimbursementId,
+        paymentDate,
+        `PAY-${Date.now()}`
+      );
+
+      // Credit the wallet
+      if (updatedReimbursement) {
+        const wallet = getWalletById(updatedReimbursement.walletId);
+        if (wallet) {
+          addToWallet(wallet.id, updatedReimbursement.finalAmount);
+        }
+      }
+
+      setShowApprovalModal(false);
+      setSelectedReimbursement(null);
+      setSelectedExpense(null);
+      setRefreshKey((prev) => prev + 1);
+    },
+    []
+  );
+
+  const handleReject = useCallback(
+    (reimbursementId: string, reason: string) => {
+      rejectReimbursement(reimbursementId, 'current-manager', reason);
+
+      setShowApprovalModal(false);
+      setSelectedReimbursement(null);
+      setSelectedExpense(null);
+      setRefreshKey((prev) => prev + 1);
+    },
+    []
+  );
+
+  // Status badge
+  const getStatusBadgeClass = (status: string) => {
+    const color = getStatusColor(status);
+    const styles = {
+      success: 'bg-green-100 text-green-800',
+      warning: 'bg-yellow-100 text-yellow-800',
+      danger: 'bg-red-100 text-red-800',
+      info: 'bg-blue-100 text-blue-800',
+      default: 'bg-gray-100 text-gray-800',
+    };
+    return styles[color];
+  };
+
+  // Table columns
+  const columns = [
+    { key: 'reimbursementNumber', header: 'Number' },
+    { key: 'walletHolderName', header: 'Holder' },
+    {
+      key: 'expenseNumber',
+      header: 'Expense',
+      render: (row: PettyCashReimbursement) => (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            router.push(`/accounting/manager/petty-cash-management/expenses/${row.expenseId}`);
+          }}
+          className="text-[#5A7A8F] hover:underline font-medium"
+        >
+          {row.expenseNumber}
+        </button>
+      ),
+    },
+    ...(groupBy !== 'company'
+      ? [{ key: 'companyName', header: 'Company' }]
+      : []),
+    {
+      key: 'finalAmount',
+      header: 'Amount',
+      align: 'right' as const,
+      render: (row: PettyCashReimbursement) => (
+        <span className="font-medium">{formatCurrency(row.finalAmount)}</span>
+      ),
+    },
+    ...(groupBy !== 'status'
+      ? [
+          {
+            key: 'status',
+            header: 'Status',
+            align: 'center' as const,
+            render: (row: PettyCashReimbursement) => (
+              <span
+                className={`inline-flex rounded-full px-2 py-1 text-xs font-semibold ${getStatusBadgeClass(
+                  row.status
+                )}`}
+              >
+                {getStatusLabel(row.status)}
+              </span>
+            ),
+          },
+        ]
+      : []),
+    {
+      key: 'createdAt',
+      header: 'Requested',
+      render: (row: PettyCashReimbursement) => formatDate(row.createdAt),
+    },
+    {
+      key: 'actions',
+      header: '',
+      align: 'right' as const,
+      render: (row: PettyCashReimbursement) => (
+        <button
+          onClick={() => handleReview(row)}
+          className={`px-3 py-1 text-xs font-medium rounded-lg transition-colors ${
+            row.status === 'pending'
+              ? 'text-white bg-[#5A7A8F] hover:bg-[#4a6a7f]'
+              : 'text-gray-600 bg-gray-100 hover:bg-gray-200'
+          }`}
+        >
+          {row.status === 'pending' ? 'Review' : 'View'}
+        </button>
+      ),
+    },
+  ];
+
+  return (
+    <AppShell currentRole="manager">
+      {/* Header */}
+      <div className="mb-6">
+        <button
+          onClick={() => router.push('/accounting/manager/petty-cash-management')}
+          className="inline-flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900 mb-4"
+        >
+          <ArrowLeft className="h-4 w-4" />
+          Back to Petty Cash Management
+        </button>
+
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-bold text-gray-900">
+              Reimbursement Management
+            </h1>
+            <p className="text-gray-500 mt-1">
+              Review and process petty cash reimbursement requests
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Stats Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+        <div
+          className={`bg-white rounded-lg border p-4 cursor-pointer transition-all ${
+            statusFilter === 'pending'
+              ? 'ring-2 ring-yellow-500 border-yellow-500'
+              : 'hover:border-gray-300'
+          }`}
+          onClick={() => setStatusFilter(statusFilter === 'pending' ? 'all' : 'pending')}
+        >
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-yellow-100 rounded-lg">
+              <Clock className="h-5 w-5 text-yellow-600" />
+            </div>
+            <div>
+              <p className="text-sm text-gray-500">Pending</p>
+              <p className="text-xl font-bold text-gray-900">{stats.pendingCount}</p>
+              <p className="text-xs text-gray-500">
+                {formatCurrency(stats.pendingAmount)}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div
+          className={`bg-white rounded-lg border p-4 cursor-pointer transition-all ${
+            statusFilter === 'approved'
+              ? 'ring-2 ring-blue-500 border-blue-500'
+              : 'hover:border-gray-300'
+          }`}
+          onClick={() => setStatusFilter(statusFilter === 'approved' ? 'all' : 'approved')}
+        >
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-blue-100 rounded-lg">
+              <CheckCircle className="h-5 w-5 text-blue-600" />
+            </div>
+            <div>
+              <p className="text-sm text-gray-500">Approved</p>
+              <p className="text-xl font-bold text-gray-900">{stats.approvedCount}</p>
+              <p className="text-xs text-gray-500">
+                {formatCurrency(stats.approvedAmount)}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div
+          className={`bg-white rounded-lg border p-4 cursor-pointer transition-all ${
+            statusFilter === 'paid'
+              ? 'ring-2 ring-green-500 border-green-500'
+              : 'hover:border-gray-300'
+          }`}
+          onClick={() => setStatusFilter(statusFilter === 'paid' ? 'all' : 'paid')}
+        >
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-green-100 rounded-lg">
+              <DollarSign className="h-5 w-5 text-green-600" />
+            </div>
+            <div>
+              <p className="text-sm text-gray-500">Paid</p>
+              <p className="text-xl font-bold text-gray-900">{stats.paidCount}</p>
+              <p className="text-xs text-gray-500">
+                {formatCurrency(stats.paidAmount)}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div
+          className={`bg-white rounded-lg border p-4 cursor-pointer transition-all ${
+            statusFilter === 'rejected'
+              ? 'ring-2 ring-red-500 border-red-500'
+              : 'hover:border-gray-300'
+          }`}
+          onClick={() => setStatusFilter(statusFilter === 'rejected' ? 'all' : 'rejected')}
+        >
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-red-100 rounded-lg">
+              <XCircle className="h-5 w-5 text-red-600" />
+            </div>
+            <div>
+              <p className="text-sm text-gray-500">Rejected</p>
+              <p className="text-xl font-bold text-gray-900">{stats.rejectedCount}</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Filters */}
+      <div className="bg-white rounded-lg border p-4 mb-6">
+        <div className="flex flex-wrap items-center gap-4">
+          <div className="flex items-center gap-2">
+            <Filter className="h-4 w-4 text-gray-400" />
+            <span className="text-sm font-medium text-gray-700">Filters:</span>
+          </div>
+
+          {/* Company Filter */}
+          <div className="flex items-center gap-2">
+            <Building2 className="h-4 w-4 text-gray-400" />
+            <select
+              value={companyFilter}
+              onChange={(e) => setCompanyFilter(e.target.value)}
+              className="text-sm border border-gray-300 rounded-lg px-3 py-1.5 focus:ring-2 focus:ring-[#5A7A8F]/20 focus:border-[#5A7A8F]"
+            >
+              <option value="all">All Companies</option>
+              {companies.map((company) => (
+                <option key={company.id} value={company.id}>
+                  {company.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Group By */}
+          <div className="flex items-center gap-2 ml-auto">
+            <span className="text-sm text-gray-500">Group by:</span>
+            <div className="flex rounded-lg border border-gray-300 overflow-hidden">
+              {[
+                { value: 'company', icon: Building2, label: 'Company' },
+                { value: 'holder', icon: User, label: 'Holder' },
+                { value: 'status', icon: Clock, label: 'Status' },
+                { value: 'none', icon: Wallet, label: 'None' },
+              ].map((option) => (
+                <button
+                  key={option.value}
+                  onClick={() => setGroupBy(option.value as GroupBy)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 text-sm transition-colors ${
+                    groupBy === option.value
+                      ? 'bg-[#5A7A8F] text-white'
+                      : 'bg-white text-gray-600 hover:bg-gray-50'
+                  }`}
+                >
+                  <option.icon className="h-3.5 w-3.5" />
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* Active Filters */}
+        {(statusFilter !== 'all' || companyFilter !== 'all') && (
+          <div className="flex items-center gap-2 mt-3 pt-3 border-t border-gray-100">
+            <span className="text-xs text-gray-500">Active filters:</span>
+            {statusFilter !== 'all' && (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-gray-100 text-gray-700 rounded text-xs">
+                Status: {getStatusLabel(statusFilter)}
+                <button
+                  onClick={() => setStatusFilter('all')}
+                  className="ml-1 hover:text-gray-900"
+                >
+                  ×
+                </button>
+              </span>
+            )}
+            {companyFilter !== 'all' && (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-gray-100 text-gray-700 rounded text-xs">
+                Company: {companies.find((c) => c.id === companyFilter)?.name}
+                <button
+                  onClick={() => setCompanyFilter('all')}
+                  className="ml-1 hover:text-gray-900"
+                >
+                  ×
+                </button>
+              </span>
+            )}
+            <button
+              onClick={() => {
+                setStatusFilter('all');
+                setCompanyFilter('all');
+              }}
+              className="text-xs text-[#5A7A8F] hover:underline ml-2"
+            >
+              Clear all
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Grouped Tables */}
+      {Object.entries(groupedReimbursements).map(([groupName, reimbursements]) => (
+        <div key={groupName} className="mb-6">
+          {groupBy !== 'none' && (
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wider">
+                {groupName}
+              </h3>
+              <span className="text-sm text-gray-500">
+                {reimbursements.length} reimbursement
+                {reimbursements.length !== 1 ? 's' : ''} •{' '}
+                {formatCurrency(
+                  reimbursements.reduce((sum, r) => sum + r.finalAmount, 0)
+                )}
+              </span>
+            </div>
+          )}
+          <DataTable
+            columns={columns}
+            data={reimbursements}
+            emptyMessage="No reimbursements found"
+          />
+        </div>
+      ))}
+
+      {filteredReimbursements.length === 0 && (
+        <div className="text-center py-12">
+          <Wallet className="h-12 w-12 text-gray-300 mx-auto mb-4" />
+          <h3 className="text-lg font-medium text-gray-900 mb-1">
+            No Reimbursements Found
+          </h3>
+          <p className="text-gray-500">
+            {statusFilter !== 'all' || companyFilter !== 'all'
+              ? 'Try adjusting your filters'
+              : 'No reimbursement requests have been submitted yet'}
+          </p>
+        </div>
+      )}
+
+      {/* Approval Modal */}
+      {showApprovalModal && selectedReimbursement && selectedExpense && (
+        <ReimbursementApprovalModal
+          reimbursement={selectedReimbursement}
+          expense={selectedExpense}
+          onApprove={handleApprove}
+          onReject={handleReject}
+          onClose={() => {
+            setShowApprovalModal(false);
+            setSelectedReimbursement(null);
+            setSelectedExpense(null);
+          }}
+          onExpenseUpdated={(updatedExpense) => {
+            setSelectedExpense(updatedExpense);
+            setRefreshKey((prev) => prev + 1);
+          }}
+        />
+      )}
+    </AppShell>
+  );
+}

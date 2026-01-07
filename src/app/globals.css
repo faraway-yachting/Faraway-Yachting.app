@@ -1,26 +1,192 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #A8C5D6;
+  --foreground: #2c3e50;
+  --light-blue: #A8C5D6;
+  --light-blue-dark: #8FADC2;
+  --accent: #5A7A8F;
+  --text-dark: #2c3e50;
+  --text-light: #ffffff;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-light-blue: var(--light-blue);
+  --color-light-blue-dark: var(--light-blue-dark);
+  --color-accent: var(--accent);
+  --color-text-dark: var(--text-dark);
+  --color-text-light: var(--text-light);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-geist-sans), system-ui, -apple-system, sans-serif;
+}
+
+/* Page header - hidden on screen, shown when printing */
+.print-page-header {
+  display: none;
+}
+
+/* Print styles for quotation/invoice/receipt PDF */
+@media print {
+  @page {
+    size: A4;
+    margin: 0;
+  }
+
+  /* When printing, hide the main app container */
+  body.printing-quotation,
+  body.printing-invoice,
+  body.printing-receipt,
+  body.printing-expense {
+    background: white !important;
+  }
+
+  body.printing-quotation #app-root,
+  body.printing-invoice #app-root,
+  body.printing-receipt #app-root,
+  body.printing-expense #app-root,
+  body.printing-quotation #__next,
+  body.printing-invoice #__next,
+  body.printing-receipt #__next,
+  body.printing-expense #__next {
+    display: none !important;
+  }
+
+  /* Style the print portal content (rendered outside #app-root) */
+  body.printing-quotation .print-portal,
+  body.printing-invoice .print-portal,
+  body.printing-receipt .print-portal,
+  body.printing-expense .print-portal {
+    display: block !important;
+    position: static !important;
+    background: white !important;
+    overflow: visible !important;
+    width: 100% !important;
+    height: auto !important;
+  }
+
+  body.printing-quotation .print-portal *,
+  body.printing-invoice .print-portal *,
+  body.printing-receipt .print-portal *,
+  body.printing-expense .print-portal * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* Hide print controls in the print output */
+  .print-portal .print-controls {
+    display: none !important;
+  }
+
+  .print-portal [class*="print:hidden"] {
+    display: none !important;
+  }
+
+  /* ===== Multi-page print layout with fixed header/footer ===== */
+
+  /* Page container - A4 size (297mm total, with 10mm padding = 277mm content) */
+  .print-page {
+    width: 210mm;
+    min-height: 277mm;
+    padding: 10mm;
+    box-sizing: content-box;
+    page-break-after: always;
+    background: white !important;
+  }
+
+  .print-page:last-child {
+    page-break-after: avoid;
+  }
+
+  /* Header section */
+  .print-header {
+    padding-bottom: 4mm;
+    border-bottom: 2px solid #1f2937;
+  }
+
+  /* Content section */
+  .print-content {
+    padding: 4mm 0;
+  }
+
+  /* Footer section */
+  .print-footer {
+    padding-top: 4mm;
+  }
+
+  /* Page number styling */
+  .page-number {
+    font-size: 9pt;
+    color: #6b7280;
+  }
+}
+
+/* WHT Certificate specific print styles - A4 single page */
+@media print {
+  body.printing-wht-certificate {
+    background: white !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  body.printing-wht-certificate #app-root,
+  body.printing-wht-certificate #__next {
+    display: none !important;
+  }
+
+  body.printing-wht-certificate .print-portal {
+    display: block !important;
+    position: static !important;
+    background: white !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    width: 100% !important;
+    height: auto !important;
+  }
+
+  body.printing-wht-certificate .print-portal * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* WHT Certificate A4 page container - exact A4 size, compact */
+  body.printing-wht-certificate .print-portal .wht-print-container {
+    width: 210mm !important;
+    height: 297mm !important;
+    max-height: 297mm !important;
+    margin: 0 !important;
+    padding: 8mm !important;
+    background: white !important;
+    box-shadow: none !important;
+    page-break-after: avoid !important;
+    page-break-inside: avoid !important;
+    box-sizing: border-box !important;
+    font-size: 9pt !important;
+    line-height: 1.2 !important;
+    overflow: hidden !important;
+  }
+
+  /* Ensure all borders print at 0.5pt black */
+  body.printing-wht-certificate .print-portal table,
+  body.printing-wht-certificate .print-portal th,
+  body.printing-wht-certificate .print-portal td {
+    border-width: 0.5pt !important;
+    border-color: black !important;
+  }
+
+  body.printing-wht-certificate .print-portal table {
+    border-collapse: collapse !important;
+  }
+
+  /* Hide print controls */
+  body.printing-wht-certificate .print-controls {
+    display: none !important;
+  }
 }
