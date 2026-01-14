@@ -93,8 +93,8 @@ export interface ExpenseRecord {
 
   // Company & Vendor
   companyId: string; // Our company making the payment
-  vendorId: string; // Supplier contact
-  vendorName: string;
+  vendorId?: string; // Supplier contact (optional)
+  vendorName?: string;
 
   // Dates
   expenseDate: string; // ISO date - date expense is recorded
@@ -106,7 +106,10 @@ export interface ExpenseRecord {
 
   // FX Rate fields (for THB P&L reporting)
   fxRate?: number; // Exchange rate to THB at transaction time (locked on save)
-  fxRateSource?: FxRateSource; // 'api' or 'manual'
+  fxRateSource?: FxRateSource; // 'bot' | 'fallback' | 'manual' | 'api' (legacy)
+  fxBaseCurrency?: string; // Source currency (e.g., 'USD')
+  fxTargetCurrency?: string; // Target currency (always 'THB')
+  fxRateDate?: string; // Actual date the rate is from (may differ if weekend/holiday)
   thbSubtotal?: number; // subtotal × fxRate
   thbVatAmount?: number; // vatAmount × fxRate
   thbWhtAmount?: number; // whtAmount × fxRate

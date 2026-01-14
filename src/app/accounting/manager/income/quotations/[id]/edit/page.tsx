@@ -3,7 +3,8 @@
 import { useParams, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import QuotationForm from '@/components/income/QuotationForm';
-import { getQuotationById } from '@/data/income/quotations';
+import { quotationsApi } from '@/lib/supabase/api/quotations';
+import { dbQuotationToFrontend } from '@/lib/supabase/transforms';
 import type { Quotation } from '@/data/income/types';
 
 export default function EditQuotationPage() {
@@ -14,16 +15,26 @@ export default function EditQuotationPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const id = params.id as string;
-    if (id) {
-      const found = getQuotationById(id);
-      if (found) {
-        setQuotation(found);
-      } else {
-        setError('Quotation not found');
+    const fetchQuotation = async () => {
+      const id = params.id as string;
+      if (id) {
+        try {
+          const result = await quotationsApi.getByIdWithLineItems(id);
+          if (result) {
+            const transformed = dbQuotationToFrontend(result, result.line_items);
+            setQuotation(transformed);
+          } else {
+            setError('Quotation not found');
+          }
+        } catch (err) {
+          console.error('Error fetching quotation:', err);
+          setError('Failed to load quotation');
+        }
       }
-    }
-    setLoading(false);
+      setLoading(false);
+    };
+
+    fetchQuotation();
   }, [params.id]);
 
   if (loading) {

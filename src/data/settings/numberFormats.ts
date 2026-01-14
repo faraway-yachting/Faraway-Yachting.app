@@ -71,7 +71,7 @@ export function getNumberFormat(
 export function getAllNumberFormats(
   companyId: string
 ): Record<DocumentType, NumberFormatConfig> {
-  const docTypes: DocumentType[] = ['quotation', 'invoice', 'receipt', 'creditNote', 'debitNote'];
+  const docTypes: DocumentType[] = ['quotation', 'invoice', 'receipt', 'creditNote', 'debitNote', 'whtCertificate'];
   const result: Record<DocumentType, NumberFormatConfig> = {} as Record<DocumentType, NumberFormatConfig>;
 
   for (const docType of docTypes) {

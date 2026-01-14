@@ -1,12 +1,18 @@
 'use client';
 
-import { useState, useRef } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
-import { Plus, Filter, FileDown, FileText, CheckCircle, XCircle, Building2, X, Calendar } from 'lucide-react';
-import { mockQuotations } from '@/data/income/mockData';
-import { getCompanyById, getActiveCompanies } from '@/data/company/companies';
-import type { QuotationStatus } from '@/data/income/types';
-import type { Currency } from '@/data/company/types';
+import { Plus, Filter, FileDown, FileText, Building2, Eye, Printer } from 'lucide-react';
+import { quotationsApi } from '@/lib/supabase/api/quotations';
+import { dbQuotationToFrontend, dbCompanyToFrontend, dbBankAccountToFrontend, dbContactToFrontend, dbQuotationLineItemToFrontend } from '@/lib/supabase/transforms';
+import { companiesApi } from '@/lib/supabase/api/companies';
+import { bankAccountsApi } from '@/lib/supabase/api/bankAccounts';
+import { contactsApi } from '@/lib/supabase/api/contacts';
+import QuotationPrintView from '@/components/income/QuotationPrintView';
+import type { Quotation, QuotationStatus, LineItem } from '@/data/income/types';
+import type { Currency, Company } from '@/data/company/types';
+import type { BankAccount } from '@/data/banking/types';
+import type { Contact } from '@/data/contact/types';
 
 // Status tabs configuration
 const statusTabs = [
@@ -61,7 +67,49 @@ export default function QuotationsPage() {
     dateTo: '',
   });
 
-  const companies = getActiveCompanies();
+  // State for data from Supabase
+  const [quotations, setQuotations] = useState<Quotation[]>([]);
+  const [companies, setCompanies] = useState<Company[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  // PDF Preview state
+  const [showPdfPreview, setShowPdfPreview] = useState(false);
+  const [selectedQuotationForPdf, setSelectedQuotationForPdf] = useState<{
+    quotation: Quotation;
+    company: Company | undefined;
+    bankAccount: BankAccount | undefined;
+    client: Contact | undefined;
+    lineItems: LineItem[];
+  } | null>(null);
+  const [loadingPdf, setLoadingPdf] = useState(false);
+
+  // Fetch data from Supabase
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        setLoading(true);
+        const [quotationsData, companiesData] = await Promise.all([
+          quotationsApi.getAll(),
+          companiesApi.getAll(),
+        ]);
+
+        // Transform quotations and companies to frontend format
+        const transformedQuotations = quotationsData.map(q => dbQuotationToFrontend(q, []));
+        const transformedCompanies = companiesData.map(dbCompanyToFrontend);
+        setQuotations(transformedQuotations);
+        setCompanies(transformedCompanies);
+      } catch (error) {
+        console.error('Error fetching quotations:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchData();
+  }, []);
+
+  // Helper function to get company by ID
+  const getCompanyById = (companyId: string) => companies.find(c => c.id === companyId);
 
   // Check if any filters are active
   const hasActiveFilters = filters.companyId || filters.currency || filters.dateFrom || filters.dateTo;
@@ -77,7 +125,7 @@ export default function QuotationsPage() {
   };
 
   // Filter quotations based on active tab and filters
-  const filteredQuotations = mockQuotations.filter((quotation) => {
+  const filteredQuotations = quotations.filter((quotation) => {
     // Status filter
     if (activeTab !== 'all' && activeTab !== 'recent') {
       if (quotation.status !== activeTab) return false;
@@ -153,11 +201,99 @@ export default function QuotationsPage() {
     router.push(`/accounting/manager/income/quotations/${quotationId}/edit`);
   };
 
-  // Calculate summary statistics
-  const stats = {
-    total: filteredQuotations.length,
-    totalValue: filteredQuotations.reduce((sum, q) => sum + q.totalAmount, 0),
+  // Handle PDF preview
+  const handlePdfPreview = async (quotation: Quotation) => {
+    setLoadingPdf(true);
+    try {
+      // Fetch full quotation with line items
+      const quotationWithItems = await quotationsApi.getByIdWithLineItems(quotation.id);
+      if (!quotationWithItems) {
+        console.error('Quotation not found');
+        return;
+      }
+
+      // Get company
+      const company = companies.find(c => c.id === quotation.companyId);
+
+      // Get bank account for the currency
+      let bankAccount: BankAccount | undefined;
+      if (company) {
+        const bankAccounts = await bankAccountsApi.getByCompanyActive(company.id);
+        bankAccount = bankAccounts
+          .map(dbBankAccountToFrontend)
+          .find(ba => ba.currency === quotation.currency);
+      }
+
+      // Get client contact
+      let client: Contact | undefined;
+      if (quotation.clientId) {
+        const contactData = await contactsApi.getById(quotation.clientId);
+        if (contactData) {
+          client = dbContactToFrontend(contactData);
+        }
+      }
+
+      // Transform line items
+      const lineItems = quotationWithItems.line_items?.map(dbQuotationLineItemToFrontend) || [];
+
+      setSelectedQuotationForPdf({
+        quotation: dbQuotationToFrontend(quotationWithItems, quotationWithItems.line_items || []),
+        company,
+        bankAccount,
+        client,
+        lineItems,
+      });
+      setShowPdfPreview(true);
+    } catch (error) {
+      console.error('Error loading quotation for PDF:', error);
+    } finally {
+      setLoadingPdf(false);
+    }
   };
+
+  // Calculate summary statistics grouped by currency
+  const totalsByCurrency = useMemo(() => {
+    const byCurrency: Record<string, { total: number; thbEquiv: number }> = {};
+
+    filteredQuotations.forEach((quotation) => {
+      const currency = quotation.currency;
+      if (!byCurrency[currency]) {
+        byCurrency[currency] = { total: 0, thbEquiv: 0 };
+      }
+      byCurrency[currency].total += quotation.totalAmount;
+      // Calculate THB equivalent
+      if (currency === 'THB') {
+        byCurrency[currency].thbEquiv += quotation.totalAmount;
+      } else if (quotation.fxRate) {
+        byCurrency[currency].thbEquiv += quotation.totalAmount * quotation.fxRate;
+      }
+    });
+
+    // Sort currencies: THB first, then alphabetically
+    const sortedCurrencies = Object.keys(byCurrency).sort((a, b) => {
+      if (a === 'THB') return -1;
+      if (b === 'THB') return 1;
+      return a.localeCompare(b);
+    });
+
+    return sortedCurrencies.map((currency) => ({
+      currency,
+      ...byCurrency[currency],
+    }));
+  }, [filteredQuotations]);
+
+  // Calculate grand total in THB
+  const grandTotalThb = useMemo(() => {
+    return totalsByCurrency.reduce((sum, item) => sum + item.thbEquiv, 0);
+  }, [totalsByCurrency]);
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-[400px]">
+        <div className="text-gray-500">Loading quotations...</div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -168,10 +304,10 @@ export default function QuotationsPage() {
             {statusTabs.map((tab) => {
               const isActive = activeTab === tab.value;
               const count = tab.value === 'all'
-                ? mockQuotations.length
+                ? quotations.length
                 : tab.value === 'recent'
-                ? mockQuotations.length
-                : mockQuotations.filter(q => q.status === tab.value).length;
+                ? quotations.length
+                : quotations.filter(q => q.status === tab.value).length;
 
               return (
                 <button
@@ -352,6 +488,9 @@ export default function QuotationsPage() {
                   Status
                 </th>
                 <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  THB Equiv.
+                </th>
+                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Actions
                 </th>
               </tr>
@@ -359,7 +498,7 @@ export default function QuotationsPage() {
             <tbody className="bg-white divide-y divide-gray-200">
               {filteredQuotations.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="px-6 py-12 text-center text-sm text-gray-500">
+                  <td colSpan={10} className="px-6 py-12 text-center text-sm text-gray-500">
                     No quotations found
                   </td>
                 </tr>
@@ -423,23 +562,35 @@ export default function QuotationsPage() {
                     <td className="px-6 py-4 whitespace-nowrap text-center">
                       {getStatusBadge(quotation.status)}
                     </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-right">
+                      <div className="text-sm text-gray-500">
+                        {quotation.currency === 'THB'
+                          ? '-'
+                          : quotation.fxRate
+                          ? (quotation.totalAmount * quotation.fxRate).toLocaleString('en-US', {
+                              minimumFractionDigits: 2,
+                              maximumFractionDigits: 2,
+                            })
+                          : '-'}
+                      </div>
+                    </td>
                     <td className="px-6 py-4 whitespace-nowrap text-right text-sm">
-                      <div className="flex items-center justify-end gap-2" onClick={(e) => e.stopPropagation()}>
-                        {quotation.status === 'draft' && (
-                          <button className="p-1.5 text-green-600 hover:bg-green-50 rounded-lg transition-colors" title="Accept">
-                            <CheckCircle className="h-4 w-4" />
-                          </button>
-                        )}
-                        {quotation.status !== 'void' && (
-                          <button className="p-1.5 text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="Void">
-                            <XCircle className="h-4 w-4" />
-                          </button>
-                        )}
+                      <div className="flex items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>
                         <button
-                          onClick={() => handleRowClick(quotation.id)}
-                          className="px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
+                          onClick={() => handlePdfPreview(quotation)}
+                          disabled={loadingPdf}
+                          className="p-1.5 text-[#5A7A8F] hover:bg-[#5A7A8F]/10 rounded-lg transition-colors disabled:opacity-50"
+                          title="Preview PDF"
                         >
-                          View
+                          <Eye className="h-4 w-4" />
+                        </button>
+                        <button
+                          onClick={() => handlePdfPreview(quotation)}
+                          disabled={loadingPdf}
+                          className="p-1.5 text-[#5A7A8F] hover:bg-[#5A7A8F]/10 rounded-lg transition-colors disabled:opacity-50"
+                          title="Print PDF"
+                        >
+                          <Printer className="h-4 w-4" />
                         </button>
                       </div>
                     </td>
@@ -453,22 +604,85 @@ export default function QuotationsPage() {
         {/* Summary Footer */}
         {filteredQuotations.length > 0 && (
           <div className="px-6 py-4 bg-gray-50 border-t border-gray-200">
-            <div className="flex justify-between items-center text-sm">
+            <div className="flex justify-between items-start text-sm">
               <div className="text-gray-600">
                 Showing <span className="font-semibold text-gray-900">{filteredQuotations.length}</span> quotation{filteredQuotations.length !== 1 ? 's' : ''}
               </div>
-              <div className="text-gray-600">
-                Total Value: <span className="font-semibold text-gray-900">
-                  USD {stats.totalValue.toLocaleString('en-US', {
-                    minimumFractionDigits: 2,
-                    maximumFractionDigits: 2,
-                  })}
-                </span>
+              <div className="text-right">
+                <div className="text-gray-600 mb-2">Total Value:</div>
+                {totalsByCurrency.length === 0 ? (
+                  <div className="text-gray-400">-</div>
+                ) : (
+                  <div className="space-y-1">
+                    {totalsByCurrency.map(({ currency, total, thbEquiv }) => (
+                      <div key={currency} className="flex items-center justify-end gap-4">
+                        <span className="font-semibold text-gray-900">
+                          {currency} {total.toLocaleString('en-US', {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2,
+                          })}
+                        </span>
+                        {currency !== 'THB' && thbEquiv > 0 && (
+                          <span className="text-gray-500 text-xs">
+                            (THB {thbEquiv.toLocaleString('en-US', {
+                              minimumFractionDigits: 0,
+                              maximumFractionDigits: 0,
+                            })})
+                          </span>
+                        )}
+                      </div>
+                    ))}
+                    {totalsByCurrency.length > 1 && (
+                      <div className="pt-1 border-t border-gray-300 mt-1">
+                        <span className="text-gray-600">Grand Total: </span>
+                        <span className="font-semibold text-gray-900">
+                          THB {grandTotalThb.toLocaleString('en-US', {
+                            minimumFractionDigits: 0,
+                            maximumFractionDigits: 0,
+                          })}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           </div>
         )}
       </div>
+
+      {/* PDF Preview Modal */}
+      {selectedQuotationForPdf && (
+        <QuotationPrintView
+          quotation={{
+            quotationNumber: selectedQuotationForPdf.quotation.quotationNumber,
+            dateCreated: selectedQuotationForPdf.quotation.dateCreated,
+            validUntil: selectedQuotationForPdf.quotation.validUntil,
+            boatId: selectedQuotationForPdf.quotation.boatId,
+            charterType: selectedQuotationForPdf.quotation.charterType,
+            charterDateFrom: selectedQuotationForPdf.quotation.charterDateFrom,
+            charterDateTo: selectedQuotationForPdf.quotation.charterDateTo,
+            charterTime: selectedQuotationForPdf.quotation.charterTime,
+            lineItems: selectedQuotationForPdf.lineItems,
+            pricingType: selectedQuotationForPdf.quotation.pricingType,
+            subtotal: selectedQuotationForPdf.quotation.subtotal,
+            taxAmount: selectedQuotationForPdf.quotation.taxAmount,
+            totalAmount: selectedQuotationForPdf.quotation.totalAmount,
+            whtAmount: 0,
+            currency: selectedQuotationForPdf.quotation.currency,
+            termsAndConditions: selectedQuotationForPdf.quotation.termsAndConditions,
+          }}
+          company={selectedQuotationForPdf.company}
+          client={selectedQuotationForPdf.client}
+          clientName={selectedQuotationForPdf.quotation.clientName}
+          bankAccount={selectedQuotationForPdf.bankAccount}
+          isOpen={showPdfPreview}
+          onClose={() => {
+            setShowPdfPreview(false);
+            setSelectedQuotationForPdf(null);
+          }}
+        />
+      )}
     </div>
   );
 }

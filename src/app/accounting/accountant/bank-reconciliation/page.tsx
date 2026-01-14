@@ -51,8 +51,11 @@ import {
 export default function BankReconciliationPage() {
   // Scope bar state
   const [dataScope, setDataScope] = useState("all-companies");
-  const [dateFrom, setDateFrom] = useState("2024-01-01");
-  const [dateTo, setDateTo] = useState("2024-12-31");
+  // Default date range: 1 year from today
+  const today = new Date();
+  const oneYearAgo = new Date(today.getFullYear() - 1, today.getMonth(), today.getDate());
+  const [dateFrom, setDateFrom] = useState(oneYearAgo.toISOString().split('T')[0]);
+  const [dateTo, setDateTo] = useState(today.toISOString().split('T')[0]);
   const [selectedBankAccountIds, setSelectedBankAccountIds] = useState<string[]>([]);
   const [selectedCurrencies, setSelectedCurrencies] = useState<Currency[]>([]);
   const [selectedStatuses, setSelectedStatuses] = useState<BankFeedStatus[]>([]);
@@ -533,6 +536,7 @@ export default function BankReconciliationPage() {
         isOpen={showImportSyncModal}
         onClose={() => setShowImportSyncModal(false)}
         bankAccountsInScope={bankAccountsInScope}
+        companies={companies.map(c => ({ id: c.id, name: c.name }))}
         onImportComplete={handleImportComplete}
       />
 
@@ -555,6 +559,13 @@ export default function BankReconciliationPage() {
           handleCreateMatch(match);
           setCreateTransactionModal({ isOpen: false, type: null });
         }}
+        allBankAccounts={allBankAccounts}
+        allProjects={allProjects.map(p => ({
+          id: p.id,
+          name: p.name,
+          companyId: p.companyId,
+          status: p.status,
+        }))}
       />
     </AppShell>
   );

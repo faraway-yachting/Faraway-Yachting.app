@@ -78,7 +78,7 @@ export default function CategorizationPage() {
           documentNumber: expense.expenseNumber,
           documentId: expense.id,
           date: expense.expenseDate,
-          counterparty: expense.vendorName,
+          counterparty: expense.vendorName || '',
           description: lineItem.description,
           amount: lineItem.amount,
           currency: expense.currency,

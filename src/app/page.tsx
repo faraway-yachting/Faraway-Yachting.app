@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { Footer } from "@/components/Footer";
 import { Button } from "@/components/ui/Button";
@@ -13,6 +14,22 @@ import { modules } from "@/data/modules";
 export default function Home() {
   const [modalOpen, setModalOpen] = useState(false);
   const [selectedModule, setSelectedModule] = useState("");
+  const router = useRouter();
+
+  // Detect invite token in URL hash and redirect to password setup
+  useEffect(() => {
+    const hash = window.location.hash;
+    if (hash) {
+      const hashParams = new URLSearchParams(hash.substring(1));
+      const accessToken = hashParams.get('access_token');
+      const type = hashParams.get('type');
+
+      // If this is an invite link, redirect to password setup page with the hash
+      if (accessToken && type === 'invite') {
+        router.push(`/auth/setup-password${hash}`);
+      }
+    }
+  }, [router]);
 
   const handleNotify = (moduleName: string) => {
     setSelectedModule(moduleName);
@@ -47,7 +64,7 @@ export default function Home() {
             <Button variant="primary" size="md">
               Request Demo
             </Button>
-            <Button variant="outline" size="md">
+            <Button variant="outline" size="md" href="/login">
               Sign In
             </Button>
           </div>

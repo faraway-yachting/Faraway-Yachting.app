@@ -74,7 +74,13 @@ export function MatchWorkbench({
     return 'text-red-600 bg-red-50';
   };
 
-  const remainingAmount = Math.abs(selectedLine.amount) - selectedLine.matchedAmount;
+  // Calculate actual matched amount from matches (in case database value is out of sync)
+  const actualMatchedAmount = selectedLine.matches.length > 0
+    ? selectedLine.matches.reduce((sum, m) => sum + m.matchedAmount, 0)
+    : selectedLine.matchedAmount;
+
+  const remainingAmount = Math.abs(selectedLine.amount) - actualMatchedAmount;
+  const hasExistingMatch = selectedLine.matches.length > 0;
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 h-full">
@@ -108,12 +114,12 @@ export function MatchWorkbench({
             </div>
 
             {/* Match progress */}
-            {selectedLine.matchedAmount > 0 && (
+            {actualMatchedAmount > 0 && (
               <div className="mt-3 p-2 bg-white rounded border border-blue-200">
                 <div className="flex items-center justify-between text-xs mb-1">
                   <span className="text-gray-600">Matched</span>
                   <span className="font-medium text-gray-900">
-                    {formatAmount(selectedLine.matchedAmount, selectedLine.currency)}
+                    {formatAmount(actualMatchedAmount, selectedLine.currency)}
                   </span>
                 </div>
                 <div className="flex items-center justify-between text-xs">
@@ -126,7 +132,7 @@ export function MatchWorkbench({
                   <div
                     className="bg-green-600 h-1.5 rounded-full transition-all"
                     style={{
-                      width: `${(selectedLine.matchedAmount / Math.abs(selectedLine.amount)) * 100}%`,
+                      width: `${(actualMatchedAmount / Math.abs(selectedLine.amount)) * 100}%`,
                     }}
                   />
                 </div>
@@ -231,7 +237,13 @@ export function MatchWorkbench({
                     {/* Actions */}
                     <button
                       onClick={() => onAcceptSuggestion(suggestion)}
-                      className="w-full flex items-center justify-center gap-2 px-3 py-2 text-sm font-medium text-white bg-[#5A7A8F] hover:bg-[#2c3e50] rounded transition-colors"
+                      disabled={hasExistingMatch}
+                      className={`w-full flex items-center justify-center gap-2 px-3 py-2 text-sm font-medium rounded transition-colors ${
+                        hasExistingMatch
+                          ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                          : 'text-white bg-[#5A7A8F] hover:bg-[#2c3e50]'
+                      }`}
+                      title={hasExistingMatch ? 'Remove existing match first' : 'Accept this match'}
                     >
                       <Check className="h-4 w-4" />
                       Accept Match
@@ -247,31 +259,56 @@ export function MatchWorkbench({
             <h4 className="text-xs font-semibold text-gray-700 uppercase tracking-wider mb-3">
               Create New Record
             </h4>
+            {hasExistingMatch && (
+              <div className="mb-3 p-2 bg-amber-50 border border-amber-200 rounded text-xs text-amber-700">
+                This transaction already has a match. Remove the existing match to create a new record.
+              </div>
+            )}
             <div className="grid grid-cols-2 gap-2">
               <button
                 onClick={() => onCreateNew('receipt')}
-                className="flex items-center justify-center gap-2 px-3 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 rounded transition-colors"
+                disabled={hasExistingMatch}
+                className={`flex items-center justify-center gap-2 px-3 py-2 text-sm font-medium rounded transition-colors ${
+                  hasExistingMatch
+                    ? 'bg-gray-100 text-gray-400 border border-gray-200 cursor-not-allowed'
+                    : 'text-gray-700 bg-white border border-gray-300 hover:bg-gray-50'
+                }`}
               >
                 <Plus className="h-4 w-4" />
                 Receipt
               </button>
               <button
                 onClick={() => onCreateNew('expense')}
-                className="flex items-center justify-center gap-2 px-3 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 rounded transition-colors"
+                disabled={hasExistingMatch}
+                className={`flex items-center justify-center gap-2 px-3 py-2 text-sm font-medium rounded transition-colors ${
+                  hasExistingMatch
+                    ? 'bg-gray-100 text-gray-400 border border-gray-200 cursor-not-allowed'
+                    : 'text-gray-700 bg-white border border-gray-300 hover:bg-gray-50'
+                }`}
               >
                 <Plus className="h-4 w-4" />
                 Expense
               </button>
               <button
                 onClick={() => onCreateNew('transfer')}
-                className="flex items-center justify-center gap-2 px-3 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 rounded transition-colors"
+                disabled={hasExistingMatch}
+                className={`flex items-center justify-center gap-2 px-3 py-2 text-sm font-medium rounded transition-colors ${
+                  hasExistingMatch
+                    ? 'bg-gray-100 text-gray-400 border border-gray-200 cursor-not-allowed'
+                    : 'text-gray-700 bg-white border border-gray-300 hover:bg-gray-50'
+                }`}
               >
                 <Plus className="h-4 w-4" />
                 Transfer
               </button>
               <button
                 onClick={() => onCreateNew('owner_contribution')}
-                className="flex items-center justify-center gap-2 px-3 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 rounded transition-colors"
+                disabled={hasExistingMatch}
+                className={`flex items-center justify-center gap-2 px-3 py-2 text-sm font-medium rounded transition-colors ${
+                  hasExistingMatch
+                    ? 'bg-gray-100 text-gray-400 border border-gray-200 cursor-not-allowed'
+                    : 'text-gray-700 bg-white border border-gray-300 hover:bg-gray-50'
+                }`}
               >
                 <Plus className="h-4 w-4" />
                 Owner
@@ -324,7 +361,7 @@ export function MatchWorkbench({
                   <div className="flex justify-between text-sm">
                     <span className="text-gray-600">Matched Amount:</span>
                     <span className="font-medium text-green-600">
-                      {formatAmount(selectedLine.matchedAmount, selectedLine.currency)}
+                      {formatAmount(actualMatchedAmount, selectedLine.currency)}
                     </span>
                   </div>
                   <div className="flex justify-between text-sm">

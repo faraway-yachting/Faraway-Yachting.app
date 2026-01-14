@@ -21,6 +21,11 @@ interface ReceiptPrintViewProps {
     receiptNumber?: string;
     receiptDate: string;
     reference?: string;
+    boatId?: string;
+    charterType?: string;
+    charterDateFrom?: string;
+    charterDateTo?: string;
+    charterTime?: string;
     lineItems: LineItem[];
     pricingType: PricingType;
     subtotal: number;
@@ -28,20 +33,21 @@ interface ReceiptPrintViewProps {
     whtAmount: number;
     totalAmount: number;
     payments: PaymentRecord[];
-    adjustmentType: AdjustmentType;
-    adjustmentAmount: number;
+    adjustmentType?: AdjustmentType;
+    adjustmentAmount?: number;
     adjustmentRemark?: string;
-    netAmountToPay: number;
-    totalPayments: number;
-    totalReceived: number;
-    remainingAmount: number;
+    netAmountToPay?: number;
+    totalPayments?: number;
+    totalReceived?: number;
+    remainingAmount?: number;
     currency: string;
     notes?: string;
   };
   company: Company | undefined;
   client: Contact | undefined;
   clientName: string;
-  bankAccounts: BankAccount[];
+  bankAccount?: BankAccount;
+  bankAccounts?: BankAccount[];
   createdBy?: string;
   isOpen: boolean;
   onClose: () => void;
@@ -52,11 +58,14 @@ export default function ReceiptPrintView({
   company,
   client,
   clientName,
-  bankAccounts,
+  bankAccount,
+  bankAccounts = [],
   createdBy,
   isOpen,
   onClose,
 }: ReceiptPrintViewProps) {
+  // Support both single bankAccount and bankAccounts array
+  const effectiveBankAccounts = bankAccount ? [bankAccount] : bankAccounts;
   const [mounted, setMounted] = useState(false);
 
   // Get PDF field settings for receipts (use invoice settings as base)
@@ -139,7 +148,7 @@ export default function ReceiptPrintView({
   // Helper to get bank account name from ID
   const getBankAccountName = (receivedAt: string): string => {
     if (receivedAt === 'cash') return 'Cash';
-    const account = bankAccounts.find((ba) => ba.id === receivedAt);
+    const account = effectiveBankAccounts.find((ba) => ba.id === receivedAt);
     if (account) {
       return `${account.bankInformation.bankName} (${account.accountNumber})`;
     }
@@ -299,7 +308,7 @@ export default function ReceiptPrintView({
                       -{formatCurrency(receipt.whtAmount, receipt.currency as any)}
                     </td>
                   </tr>
-                  {fieldSettings.showNetAmountToPay && (
+                  {fieldSettings.showNetAmountToPay && receipt.netAmountToPay !== undefined && (
                     <tr className="border-t border-gray-300">
                       <td className="py-1 font-semibold text-gray-900">Net Amount to Pay:</td>
                       <td className="py-1 text-right font-semibold text-gray-900">
@@ -324,7 +333,7 @@ export default function ReceiptPrintView({
             <thead>
               <tr className="bg-gray-100">
                 <th className="py-1 px-2 text-left font-semibold text-gray-700 w-8">#</th>
-                <th className="py-1 px-2 text-left font-semibold text-gray-700 w-20">Date</th>
+                <th className="py-1 px-2 text-left font-semibold text-gray-700 w-28">Date</th>
                 <th className="py-1 px-2 text-left font-semibold text-gray-700">Received At</th>
                 <th className="py-1 px-2 text-left font-semibold text-gray-700">Remark</th>
                 <th className="py-1 px-2 text-right font-semibold text-gray-700 w-24">Amount</th>

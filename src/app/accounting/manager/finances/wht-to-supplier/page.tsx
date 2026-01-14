@@ -1,26 +1,133 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { FinancesScopeBar } from '@/components/finances/FinancesScopeBar';
 import { WhtSummaryBox } from '@/components/finances/WhtSummaryBox';
 import { WhtTransactionTable } from '@/components/finances/WhtTransactionTable';
 import WhtCertificatePrintView from '@/components/finances/WhtCertificatePrintView';
-import {
-  getAllWhtToSupplier,
-  getWhtToSupplierByCompany,
-  getWhtToSupplierSummaries,
-} from '@/data/finances/mockWhtToSupplier';
-import { getCompanyById } from '@/data/company/companies';
-import { getContactById } from '@/data/contact/contacts';
+import { companiesApi } from '@/lib/supabase/api/companies';
+import { whtCertificatesApi } from '@/lib/supabase/api/whtCertificates';
+import { contactsApi } from '@/lib/supabase/api/contacts';
+import type { Database } from '@/lib/supabase/database.types';
 import type { WhtToSupplier, WhtToSupplierSummary } from '@/data/finances/types';
 import type { Company } from '@/data/company/types';
 import type { Contact } from '@/data/contact/types';
 
-// Mock companies
-const companies = [
-  { id: 'company-001', name: 'Faraway Yachting' },
-  { id: 'company-002', name: 'Blue Horizon Maritime' },
-];
+type DbCompany = Database['public']['Tables']['companies']['Row'];
+type DbContact = Database['public']['Tables']['contacts']['Row'];
+type WhtCertificate = Database['public']['Tables']['wht_certificates']['Row'];
+
+// Convert Supabase WhtCertificate to UI WhtToSupplier type
+function convertToWhtToSupplier(
+  cert: WhtCertificate,
+  companies: DbCompany[],
+  contacts: DbContact[]
+): WhtToSupplier {
+  const company = companies.find(c => c.id === cert.company_id);
+  const vendor = contacts.find(c => c.id === cert.payee_vendor_id);
+
+  // Map status: draft/issued/filed -> pending/submitted/filed
+  const statusMap: Record<string, WhtToSupplier['status']> = {
+    'draft': 'pending',
+    'issued': 'submitted',
+    'filed': 'filed',
+  };
+
+  return {
+    id: cert.id,
+    date: cert.payment_date,
+    documentNumber: cert.certificate_number,
+    documentType: 'payment',
+    supplierId: cert.payee_vendor_id || '',
+    supplierName: cert.payee_name,
+    supplierTaxId: cert.payee_tax_id || '',
+    companyId: cert.company_id,
+    companyName: company?.name || 'Unknown Company',
+    paymentAmount: cert.amount_paid,
+    whtType: cert.form_type,
+    whtRate: cert.wht_rate,
+    whtAmount: cert.wht_amount,
+    whtCertificateNumber: cert.certificate_number,
+    status: statusMap[cert.status] || 'pending',
+    submissionDate: cert.filed_date || undefined,
+    period: cert.tax_period,
+    currency: 'THB',
+  };
+}
+
+// Convert Company type to UI format
+function convertCompanyToUi(company: DbCompany): { id: string; name: string } {
+  return { id: company.id, name: company.name };
+}
+
+// Convert Contact to UI Company type (for print view)
+function convertDbCompanyToUiCompany(company: DbCompany | undefined): Company | undefined {
+  if (!company) return undefined;
+  const contactInfo = company.contact_information as { primaryContactName?: string; phoneNumber?: string; email?: string } | null;
+  const billingAddr = company.billing_address as { street?: string; city?: string; state?: string; postalCode?: string; country?: string } | null;
+  const registeredAddr = company.registered_address as { street?: string; city?: string; state?: string; postalCode?: string; country?: string } | null;
+  return {
+    id: company.id,
+    name: company.name,
+    taxId: company.tax_id || '',
+    registeredAddress: {
+      street: registeredAddr?.street || '',
+      city: registeredAddr?.city || '',
+      state: registeredAddr?.state || '',
+      postalCode: registeredAddr?.postalCode || '',
+      country: registeredAddr?.country || '',
+    },
+    billingAddress: {
+      street: billingAddr?.street || '',
+      city: billingAddr?.city || '',
+      state: billingAddr?.state || '',
+      postalCode: billingAddr?.postalCode || '',
+      country: billingAddr?.country || '',
+    },
+    sameAsBillingAddress: company.same_as_billing_address,
+    contactInformation: {
+      primaryContactName: contactInfo?.primaryContactName || '',
+      phoneNumber: contactInfo?.phoneNumber || '',
+      email: contactInfo?.email || '',
+    },
+    currency: (company.currency as 'THB' | 'EUR' | 'USD' | 'SGD' | 'GBP' | 'AED') || 'THB',
+    fiscalYearEnd: '12-31',
+    logoUrl: company.logo_url || '',
+    isActive: company.is_active,
+    isVatRegistered: company.is_vat_registered,
+    vatRate: company.vat_rate || undefined,
+    createdAt: company.created_at,
+    updatedAt: company.updated_at,
+  };
+}
+
+// Convert DbContact to UI Contact type (for print view)
+function convertDbContactToUiContact(contact: DbContact | undefined): Contact | undefined {
+  if (!contact) return undefined;
+  const billingAddr = contact.billing_address as { street?: string; city?: string; state?: string; postalCode?: string; country?: string } | null;
+  return {
+    id: contact.id,
+    name: contact.name,
+    type: contact.type as 'customer' | 'vendor' | 'both',
+    contactPerson: contact.contact_person || undefined,
+    email: contact.email || undefined,
+    phone: contact.phone || undefined,
+    taxId: contact.tax_id || undefined,
+    billingAddress: billingAddr ? {
+      street: billingAddr.street,
+      city: billingAddr.city,
+      state: billingAddr.state,
+      postalCode: billingAddr.postalCode,
+      country: billingAddr.country,
+    } : undefined,
+    defaultCurrency: (contact.default_currency as 'THB' | 'EUR' | 'USD' | 'SGD' | 'GBP' | 'AED') || undefined,
+    paymentTerms: contact.payment_terms || undefined,
+    notes: contact.notes || undefined,
+    isActive: contact.is_active,
+    createdAt: contact.created_at,
+    updatedAt: contact.updated_at,
+  };
+}
 
 export default function WhtToSupplierPage() {
   const [dataScope, setDataScope] = useState('all-companies');
@@ -28,11 +135,39 @@ export default function WhtToSupplierPage() {
   const [year, setYear] = useState(() => new Date().getFullYear());
   const [month, setMonth] = useState<number | null>(() => new Date().getMonth() + 1); // null = all periods
 
+  // Data from Supabase
+  const [companies, setCompanies] = useState<DbCompany[]>([]);
+  const [contacts, setContacts] = useState<DbContact[]>([]);
+  const [whtCertificates, setWhtCertificates] = useState<WhtCertificate[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
   // WHT Certificate print view state
   const [selectedTransaction, setSelectedTransaction] = useState<WhtToSupplier | null>(null);
   const [selectedCompany, setSelectedCompany] = useState<Company | undefined>(undefined);
   const [selectedSupplier, setSelectedSupplier] = useState<Contact | undefined>(undefined);
   const [showPrintView, setShowPrintView] = useState(false);
+
+  // Load data from Supabase
+  useEffect(() => {
+    async function loadData() {
+      setIsLoading(true);
+      try {
+        const [companiesData, contactsData, whtData] = await Promise.all([
+          companiesApi.getAll(),
+          contactsApi.getAll(),
+          whtCertificatesApi.getAll(),
+        ]);
+        setCompanies(companiesData);
+        setContacts(contactsData);
+        setWhtCertificates(whtData);
+      } catch (error) {
+        console.error('Error loading WHT data:', error);
+      } finally {
+        setIsLoading(false);
+      }
+    }
+    loadData();
+  }, []);
 
   const handlePeriodChange = (newYear: number, newMonth: number | null) => {
     setYear(newYear);
@@ -44,13 +179,13 @@ export default function WhtToSupplierPage() {
   };
 
   const handleDownloadCertificate = (transaction: WhtToSupplier) => {
-    // Fetch company and supplier details
-    const company = getCompanyById(transaction.companyId);
-    const supplier = getContactById(transaction.supplierId);
+    // Fetch company and supplier details from loaded data
+    const company = companies.find(c => c.id === transaction.companyId);
+    const supplier = contacts.find(c => c.id === transaction.supplierId);
 
     setSelectedTransaction(transaction);
-    setSelectedCompany(company);
-    setSelectedSupplier(supplier);
+    setSelectedCompany(convertDbCompanyToUiCompany(company));
+    setSelectedSupplier(convertDbContactToUiContact(supplier));
     setShowPrintView(true);
   };
 
@@ -63,9 +198,12 @@ export default function WhtToSupplierPage() {
 
   const period = month ? `${year}-${String(month).padStart(2, '0')}` : null; // null = all periods
 
-  // Get filtered data
+  // Convert and filter data
   const { summaries, transactions, showCompany } = useMemo(() => {
-    const allTransactions = getAllWhtToSupplier();
+    // Convert all WHT certificates to UI format
+    const allTransactions = whtCertificates.map(cert =>
+      convertToWhtToSupplier(cert, companies, contacts)
+    );
 
     // Filter by period (if specific month selected) or by year (if all periods)
     let periodFiltered = allTransactions;
@@ -76,39 +214,58 @@ export default function WhtToSupplierPage() {
       periodFiltered = allTransactions.filter(t => t.period.startsWith(`${year}-`));
     }
 
+    // Filter by company if not "all-companies"
     let filtered = periodFiltered;
     if (dataScope !== 'all-companies') {
-      const companyTransactions = getWhtToSupplierByCompany(dataScope);
-      if (period) {
-        filtered = companyTransactions.filter(t => t.period === period);
+      filtered = periodFiltered.filter(t => t.companyId === dataScope);
+    }
+
+    // Build summaries from filtered data
+    const summaryMap = new Map<string, WhtToSupplierSummary>();
+
+    for (const t of filtered) {
+      const key = `${t.companyId}-${t.period}`;
+      const existing = summaryMap.get(key);
+
+      if (existing) {
+        existing.transactionCount++;
+        existing.totalWhtAmount += t.whtAmount;
+        if (t.whtType === 'pnd3') {
+          existing.pnd3Amount += t.whtAmount;
+        } else {
+          existing.pnd53Amount += t.whtAmount;
+        }
+        // Update status: if any pending, summary is pending
+        if (t.status === 'pending') {
+          existing.status = 'pending';
+        }
       } else {
-        filtered = companyTransactions.filter(t => t.period.startsWith(`${year}-`));
+        // Calculate due date for this period
+        const [pYear, pMonth] = t.period.split('-').map(Number);
+        const nextMonth = pMonth === 12 ? 1 : pMonth + 1;
+        const nextYear = pMonth === 12 ? pYear + 1 : pYear;
+        const dueDate = new Date(nextYear, nextMonth - 1, 7);
+
+        summaryMap.set(key, {
+          period: t.period,
+          companyId: t.companyId,
+          companyName: t.companyName,
+          pnd3Amount: t.whtType === 'pnd3' ? t.whtAmount : 0,
+          pnd53Amount: t.whtType === 'pnd53' ? t.whtAmount : 0,
+          totalWhtAmount: t.whtAmount,
+          transactionCount: 1,
+          dueDate: dueDate.toISOString().split('T')[0],
+          status: t.status,
+        });
       }
     }
-
-    // Get summaries - for all periods, get all months in the year
-    let allSummaries: WhtToSupplierSummary[] = [];
-    if (period) {
-      allSummaries = getWhtToSupplierSummaries(period);
-    } else {
-      // Get summaries for all months in the year
-      for (let m = 1; m <= 12; m++) {
-        const monthPeriod = `${year}-${String(m).padStart(2, '0')}`;
-        const monthSummaries = getWhtToSupplierSummaries(monthPeriod);
-        allSummaries = [...allSummaries, ...monthSummaries];
-      }
-    }
-
-    const filteredSummaries: WhtToSupplierSummary[] = dataScope === 'all-companies'
-      ? allSummaries
-      : allSummaries.filter((s: WhtToSupplierSummary) => s.companyId === dataScope.replace('company-', '') || `company-${s.companyId}` === dataScope);
 
     return {
-      summaries: filteredSummaries,
+      summaries: Array.from(summaryMap.values()),
       transactions: filtered,
       showCompany: dataScope === 'all-companies',
     };
-  }, [dataScope, period, year]);
+  }, [dataScope, period, year, whtCertificates, companies, contacts]);
 
   // Calculate totals
   const totalWht = transactions.reduce((sum, t) => sum + t.whtAmount, 0);
@@ -122,13 +279,24 @@ export default function WhtToSupplierPage() {
   const nextYear = currentMonth === 12 ? year + 1 : year;
   const dueDate = new Date(nextYear, nextMonth - 1, 7);
 
+  // Convert companies for scope bar
+  const companiesForScopeBar = companies.map(convertCompanyToUi);
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#5A7A8F]"></div>
+      </div>
+    );
+  }
+
   return (
     <div>
       {/* Scope Bar */}
       <FinancesScopeBar
         dataScope={dataScope}
         onDataScopeChange={setDataScope}
-        companies={companies}
+        companies={companiesForScopeBar}
         year={year}
         month={month}
         onPeriodChange={handlePeriodChange}

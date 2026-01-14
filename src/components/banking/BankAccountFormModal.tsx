@@ -1,11 +1,11 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
-import { X } from "lucide-react";
+import { X, Loader2 } from "lucide-react";
 import { BankAccount, BankInformation } from "@/data/banking/types";
-import { Currency } from "@/data/company/types";
-import { addBankAccount, updateBankAccount } from "@/data/banking/bankAccounts";
-import { getAllCompanies } from "@/data/company/companies";
+import { Currency, Company } from "@/data/company/types";
+import { companiesApi, bankAccountsApi } from "@/lib/supabase/api";
+import { dbCompanyToFrontend, frontendBankAccountToDb } from "@/lib/supabase/transforms";
 
 interface BankAccountFormModalProps {
   isOpen: boolean;
@@ -60,7 +60,27 @@ export function BankAccountFormModal({
   const [openingBalanceDate, setOpeningBalanceDate] = useState("");
   const [isActive, setIsActive] = useState(true);
 
-  const companies = getAllCompanies();
+  const [companies, setCompanies] = useState<Company[]>([]);
+  const [loadingCompanies, setLoadingCompanies] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  // Fetch companies on mount
+  useEffect(() => {
+    const fetchCompanies = async () => {
+      setLoadingCompanies(true);
+      try {
+        const data = await companiesApi.getAll();
+        setCompanies(data.map(dbCompanyToFrontend));
+      } catch (e) {
+        console.error('Failed to fetch companies:', e);
+      } finally {
+        setLoadingCompanies(false);
+      }
+    };
+    if (isOpen) {
+      fetchCompanies();
+    }
+  }, [isOpen]);
 
   // Form validation errors
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -90,14 +110,25 @@ export function BankAccountFormModal({
       setAccountNumber("");
       setIban("");
       setCurrency("THB");
-      setCompanyId(selectedCompanyId);
+      // If selectedCompanyId is "all" or empty, use the first available company
+      const validCompanyId = selectedCompanyId && selectedCompanyId !== 'all'
+        ? selectedCompanyId
+        : (companies.length > 0 ? companies[0].id : '');
+      setCompanyId(validCompanyId);
       setGlAccountCode("1010");
       setOpeningBalance("0");
       setOpeningBalanceDate(new Date().toISOString().split('T')[0]);
       setIsActive(true);
     }
     setErrors({});
-  }, [editingBankAccount, isOpen, selectedCompanyId]);
+  }, [editingBankAccount, isOpen, selectedCompanyId, companies]);
+
+  // Fix companyId when it's "all" and companies are loaded
+  useEffect(() => {
+    if (!editingBankAccount && (companyId === 'all' || !companyId) && companies.length > 0) {
+      setCompanyId(companies[0].id);
+    }
+  }, [companies, companyId, editingBankAccount]);
 
   // Auto-update GL account when currency changes (only for new accounts)
   useEffect(() => {
@@ -151,8 +182,8 @@ export function BankAccountFormModal({
     if (iban && !validateIban(iban)) {
       newErrors.iban = "Invalid IBAN format (15-34 characters, starts with country code)";
     }
-    if (!companyId) {
-      newErrors.companyId = "Company is required";
+    if (!companyId || companyId === 'all') {
+      newErrors.companyId = "Please select a specific company";
     }
 
     // Accounting Details validation
@@ -182,14 +213,14 @@ export function BankAccountFormModal({
     }
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
     if (!validateForm()) {
       return;
     }
 
-    const bankAccountData = {
+    const bankAccountData: Partial<BankAccount> = {
       bankInformation: {
         bankName: bankInformation.bankName,
         bankBranch: bankInformation.bankBranch || undefined,
@@ -207,14 +238,32 @@ export function BankAccountFormModal({
       isActive,
     };
 
-    if (editingBankAccount) {
-      updateBankAccount(editingBankAccount.id, bankAccountData);
-    } else {
-      addBankAccount(bankAccountData);
+    setSaving(true);
+    try {
+      const dbData = frontendBankAccountToDb(bankAccountData);
+      console.log('Saving bank account data:', dbData);
+      if (editingBankAccount) {
+        await bankAccountsApi.update(editingBankAccount.id, dbData);
+      } else {
+        await bankAccountsApi.create(dbData);
+      }
+      onSave();
+      onClose();
+    } catch (e: unknown) {
+      console.error('Failed to save bank account:', e);
+      // Extract detailed error message from Supabase error
+      let errorMessage = 'Failed to save bank account';
+      if (e && typeof e === 'object') {
+        const err = e as { message?: string; details?: string; hint?: string; code?: string };
+        if (err.message) errorMessage = err.message;
+        if (err.details) errorMessage += ` - ${err.details}`;
+        if (err.hint) errorMessage += ` (Hint: ${err.hint})`;
+        console.error('Error details:', { message: err.message, details: err.details, hint: err.hint, code: err.code });
+      }
+      setErrors({ save: errorMessage });
+    } finally {
+      setSaving(false);
     }
-
-    onSave();
-    onClose();
   };
 
   if (!isOpen) return null;
@@ -269,7 +318,7 @@ export function BankAccountFormModal({
                   <input
                     type="text"
                     id="bankBranch"
-                    value={bankInformation.bankBranch}
+                    value={bankInformation.bankBranch || ''}
                     onChange={(e) =>
                       setBankInformation({ ...bankInformation, bankBranch: e.target.value })
                     }
@@ -307,7 +356,7 @@ export function BankAccountFormModal({
                     <input
                       type="text"
                       id="swiftBic"
-                      value={bankInformation.swiftBic}
+                      value={bankInformation.swiftBic || ''}
                       onChange={(e) =>
                         setBankInformation({
                           ...bankInformation,
@@ -526,6 +575,13 @@ export function BankAccountFormModal({
             </div>
           </div>
 
+          {/* Save Error Display */}
+          {errors.save && (
+            <div className="mx-6 mb-4 p-3 bg-red-50 border border-red-200 rounded-lg">
+              <p className="text-sm text-red-600">{errors.save}</p>
+            </div>
+          )}
+
           {/* Footer Buttons */}
           <div className="flex items-center justify-between px-6 py-4 border-t border-gray-200 flex-shrink-0 bg-white rounded-b-lg">
             <div className="flex items-center gap-3">
@@ -536,7 +592,8 @@ export function BankAccountFormModal({
                     onToggleStatus(editingBankAccount.id);
                     onClose();
                   }}
-                  className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+                  disabled={saving}
+                  className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50"
                 >
                   {editingBankAccount.isActive ? 'Deactivate' : 'Activate'}
                 </button>
@@ -548,7 +605,8 @@ export function BankAccountFormModal({
                     onDelete(editingBankAccount.id);
                     onClose();
                   }}
-                  className="px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-lg hover:bg-red-700 transition-colors"
+                  disabled={saving}
+                  className="px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-lg hover:bg-red-700 transition-colors disabled:opacity-50"
                 >
                   Delete
                 </button>
@@ -558,14 +616,17 @@ export function BankAccountFormModal({
               <button
                 type="button"
                 onClick={onClose}
-                className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+                disabled={saving}
+                className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50"
               >
                 Cancel
               </button>
               <button
                 type="submit"
-                className="px-4 py-2 text-sm font-medium text-white bg-[#5A7A8F] rounded-lg hover:bg-[#2c3e50] transition-colors"
+                disabled={saving || loadingCompanies}
+                className="px-4 py-2 text-sm font-medium text-white bg-[#5A7A8F] rounded-lg hover:bg-[#2c3e50] transition-colors disabled:opacity-50 flex items-center gap-2"
               >
+                {saving && <Loader2 className="h-4 w-4 animate-spin" />}
                 {editingBankAccount ? "Update Bank Account" : "Create Bank Account"}
               </button>
             </div>

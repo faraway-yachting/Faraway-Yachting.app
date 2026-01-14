@@ -1,13 +1,18 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
-import { Plus, Filter, FileDown, FileText, CheckCircle, XCircle, Building2, AlertTriangle } from 'lucide-react';
-import { mockInvoices } from '@/data/income/mockData';
-import { getCompanyById, getActiveCompanies } from '@/data/company/companies';
-import { isInvoiceOverdue, getPaymentTermsLabel } from '@/data/income/invoices';
-import type { InvoiceStatus } from '@/data/income/types';
-import type { Currency } from '@/data/company/types';
+import { Plus, Filter, FileDown, FileText, Building2, AlertTriangle, Eye, Printer } from 'lucide-react';
+import { invoicesApi } from '@/lib/supabase/api/invoices';
+import { companiesApi } from '@/lib/supabase/api/companies';
+import { bankAccountsApi } from '@/lib/supabase/api/bankAccounts';
+import { contactsApi } from '@/lib/supabase/api/contacts';
+import { dbInvoiceToFrontend, dbCompanyToFrontend, dbBankAccountToFrontend, dbContactToFrontend, dbInvoiceLineItemToFrontend } from '@/lib/supabase/transforms';
+import InvoicePrintView from '@/components/income/InvoicePrintView';
+import type { Invoice, InvoiceStatus, LineItem } from '@/data/income/types';
+import type { Company, Currency } from '@/data/company/types';
+import type { BankAccount } from '@/data/banking/types';
+import type { Contact } from '@/data/contact/types';
 
 // Status tabs configuration
 const statusTabs = [
@@ -60,6 +65,15 @@ interface FilterState {
 // Currency options
 const currencyOptions: Currency[] = ['USD', 'EUR', 'GBP', 'THB', 'SGD', 'AED'];
 
+// Helper function to check if invoice is overdue
+function isInvoiceOverdue(invoice: Invoice): boolean {
+  if (invoice.status !== 'issued') return false;
+  const dueDate = new Date(invoice.dueDate);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return dueDate < today && invoice.amountOutstanding > 0;
+}
+
 export default function InvoicesPage() {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<InvoiceStatus | 'all' | 'recent' | 'overdue'>('recent');
@@ -71,8 +85,44 @@ export default function InvoicesPage() {
     dateFrom: '',
     dateTo: '',
   });
+  const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [companies, setCompanies] = useState<Company[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const companies = getActiveCompanies();
+  // PDF Preview state
+  const [showPdfPreview, setShowPdfPreview] = useState(false);
+  const [selectedInvoiceForPdf, setSelectedInvoiceForPdf] = useState<{
+    invoice: Invoice;
+    company: Company | undefined;
+    bankAccount: BankAccount | undefined;
+    client: Contact | undefined;
+    lineItems: LineItem[];
+  } | null>(null);
+  const [loadingPdf, setLoadingPdf] = useState(false);
+
+  // Fetch invoices and companies on mount
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        const [invoicesData, companiesData] = await Promise.all([
+          invoicesApi.getAll(),
+          companiesApi.getAll(),
+        ]);
+        const transformedInvoices = invoicesData.map(inv => dbInvoiceToFrontend(inv, []));
+        const transformedCompanies = companiesData.map(dbCompanyToFrontend);
+        setInvoices(transformedInvoices);
+        setCompanies(transformedCompanies.filter(c => c.isActive));
+      } catch (error) {
+        console.error('Error fetching data:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchData();
+  }, []);
+
+  // Helper to get company by ID
+  const getCompanyById = (id: string) => companies.find(c => c.id === id);
 
   // Check if any filters are active
   const hasActiveFilters = filters.companyId || filters.currency || filters.dateFrom || filters.dateTo;
@@ -88,7 +138,7 @@ export default function InvoicesPage() {
   };
 
   // Filter invoices based on active tab and filters
-  const filteredInvoices = mockInvoices.filter((invoice) => {
+  const filteredInvoices = invoices.filter((invoice) => {
     const overdue = isInvoiceOverdue(invoice);
 
     // Status filter
@@ -169,15 +219,110 @@ export default function InvoicesPage() {
     router.push(`/accounting/manager/income/invoices/${invoiceId}`);
   };
 
-  // Calculate summary statistics
-  const stats = {
-    total: filteredInvoices.length,
-    totalValue: filteredInvoices.reduce((sum, inv) => sum + inv.totalAmount, 0),
-    totalOutstanding: filteredInvoices.reduce((sum, inv) => sum + inv.amountOutstanding, 0),
+  // Handle PDF preview
+  const handlePdfPreview = async (invoice: Invoice) => {
+    setLoadingPdf(true);
+    try {
+      // Fetch full invoice with line items
+      const invoiceWithItems = await invoicesApi.getByIdWithLineItems(invoice.id);
+      if (!invoiceWithItems) {
+        console.error('Invoice not found');
+        return;
+      }
+
+      // Get company
+      const company = companies.find(c => c.id === invoice.companyId);
+
+      // Get bank account for the currency
+      let bankAccount: BankAccount | undefined;
+      if (company) {
+        const bankAccounts = await bankAccountsApi.getByCompanyActive(company.id);
+        bankAccount = bankAccounts
+          .map(dbBankAccountToFrontend)
+          .find(ba => ba.currency === invoice.currency);
+      }
+
+      // Get client contact
+      let client: Contact | undefined;
+      if (invoice.clientId) {
+        const contactData = await contactsApi.getById(invoice.clientId);
+        if (contactData) {
+          client = dbContactToFrontend(contactData);
+        }
+      }
+
+      // Transform line items
+      const lineItems = invoiceWithItems.line_items?.map(dbInvoiceLineItemToFrontend) || [];
+
+      setSelectedInvoiceForPdf({
+        invoice: dbInvoiceToFrontend(invoiceWithItems, invoiceWithItems.line_items || []),
+        company,
+        bankAccount,
+        client,
+        lineItems,
+      });
+      setShowPdfPreview(true);
+    } catch (error) {
+      console.error('Error loading invoice for PDF:', error);
+    } finally {
+      setLoadingPdf(false);
+    }
   };
 
+  // Calculate summary statistics grouped by currency
+  const totalsByCurrency = useMemo(() => {
+    const byCurrency: Record<string, { total: number; outstanding: number; thbEquiv: number; thbOutstanding: number }> = {};
+
+    filteredInvoices.forEach((invoice) => {
+      const currency = invoice.currency;
+      if (!byCurrency[currency]) {
+        byCurrency[currency] = { total: 0, outstanding: 0, thbEquiv: 0, thbOutstanding: 0 };
+      }
+      byCurrency[currency].total += invoice.totalAmount;
+      byCurrency[currency].outstanding += invoice.amountOutstanding;
+      // Calculate THB equivalent
+      if (currency === 'THB') {
+        byCurrency[currency].thbEquiv += invoice.totalAmount;
+        byCurrency[currency].thbOutstanding += invoice.amountOutstanding;
+      } else if (invoice.fxRate) {
+        byCurrency[currency].thbEquiv += invoice.totalAmount * invoice.fxRate;
+        byCurrency[currency].thbOutstanding += invoice.amountOutstanding * invoice.fxRate;
+      }
+    });
+
+    // Sort currencies: THB first, then alphabetically
+    const sortedCurrencies = Object.keys(byCurrency).sort((a, b) => {
+      if (a === 'THB') return -1;
+      if (b === 'THB') return 1;
+      return a.localeCompare(b);
+    });
+
+    return sortedCurrencies.map((currency) => ({
+      currency,
+      ...byCurrency[currency],
+    }));
+  }, [filteredInvoices]);
+
+  // Calculate grand totals in THB
+  const grandTotalThb = useMemo(() => {
+    return totalsByCurrency.reduce((sum, item) => sum + item.thbEquiv, 0);
+  }, [totalsByCurrency]);
+
+  const grandOutstandingThb = useMemo(() => {
+    return totalsByCurrency.reduce((sum, item) => sum + item.thbOutstanding, 0);
+  }, [totalsByCurrency]);
+
   // Count overdue invoices
-  const overdueCount = mockInvoices.filter(isInvoiceOverdue).length;
+  const overdueCount = invoices.filter(isInvoiceOverdue).length;
+
+  // Show loading state
+  if (loading) {
+    return (
+      <div className="p-6 flex items-center justify-center min-h-[400px]">
+        <div className="text-gray-500">Loading invoices...</div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -190,11 +335,11 @@ export default function InvoicesPage() {
               let count: number;
 
               if (tab.value === 'all' || tab.value === 'recent') {
-                count = mockInvoices.length;
+                count = invoices.length;
               } else if (tab.value === 'overdue') {
                 count = overdueCount;
               } else {
-                count = mockInvoices.filter(inv => inv.status === tab.value).length;
+                count = invoices.filter(inv => inv.status === tab.value).length;
               }
 
               return (
@@ -384,6 +529,9 @@ export default function InvoicesPage() {
                   Status
                 </th>
                 <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  THB Equiv.
+                </th>
+                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Actions
                 </th>
               </tr>
@@ -391,7 +539,7 @@ export default function InvoicesPage() {
             <tbody className="bg-white divide-y divide-gray-200">
               {filteredInvoices.length === 0 ? (
                 <tr>
-                  <td colSpan={10} className="px-6 py-12 text-center text-sm text-gray-500">
+                  <td colSpan={11} className="px-6 py-12 text-center text-sm text-gray-500">
                     No invoices found
                   </td>
                 </tr>
@@ -465,23 +613,35 @@ export default function InvoicesPage() {
                       <td className="px-6 py-4 whitespace-nowrap text-center">
                         {getStatusBadge(invoice.status, overdue)}
                       </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-right">
+                        <div className="text-sm text-gray-500">
+                          {invoice.currency === 'THB'
+                            ? '-'
+                            : invoice.fxRate
+                            ? (invoice.totalAmount * invoice.fxRate).toLocaleString('en-US', {
+                                minimumFractionDigits: 2,
+                                maximumFractionDigits: 2,
+                              })
+                            : '-'}
+                        </div>
+                      </td>
                       <td className="px-6 py-4 whitespace-nowrap text-right text-sm">
-                        <div className="flex items-center justify-end gap-2" onClick={(e) => e.stopPropagation()}>
-                          {invoice.status === 'draft' && (
-                            <button className="p-1.5 text-green-600 hover:bg-green-50 rounded-lg transition-colors" title="Issue">
-                              <CheckCircle className="h-4 w-4" />
-                            </button>
-                          )}
-                          {invoice.status !== 'void' && (
-                            <button className="p-1.5 text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="Void">
-                              <XCircle className="h-4 w-4" />
-                            </button>
-                          )}
+                        <div className="flex items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>
                           <button
-                            onClick={() => handleRowClick(invoice.id)}
-                            className="px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
+                            onClick={() => handlePdfPreview(invoice)}
+                            disabled={loadingPdf}
+                            className="p-1.5 text-[#5A7A8F] hover:bg-[#5A7A8F]/10 rounded-lg transition-colors disabled:opacity-50"
+                            title="Preview PDF"
                           >
-                            View
+                            <Eye className="h-4 w-4" />
+                          </button>
+                          <button
+                            onClick={() => handlePdfPreview(invoice)}
+                            disabled={loadingPdf}
+                            className="p-1.5 text-[#5A7A8F] hover:bg-[#5A7A8F]/10 rounded-lg transition-colors disabled:opacity-50"
+                            title="Print PDF"
+                          >
+                            <Printer className="h-4 w-4" />
                           </button>
                         </div>
                       </td>
@@ -496,32 +656,128 @@ export default function InvoicesPage() {
         {/* Summary Footer */}
         {filteredInvoices.length > 0 && (
           <div className="px-6 py-4 bg-gray-50 border-t border-gray-200">
-            <div className="flex justify-between items-center text-sm">
+            <div className="flex justify-between items-start text-sm">
               <div className="text-gray-600">
                 Showing <span className="font-semibold text-gray-900">{filteredInvoices.length}</span> invoice{filteredInvoices.length !== 1 ? 's' : ''}
               </div>
-              <div className="flex gap-6">
-                <div className="text-gray-600">
-                  Total: <span className="font-semibold text-gray-900">
-                    USD {stats.totalValue.toLocaleString('en-US', {
-                      minimumFractionDigits: 2,
-                      maximumFractionDigits: 2,
-                    })}
-                  </span>
+              <div className="flex gap-8">
+                {/* Total Value */}
+                <div className="text-right">
+                  <div className="text-gray-600 mb-2">Total:</div>
+                  {totalsByCurrency.length === 0 ? (
+                    <div className="text-gray-400">-</div>
+                  ) : (
+                    <div className="space-y-1">
+                      {totalsByCurrency.map(({ currency, total, thbEquiv }) => (
+                        <div key={currency} className="flex items-center justify-end gap-4">
+                          <span className="font-semibold text-gray-900">
+                            {currency} {total.toLocaleString('en-US', {
+                              minimumFractionDigits: 2,
+                              maximumFractionDigits: 2,
+                            })}
+                          </span>
+                          {currency !== 'THB' && thbEquiv > 0 && (
+                            <span className="text-gray-500 text-xs">
+                              (THB {thbEquiv.toLocaleString('en-US', {
+                                minimumFractionDigits: 0,
+                                maximumFractionDigits: 0,
+                              })})
+                            </span>
+                          )}
+                        </div>
+                      ))}
+                      {totalsByCurrency.length > 1 && (
+                        <div className="pt-1 border-t border-gray-300 mt-1">
+                          <span className="text-gray-600">Grand Total: </span>
+                          <span className="font-semibold text-gray-900">
+                            THB {grandTotalThb.toLocaleString('en-US', {
+                              minimumFractionDigits: 0,
+                              maximumFractionDigits: 0,
+                            })}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
-                <div className="text-gray-600">
-                  Outstanding: <span className={`font-semibold ${stats.totalOutstanding > 0 ? 'text-orange-600' : 'text-green-600'}`}>
-                    USD {stats.totalOutstanding.toLocaleString('en-US', {
-                      minimumFractionDigits: 2,
-                      maximumFractionDigits: 2,
-                    })}
-                  </span>
+                {/* Outstanding */}
+                <div className="text-right">
+                  <div className="text-gray-600 mb-2">Outstanding:</div>
+                  {totalsByCurrency.length === 0 ? (
+                    <div className="text-gray-400">-</div>
+                  ) : (
+                    <div className="space-y-1">
+                      {totalsByCurrency.map(({ currency, outstanding, thbOutstanding }) => (
+                        <div key={currency} className="flex items-center justify-end gap-4">
+                          <span className={`font-semibold ${outstanding > 0 ? 'text-orange-600' : 'text-green-600'}`}>
+                            {currency} {outstanding.toLocaleString('en-US', {
+                              minimumFractionDigits: 2,
+                              maximumFractionDigits: 2,
+                            })}
+                          </span>
+                          {currency !== 'THB' && thbOutstanding > 0 && (
+                            <span className="text-gray-500 text-xs">
+                              (THB {thbOutstanding.toLocaleString('en-US', {
+                                minimumFractionDigits: 0,
+                                maximumFractionDigits: 0,
+                              })})
+                            </span>
+                          )}
+                        </div>
+                      ))}
+                      {totalsByCurrency.length > 1 && (
+                        <div className="pt-1 border-t border-gray-300 mt-1">
+                          <span className="text-gray-600">Grand Total: </span>
+                          <span className={`font-semibold ${grandOutstandingThb > 0 ? 'text-orange-600' : 'text-green-600'}`}>
+                            THB {grandOutstandingThb.toLocaleString('en-US', {
+                              minimumFractionDigits: 0,
+                              maximumFractionDigits: 0,
+                            })}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
           </div>
         )}
       </div>
+
+      {/* PDF Preview Modal */}
+      {selectedInvoiceForPdf && (
+        <InvoicePrintView
+          invoice={{
+            invoiceNumber: selectedInvoiceForPdf.invoice.invoiceNumber,
+            invoiceDate: selectedInvoiceForPdf.invoice.invoiceDate,
+            dueDate: selectedInvoiceForPdf.invoice.dueDate,
+            boatId: selectedInvoiceForPdf.invoice.boatId,
+            charterType: selectedInvoiceForPdf.invoice.charterType,
+            charterDateFrom: selectedInvoiceForPdf.invoice.charterDateFrom,
+            charterDateTo: selectedInvoiceForPdf.invoice.charterDateTo,
+            charterTime: selectedInvoiceForPdf.invoice.charterTime,
+            lineItems: selectedInvoiceForPdf.lineItems,
+            pricingType: selectedInvoiceForPdf.invoice.pricingType,
+            subtotal: selectedInvoiceForPdf.invoice.subtotal,
+            taxAmount: selectedInvoiceForPdf.invoice.taxAmount,
+            totalAmount: selectedInvoiceForPdf.invoice.totalAmount,
+            whtAmount: 0,
+            currency: selectedInvoiceForPdf.invoice.currency,
+            notes: selectedInvoiceForPdf.invoice.notes,
+            reference: selectedInvoiceForPdf.invoice.reference,
+          }}
+          company={selectedInvoiceForPdf.company}
+          client={selectedInvoiceForPdf.client}
+          clientName={selectedInvoiceForPdf.invoice.clientName}
+          bankAccount={selectedInvoiceForPdf.bankAccount}
+          isOpen={showPdfPreview}
+          onClose={() => {
+            setShowPdfPreview(false);
+            setSelectedInvoiceForPdf(null);
+          }}
+        />
+      )}
     </div>
   );
 }

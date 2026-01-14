@@ -49,6 +49,7 @@ interface LineItemEditorProps {
   currency: Currency;
   projects: Project[];
   readOnly?: boolean;
+  exchangeRate?: number; // Exchange rate to THB
 }
 
 export default function LineItemEditor({
@@ -58,6 +59,7 @@ export default function LineItemEditor({
   currency,
   projects,
   readOnly = false,
+  exchangeRate,
 }: LineItemEditorProps) {
   const handleAddLineItem = () => {
     const newItem: LineItem = {
@@ -395,12 +397,22 @@ export default function LineItemEditor({
 
           <div className="flex justify-between w-full max-w-md border-t pt-2">
             <span className="text-base font-semibold text-gray-900">Total Amount:</span>
-            <span className="text-base font-bold text-gray-900">
-              {currency} {totalAmount.toLocaleString('en-US', {
-                minimumFractionDigits: 2,
-                maximumFractionDigits: 2,
-              })}
-            </span>
+            <div className="text-right">
+              <span className="text-base font-bold text-gray-900">
+                {currency} {totalAmount.toLocaleString('en-US', {
+                  minimumFractionDigits: 2,
+                  maximumFractionDigits: 2,
+                })}
+              </span>
+              {currency !== 'THB' && exchangeRate && totalAmount > 0 && (
+                <div className="text-sm text-[#5A7A8F]">
+                  (THB {(totalAmount * exchangeRate).toLocaleString('th-TH', {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  })})
+                </div>
+              )}
+            </div>
           </div>
 
           {whtAmount > 0 && (

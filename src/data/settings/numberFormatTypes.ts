@@ -2,7 +2,7 @@
  * Document Number Format Configuration Types
  */
 
-export type DocumentType = 'quotation' | 'invoice' | 'receipt' | 'creditNote' | 'debitNote';
+export type DocumentType = 'quotation' | 'invoice' | 'receipt' | 'creditNote' | 'debitNote' | 'whtCertificate';
 
 export type DateFormat = 'YYMM' | 'YYYYMM' | 'MMYY' | 'none';
 
@@ -28,6 +28,7 @@ export const documentTypeLabels: Record<DocumentType, string> = {
   receipt: 'Receipt',
   creditNote: 'Credit Note',
   debitNote: 'Debit Note',
+  whtCertificate: 'WHT Certificate',
 };
 
 // Default prefixes for each document type
@@ -37,4 +38,5 @@ export const defaultPrefixes: Record<DocumentType, string> = {
   receipt: 'RE',
   creditNote: 'CN',
   debitNote: 'DN',
+  whtCertificate: 'WHT',
 };

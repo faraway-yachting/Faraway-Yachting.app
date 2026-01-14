@@ -8,8 +8,12 @@ import { Currency } from '@/data/company/types';
 
 /**
  * Source of the exchange rate
+ * - 'bot': Bank of Thailand (primary source)
+ * - 'fallback': Frankfurt API (when BOT unavailable)
+ * - 'manual': User-entered rate
+ * - 'api': Legacy value (treat as 'fallback')
  */
-export type FxRateSource = 'api' | 'manual';
+export type FxRateSource = 'bot' | 'fallback' | 'manual' | 'api';
 
 /**
  * Exchange rate record for caching
@@ -51,6 +55,9 @@ export interface FetchRateResult {
   success: boolean;
   rate?: number;
   source?: FxRateSource;
+  date?: string;           // Actual date the rate is from
+  baseCurrency?: string;   // Source currency (e.g., 'USD')
+  targetCurrency?: string; // Target currency (always 'THB')
   error?: string;
 }
 
@@ -58,8 +65,11 @@ export interface FetchRateResult {
  * Common FX fields to add to money types
  */
 export interface FxFields {
-  fxRate?: number;           // Exchange rate to THB at transaction time
+  fxRate?: number;             // Exchange rate to THB at transaction time
   fxRateSource?: FxRateSource; // Where the rate came from
+  fxBaseCurrency?: string;     // Source currency (e.g., 'USD')
+  fxTargetCurrency?: string;   // Target currency (always 'THB')
+  fxRateDate?: string;         // Actual date the rate is from (may differ from transaction date)
 }
 
 /**

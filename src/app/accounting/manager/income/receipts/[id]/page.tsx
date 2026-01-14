@@ -3,7 +3,8 @@
 import { useParams, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import ReceiptForm from '@/components/income/ReceiptForm';
-import { getReceiptById } from '@/data/income/receipts';
+import { receiptsApi } from '@/lib/supabase/api/receipts';
+import { dbReceiptToFrontend } from '@/lib/supabase/transforms';
 import type { Receipt } from '@/data/income/types';
 
 export default function EditReceiptPage() {
@@ -14,16 +15,30 @@ export default function EditReceiptPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const id = params.id as string;
-    if (id) {
-      const found = getReceiptById(id);
-      if (found) {
-        setReceipt(found);
-      } else {
-        setError('Receipt not found');
+    const fetchReceipt = async () => {
+      const id = params.id as string;
+      if (id) {
+        try {
+          const result = await receiptsApi.getByIdWithDetails(id);
+          if (result) {
+            const transformed = dbReceiptToFrontend(
+              result,
+              result.line_items,
+              result.payment_records
+            );
+            setReceipt(transformed);
+          } else {
+            setError('Receipt not found');
+          }
+        } catch (err) {
+          console.error('Error fetching receipt:', err);
+          setError('Failed to load receipt');
+        }
       }
-    }
-    setLoading(false);
+      setLoading(false);
+    };
+
+    fetchReceipt();
   }, [params.id]);
 
   if (loading) {

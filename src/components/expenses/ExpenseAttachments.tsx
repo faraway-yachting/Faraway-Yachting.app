@@ -1,9 +1,10 @@
 'use client';
 
 import { useState, useRef } from 'react';
-import { Upload, X, FileText, Image as ImageIcon, Paperclip, Eye, Download } from 'lucide-react';
+import { Upload, X, FileText, Image as ImageIcon, Paperclip, Eye, Download, Loader2 } from 'lucide-react';
 import { Attachment } from '@/data/accounting/journalEntryTypes';
 import { formatFileSize, isImageFile, isPdfFile } from '@/lib/expenses/utils';
+import { createClient } from '@/lib/supabase/client';
 
 interface ExpenseAttachmentsProps {
   attachments: Attachment[];
@@ -11,6 +12,7 @@ interface ExpenseAttachmentsProps {
   readOnly?: boolean;
   label?: string;
   description?: string;
+  expenseId?: string; // Used for organizing files in storage
 }
 
 export function ExpenseAttachments({
@@ -19,51 +21,96 @@ export function ExpenseAttachments({
   readOnly = false,
   label = 'Attachments',
   description = 'Upload receipts, invoices, or supporting documents',
+  expenseId,
 }: ExpenseAttachmentsProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const allowedTypes = ['image/jpeg', 'image/png', 'image/gif', 'application/pdf'];
   const maxSize = 10 * 1024 * 1024; // 10MB
 
-  const handleFiles = (files: FileList | File[]) => {
-    const newAttachments: Attachment[] = [];
-    let processedCount = 0;
-    const fileArray = Array.from(files);
+  const uploadToStorage = async (file: File): Promise<Attachment | null> => {
+    const supabase = createClient();
 
-    fileArray.forEach((file) => {
+    // Generate unique file path
+    const fileExt = file.name.split('.').pop();
+    const uniqueId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    const folder = expenseId ? `expense-attachments/${expenseId}` : 'expense-attachments/temp';
+    const filePath = `${folder}/${uniqueId}.${fileExt}`;
+
+    console.log('[ExpenseAttachments] Starting upload:', { file: file.name, folder, filePath });
+
+    try {
+      // Upload file to Supabase Storage
+      const { data: uploadData, error: uploadError } = await supabase.storage
+        .from('Documents')
+        .upload(filePath, file);
+
+      console.log('[ExpenseAttachments] Upload result:', { uploadData, uploadError });
+
+      if (uploadError) {
+        console.error('[ExpenseAttachments] Upload error:', uploadError);
+        throw new Error(uploadError.message || 'Failed to upload file');
+      }
+
+      // Get public URL
+      const { data: urlData } = supabase.storage
+        .from('Documents')
+        .getPublicUrl(filePath);
+
+      console.log('[ExpenseAttachments] Public URL:', urlData.publicUrl);
+
+      return {
+        id: `att-${uniqueId}`,
+        name: file.name,
+        size: file.size,
+        type: file.type,
+        url: urlData.publicUrl,
+        uploadedAt: new Date().toISOString(),
+      };
+    } catch (error) {
+      console.error('[ExpenseAttachments] Error uploading file:', error);
+      throw error;
+    }
+  };
+
+  const handleFiles = async (files: FileList | File[]) => {
+    const fileArray = Array.from(files);
+    const newAttachments: Attachment[] = [];
+
+    setIsUploading(true);
+    setUploadError(null);
+
+    for (const file of fileArray) {
       if (!allowedTypes.includes(file.type)) {
-        alert(`File type not supported: ${file.name}. Only JPEG, PNG, GIF, and PDF are allowed.`);
-        processedCount++;
-        return;
+        setUploadError(`File type not supported: ${file.name}. Only JPEG, PNG, GIF, and PDF are allowed.`);
+        continue;
       }
 
       if (file.size > maxSize) {
-        alert(`File too large: ${file.name}. Maximum size is 10MB.`);
-        processedCount++;
-        return;
+        setUploadError(`File too large: ${file.name}. Maximum size is 10MB.`);
+        continue;
       }
 
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const attachment: Attachment = {
-          id: `att-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-          name: file.name,
-          size: file.size,
-          type: file.type,
-          url: e.target?.result as string,
-          uploadedAt: new Date().toISOString(),
-        };
-        newAttachments.push(attachment);
-        processedCount++;
-
-        if (processedCount === fileArray.length && newAttachments.length > 0) {
-          onChange([...attachments, ...newAttachments]);
+      try {
+        const attachment = await uploadToStorage(file);
+        if (attachment) {
+          newAttachments.push(attachment);
         }
-      };
-      reader.readAsDataURL(file);
-    });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Upload failed';
+        setUploadError(`Failed to upload ${file.name}: ${message}`);
+      }
+    }
+
+    if (newAttachments.length > 0) {
+      onChange([...attachments, ...newAttachments]);
+    }
+
+    setIsUploading(false);
   };
 
   const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -78,7 +125,7 @@ export function ExpenseAttachments({
 
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
-    if (!readOnly) {
+    if (!readOnly && !isUploading) {
       setIsDragging(true);
     }
   };
@@ -92,7 +139,7 @@ export function ExpenseAttachments({
     e.preventDefault();
     setIsDragging(false);
 
-    if (readOnly) return;
+    if (readOnly || isUploading) return;
 
     const files = e.dataTransfer.files;
     if (files.length > 0) {
@@ -100,23 +147,50 @@ export function ExpenseAttachments({
     }
   };
 
-  const handleRemoveAttachment = (attachmentId: string) => {
+  const handleRemoveAttachment = async (attachmentId: string) => {
+    const attachment = attachments.find(a => a.id === attachmentId);
+
+    // Try to delete from storage if it's a Supabase URL
+    if (attachment?.url?.includes('supabase')) {
+      try {
+        const supabase = createClient();
+        // Extract file path from URL
+        const url = new URL(attachment.url);
+        const pathMatch = url.pathname.match(/\/storage\/v1\/object\/public\/Documents\/(.+)/);
+        if (pathMatch) {
+          await supabase.storage.from('Documents').remove([pathMatch[1]]);
+        }
+      } catch (error) {
+        console.warn('Could not delete file from storage:', error);
+      }
+    }
+
     onChange(attachments.filter((att) => att.id !== attachmentId));
   };
 
   const handlePreview = (attachment: Attachment) => {
     if (isImageFile(attachment.type) || isPdfFile(attachment.type)) {
-      setPreviewUrl(attachment.url);
+      // For Supabase URLs, open in new tab
+      if (attachment.url.startsWith('http')) {
+        window.open(attachment.url, '_blank');
+      } else {
+        setPreviewUrl(attachment.url);
+      }
     }
   };
 
   const handleDownload = (attachment: Attachment) => {
-    const link = document.createElement('a');
-    link.href = attachment.url;
-    link.download = attachment.name;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    // For Supabase URLs, open in new tab to trigger download
+    if (attachment.url.startsWith('http')) {
+      window.open(attachment.url, '_blank');
+    } else {
+      const link = document.createElement('a');
+      link.href = attachment.url;
+      link.download = attachment.name;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
   };
 
   const getFileIcon = (type: string) => {
@@ -140,9 +214,10 @@ export function ExpenseAttachments({
           onDragOver={handleDragOver}
           onDragLeave={handleDragLeave}
           onDrop={handleDrop}
-          onClick={() => fileInputRef.current?.click()}
+          onClick={() => !isUploading && fileInputRef.current?.click()}
           className={`
             border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition-colors
+            ${isUploading ? 'cursor-wait opacity-70' : ''}
             ${
               isDragging
                 ? 'border-[#5A7A8F] bg-[#5A7A8F]/5'
@@ -157,15 +232,32 @@ export function ExpenseAttachments({
             accept=".jpg,.jpeg,.png,.gif,.pdf"
             onChange={handleFileUpload}
             className="hidden"
+            disabled={isUploading}
           />
-          <Upload className="h-8 w-8 mx-auto text-gray-400 mb-2" />
-          <p className="text-sm text-gray-600">
-            <span className="font-medium text-[#5A7A8F]">Click to upload</span> or drag and
-            drop
-          </p>
-          <p className="text-xs text-gray-500 mt-1">
-            JPEG, PNG, GIF, or PDF (max 10MB each)
-          </p>
+          {isUploading ? (
+            <>
+              <Loader2 className="h-8 w-8 mx-auto text-[#5A7A8F] mb-2 animate-spin" />
+              <p className="text-sm text-gray-600">Uploading...</p>
+            </>
+          ) : (
+            <>
+              <Upload className="h-8 w-8 mx-auto text-gray-400 mb-2" />
+              <p className="text-sm text-gray-600">
+                <span className="font-medium text-[#5A7A8F]">Click to upload</span> or drag and
+                drop
+              </p>
+              <p className="text-xs text-gray-500 mt-1">
+                JPEG, PNG, GIF, or PDF (max 10MB each)
+              </p>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* Upload Error */}
+      {uploadError && (
+        <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
+          <p className="text-sm text-red-600">{uploadError}</p>
         </div>
       )}
 
@@ -175,6 +267,7 @@ export function ExpenseAttachments({
           {attachments.map((attachment) => {
             const FileIcon = getFileIcon(attachment.type);
             const isImage = isImageFile(attachment.type);
+            const isStorageUrl = attachment.url.startsWith('http');
 
             return (
               <div
@@ -183,7 +276,13 @@ export function ExpenseAttachments({
               >
                 {/* Thumbnail or Icon */}
                 <div className="flex-shrink-0 w-12 h-12 rounded-lg overflow-hidden bg-white border border-gray-200 flex items-center justify-center">
-                  {isImage ? (
+                  {isImage && isStorageUrl ? (
+                    <img
+                      src={attachment.url}
+                      alt={attachment.name}
+                      className="w-full h-full object-cover"
+                    />
+                  ) : isImage && !isStorageUrl ? (
                     <img
                       src={attachment.url}
                       alt={attachment.name}
@@ -239,7 +338,7 @@ export function ExpenseAttachments({
         </div>
       )}
 
-      {/* Preview Modal */}
+      {/* Preview Modal (for base64 images only) */}
       {previewUrl && (
         <div
           className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4"

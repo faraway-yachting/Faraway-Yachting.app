@@ -2,19 +2,28 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { X, Save, FileText, Printer, XCircle, Building2, AlertCircle, Share2, Receipt, ChevronDown, Pencil } from 'lucide-react';
+import { X, Save, FileText, Printer, XCircle, Building2, AlertCircle, Share2, Receipt, ChevronDown, Pencil, Loader2 } from 'lucide-react';
 import ClientSelector from './ClientSelector';
 import LineItemEditor from './LineItemEditor';
 import QuotationPrintView from './QuotationPrintView';
-import type { Quotation, LineItem, PricingType } from '@/data/income/types';
-import type { Currency } from '@/data/company/types';
-import { getActiveCompanies } from '@/data/company/companies';
-import { createQuotation, updateQuotation } from '@/data/income/quotations';
-import { getActiveBankAccountsByCompany } from '@/data/banking/bankAccounts';
-import { getContactById } from '@/data/contact/contacts';
+import { CharterInfoBox } from './CharterInfoBox';
+import type { Quotation, LineItem, PricingType, CharterType } from '@/data/income/types';
+import { charterTypeAccountCodes } from '@/data/income/types';
+import type { Currency, Company } from '@/data/company/types';
+import type { Project } from '@/data/project/types';
+import type { BankAccount } from '@/data/banking/types';
+import type { Contact } from '@/data/contact/types';
+import { companiesApi } from '@/lib/supabase/api/companies';
+import { projectsApi } from '@/lib/supabase/api/projects';
+import { bankAccountsApi } from '@/lib/supabase/api/bankAccounts';
+import { contactsApi } from '@/lib/supabase/api/contacts';
+import { quotationsApi } from '@/lib/supabase/api/quotations';
+import { documentNumbersApi } from '@/lib/supabase/api/documentNumbers';
+import { dbCompanyToFrontend, dbProjectToFrontend, dbBankAccountToFrontend, dbContactToFrontend, frontendQuotationToDb, frontendLineItemToDbQuotation } from '@/lib/supabase/transforms';
 import { getDefaultTermsAndConditions, getDefaultValidityDays } from '@/data/settings/pdfSettings';
-import { getActiveProjectsByCompany } from '@/data/project/projects';
 import { calculateDocumentTotals, calculateLineItemTotal, calculateTotalWhtAmount, getTodayISO, addDays, generateId } from '@/lib/income/utils';
+import { getExchangeRate } from '@/lib/exchangeRate/service';
+import type { FxRateSource } from '@/data/exchangeRate/types';
 
 interface QuotationFormProps {
   quotation?: Quotation;
@@ -25,15 +34,24 @@ export default function QuotationForm({ quotation, onCancel }: QuotationFormProp
   const router = useRouter();
   const isEditing = !!quotation;
 
-  // Get available companies
-  const companies = getActiveCompanies();
+  // Async loaded data
+  const [companies, setCompanies] = useState<Company[]>([]);
+  const [companyProjects, setCompanyProjects] = useState<Project[]>([]);
+  const [companyBankAccounts, setCompanyBankAccounts] = useState<BankAccount[]>([]);
+  const [clientContact, setClientContact] = useState<Contact | undefined>(undefined);
+  const [isLoading, setIsLoading] = useState(true);
 
   // Form state
   const [companyId, setCompanyId] = useState(quotation?.companyId || '');
   const [clientId, setClientId] = useState(quotation?.clientId || '');
   const [clientName, setClientName] = useState(quotation?.clientName || '');
-  const [charterPeriodFrom, setCharterPeriodFrom] = useState(quotation?.charterPeriodFrom || '');
-  const [charterPeriodTo, setCharterPeriodTo] = useState(quotation?.charterPeriodTo || '');
+  // Charter information
+  const [boatId, setBoatId] = useState(quotation?.boatId || '');
+  const [charterType, setCharterType] = useState<CharterType | ''>(quotation?.charterType || '');
+  const [charterDateFrom, setCharterDateFrom] = useState(quotation?.charterDateFrom || quotation?.charterPeriodFrom || '');
+  const [charterDateTo, setCharterDateTo] = useState(quotation?.charterDateTo || quotation?.charterPeriodTo || '');
+  const [charterTime, setCharterTime] = useState(quotation?.charterTime || '');
+  const [externalBoatName, setExternalBoatName] = useState('');
   const [dateCreated, setDateCreated] = useState(quotation?.dateCreated || getTodayISO());
   const [validUntil, setValidUntil] = useState(quotation?.validUntil || addDays(getTodayISO(), getDefaultValidityDays('quotation')));
   const [currency, setCurrency] = useState<Currency>(quotation?.currency || 'USD');
@@ -61,6 +79,15 @@ export default function QuotationForm({ quotation, onCancel }: QuotationFormProp
   const [quotationNumber, setQuotationNumber] = useState(quotation?.quotationNumber || '');
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [isSaving, setIsSaving] = useState(false);
+  // Exchange rate state
+  const [exchangeRate, setExchangeRate] = useState<number | undefined>(
+    quotation?.fxRate
+  );
+  const [fxRateSource, setFxRateSource] = useState<FxRateSource>(
+    quotation?.fxRateSource || 'bot'
+  );
+  const [fxRateDate, setFxRateDate] = useState<string | undefined>(undefined);
+  const [isFetchingRate, setIsFetchingRate] = useState(false);
   const [showVoidModal, setShowVoidModal] = useState(false);
   const [voidReason, setVoidReason] = useState('');
   const [currentStatus, setCurrentStatus] = useState(quotation?.status || 'draft');
@@ -69,18 +96,95 @@ export default function QuotationForm({ quotation, onCancel }: QuotationFormProp
   // Edit mode: for existing documents, start in view mode (locked); for new documents, start in edit mode
   const [isEditMode, setIsEditMode] = useState(!isEditing);
 
+  // Load initial data (companies)
+  useEffect(() => {
+    const loadInitialData = async () => {
+      setIsLoading(true);
+      try {
+        const companiesData = await companiesApi.getActive();
+        setCompanies(companiesData.map(dbCompanyToFrontend));
+      } catch (error) {
+        console.error('Failed to load initial data:', error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    loadInitialData();
+  }, []);
+
+  // Load all projects (projects can be assigned from any company in the group)
+  useEffect(() => {
+    const loadProjects = async () => {
+      try {
+        // Get all projects across all companies (active and inactive, not completed)
+        // Note: Projects belong to a Company for legal registration, but transactions
+        // for P&L calculation can come from any company in the Faraway Yachting group
+        const projectsData = await projectsApi.getAll();
+        // Filter to show active and inactive projects (not completed)
+        const filteredProjects = projectsData.filter(p => p.status !== 'completed');
+        setCompanyProjects(filteredProjects.map(dbProjectToFrontend));
+      } catch (error) {
+        console.error('Failed to load projects:', error);
+      }
+    };
+    loadProjects();
+  }, []);
+
+  // Load company-specific data when company changes (bank accounts only)
+  useEffect(() => {
+    const loadCompanyData = async () => {
+      if (!companyId) {
+        setCompanyBankAccounts([]);
+        return;
+      }
+      try {
+        const bankAccountsData = await bankAccountsApi.getByCompanyActive(companyId);
+        setCompanyBankAccounts(bankAccountsData.map(dbBankAccountToFrontend));
+      } catch (error) {
+        console.error('Failed to load company bank accounts:', error);
+      }
+    };
+    loadCompanyData();
+  }, [companyId]);
+
+  // Generate document number when company is selected (for new documents only)
+  useEffect(() => {
+    const generateNumber = async () => {
+      if (!companyId || isEditing || quotationNumber) return;
+      try {
+        const nextNumber = await documentNumbersApi.getNextDocumentNumber(companyId, 'quotation');
+        setQuotationNumber(nextNumber);
+      } catch (error) {
+        console.error('Failed to generate quotation number:', error);
+      }
+    };
+    generateNumber();
+  }, [companyId, isEditing]);
+
+  // Load client contact when client changes
+  useEffect(() => {
+    const loadClientContact = async () => {
+      if (!clientId) {
+        setClientContact(undefined);
+        return;
+      }
+      try {
+        const contact = await contactsApi.getById(clientId);
+        if (contact) {
+          setClientContact(dbContactToFrontend(contact));
+        }
+      } catch (error) {
+        console.error('Failed to load client contact:', error);
+      }
+    };
+    loadClientContact();
+  }, [clientId]);
+
   // Get selected company
   const selectedCompany = companies.find((c) => c.id === companyId);
 
   // Get bank account matching selected company and currency
-  const companyBankAccounts = companyId ? getActiveBankAccountsByCompany(companyId) : [];
   const paymentBankAccount = companyBankAccounts.find((ba) => ba.currency === currency);
-
-  // Get active projects for selected company
-  const companyProjects = companyId ? getActiveProjectsByCompany(companyId) : [];
-
-  // Get client contact for print view
-  const clientContact = clientId ? getContactById(clientId) : undefined;
 
   // Check if VAT is available for selected company
   const isVatAvailable = selectedCompany?.isVatRegistered ?? true;
@@ -116,9 +220,147 @@ export default function QuotationForm({ quotation, onCancel }: QuotationFormProp
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [effectivePricingType]);
 
+  // Auto-fetch exchange rate when currency or date changes
+  useEffect(() => {
+    const fetchRate = async () => {
+      // Skip if THB (no conversion needed)
+      if (currency === 'THB') {
+        setExchangeRate(1);
+        return;
+      }
+
+      // Skip if no date set
+      if (!dateCreated) return;
+
+      // Skip if editing and rate already set (user may have manually entered)
+      if (isEditing && quotation?.fxRate && fxRateSource === 'manual') return;
+
+      setIsFetchingRate(true);
+      try {
+        const result = await getExchangeRate(currency, dateCreated);
+        if (result.success && result.rate) {
+          setExchangeRate(result.rate);
+          setFxRateSource(result.source || 'bot');
+          setFxRateDate(result.date || dateCreated);
+        }
+      } catch (error) {
+        console.error('Failed to fetch exchange rate:', error);
+      } finally {
+        setIsFetchingRate(false);
+      }
+    };
+
+    fetchRate();
+  }, [currency, dateCreated]);
+
   // Calculate totals
   const totals = calculateDocumentTotals(lineItems, effectivePricingType);
   const whtAmount = calculateTotalWhtAmount(lineItems, effectivePricingType);
+
+  // Agency project codes (when selected, external boat name is used)
+  const AGENCY_PROJECT_CODES = ['FA'];
+
+  // Format date as DD MMM YYYY (e.g., 01 Jan 2026)
+  const formatDateForDescription = (dateStr: string): string => {
+    if (!dateStr) return '';
+    const date = new Date(dateStr);
+    const day = date.getDate().toString().padStart(2, '0');
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const month = months[date.getMonth()];
+    const year = date.getFullYear();
+    return `${day} ${month} ${year}`;
+  };
+
+  // Handle Add to Booking Calendar - navigate to booking calendar with pre-filled data
+  // Quotation -> Enquiry status
+  const handleAddToBooking = () => {
+    // Find selected boat
+    const selectedBoat = companyProjects.find(p => p.id === boatId);
+    const isAgencyBooking = selectedBoat && AGENCY_PROJECT_CODES.includes(selectedBoat.code);
+
+    // Map charter type to booking type (only day_charter, overnight_charter, cabin_charter are valid)
+    const bookingTypeMap: Record<string, string> = {
+      day_charter: 'day_charter',
+      overnight_charter: 'overnight_charter',
+      cabin_charter: 'cabin_charter',
+      other_charter: 'day_charter', // Default to day_charter
+      bareboat_charter: 'overnight_charter',
+      crewed_charter: 'overnight_charter',
+      outsource_commission: 'day_charter',
+    };
+    const bookingType = charterType ? bookingTypeMap[charterType] || 'day_charter' : 'day_charter';
+
+    // Build URL parameters for booking calendar
+    const params = new URLSearchParams();
+    params.set('status', 'enquiry'); // Quotation -> Enquiry
+    params.set('type', bookingType);
+    params.set('title', clientName || '');
+    params.set('customerName', clientName || '');
+
+    if (charterDateFrom) params.set('dateFrom', charterDateFrom);
+    if (charterDateTo) params.set('dateTo', charterDateTo);
+    if (charterTime) params.set('time', charterTime);
+
+    // Set boat info
+    if (isAgencyBooking && externalBoatName) {
+      params.set('externalBoatName', externalBoatName);
+    } else if (selectedBoat) {
+      params.set('projectId', selectedBoat.id);
+    }
+
+    // Set financial info
+    if (totals.totalAmount > 0) {
+      params.set('totalPrice', totals.totalAmount.toString());
+    }
+    params.set('currency', currency);
+
+    // Set source document reference
+    if (quotationNumber) {
+      params.set('sourceDoc', `Quotation: ${quotationNumber}`);
+    }
+
+    // Navigate to booking calendar with new booking form
+    router.push(`/bookings/manager/calendar?newBooking=true&${params.toString()}`);
+  };
+
+  // Handle Update Description - update first line item with charter info
+  const handleUpdateDescription = () => {
+    if (lineItems.length === 0) return;
+
+    // Find selected boat name
+    const selectedBoat = companyProjects.find(p => p.id === boatId);
+    const isAgencyBooking = selectedBoat && AGENCY_PROJECT_CODES.includes(selectedBoat.code);
+
+    // For agency bookings: use external boat name (or leave empty if not provided)
+    // For regular bookings: use the selected project name
+    const boatName = isAgencyBooking
+      ? (externalBoatName || '')
+      : (selectedBoat ? `${selectedBoat.code} - ${selectedBoat.name}` : '');
+
+    // Format date range with DD MMM YYYY format
+    const formattedFrom = formatDateForDescription(charterDateFrom);
+    const formattedTo = formatDateForDescription(charterDateTo);
+    const dateRange = charterDateFrom === charterDateTo || !charterDateTo
+      ? formattedFrom
+      : `${formattedFrom} - ${formattedTo}`;
+
+    // Build structured description
+    const description = `Boat: ${boatName}
+Charter Date: ${dateRange}
+Time: ${charterTime || ''}
+Number of guest:
+Destination: `;
+
+    // Update first line item
+    const updatedItems = [...lineItems];
+    updatedItems[0] = {
+      ...updatedItems[0],
+      description,
+      projectId: boatId || updatedItems[0].projectId,
+      accountCode: charterType ? charterTypeAccountCodes[charterType as CharterType] : updatedItems[0].accountCode,
+    };
+    setLineItems(updatedItems);
+  };
 
   // Validation
   const validate = (): boolean => {
@@ -134,9 +376,9 @@ export default function QuotationForm({ quotation, onCancel }: QuotationFormProp
       newErrors.validUntil = 'Valid until must be on or after date created';
     }
 
-    // Charter period validation
-    if (charterPeriodFrom && charterPeriodTo && charterPeriodTo < charterPeriodFrom) {
-      newErrors.charterPeriodTo = 'Charter end date must be on or after start date';
+    // Charter date validation
+    if (charterDateFrom && charterDateTo && charterDateTo < charterDateFrom) {
+      newErrors.charterDateTo = 'Charter end date must be on or after start date';
     }
 
     // Line items validation
@@ -179,14 +421,20 @@ export default function QuotationForm({ quotation, onCancel }: QuotationFormProp
         newErrors.lineItems = 'At least one line item with description or price is required';
       }
 
+      // Check if all line items have a project selected
+      const lineItemsMissingProject = nonEmptyLineItems.some(item => !item.projectId);
+      if (lineItemsMissingProject) {
+        newErrors.lineItems = 'Project is required for each line item';
+      }
+
       // Date validation (only if validUntil is provided)
       if (validUntil && dateCreated && validUntil < dateCreated) {
         newErrors.validUntil = 'Valid until must be on or after date created';
       }
 
-      // Charter period validation
-      if (charterPeriodFrom && charterPeriodTo && charterPeriodTo < charterPeriodFrom) {
-        newErrors.charterPeriodTo = 'Charter end date must be on or after start date';
+      // Charter date validation
+      if (charterDateFrom && charterDateTo && charterDateTo < charterDateFrom) {
+        newErrors.charterDateTo = 'Charter end date must be on or after start date';
       }
 
       if (Object.keys(newErrors).length > 0) {
@@ -197,10 +445,19 @@ export default function QuotationForm({ quotation, onCancel }: QuotationFormProp
       }
     }
 
-    // For draft, only require company
+    // For draft, require company and project for each line item
     if (status === 'draft') {
-      if (!companyId) {
-        setErrors({ companyId: 'Company is required' });
+      const newErrors: Record<string, string> = {};
+      if (!companyId) newErrors.companyId = 'Company is required';
+
+      // Check if any non-empty line items are missing project
+      const lineItemsMissingProject = nonEmptyLineItems.some(item => !item.projectId);
+      if (lineItemsMissingProject) {
+        newErrors.lineItems = 'Project is required for each line item';
+      }
+
+      if (Object.keys(newErrors).length > 0) {
+        setErrors(newErrors);
         return;
       }
     }
@@ -208,45 +465,87 @@ export default function QuotationForm({ quotation, onCancel }: QuotationFormProp
     setIsSaving(true);
 
     try {
+      const finalLineItems = nonEmptyLineItems.length > 0 ? nonEmptyLineItems : lineItems;
+
+      // Generate quotation number if not provided (using company settings)
+      let finalQuotationNumber = quotationNumber;
+      if (!finalQuotationNumber) {
+        finalQuotationNumber = await documentNumbersApi.getNextDocumentNumber(companyId, 'quotation');
+      }
+
       const quotationData: Partial<Quotation> = {
         companyId,
         clientId,
         clientName,
-        quotationNumber: quotationNumber || undefined, // Will be auto-generated if empty
-        charterPeriodFrom: charterPeriodFrom || undefined,
-        charterPeriodTo: charterPeriodTo || undefined,
+        quotationNumber: finalQuotationNumber,
+        // Charter information
+        boatId: boatId || undefined,
+        charterType: charterType || undefined,
+        charterDateFrom: charterDateFrom || undefined,
+        charterDateTo: charterDateTo || undefined,
+        charterTime: charterTime || undefined,
         dateCreated,
         validUntil: validUntil || undefined,
         currency,
         pricingType: effectivePricingType,
-        lineItems: nonEmptyLineItems.length > 0 ? nonEmptyLineItems : lineItems,
         subtotal: totals.subtotal,
         taxAmount: totals.taxAmount,
         totalAmount: totals.totalAmount,
+        // FX Rate fields
+        fxRate: currency !== 'THB' ? exchangeRate : undefined,
+        fxRateSource: currency !== 'THB' ? fxRateSource : undefined,
+        thbSubtotal: currency !== 'THB' && exchangeRate ? totals.subtotal * exchangeRate : undefined,
+        thbTaxAmount: currency !== 'THB' && exchangeRate ? totals.taxAmount * exchangeRate : undefined,
+        thbTotalAmount: currency !== 'THB' && exchangeRate ? totals.totalAmount * exchangeRate : undefined,
         termsAndConditions: termsAndConditions || undefined,
         notes: notes || undefined,
         status,
       };
 
+      // Convert to DB format
+      const dbQuotation = frontendQuotationToDb(quotationData);
+      const dbLineItems = finalLineItems.map(item => frontendLineItemToDbQuotation(item, ''));
+
       // Create or update quotation
       if (isEditing && quotation) {
-        const updated = updateQuotation(quotation.id, quotationData);
-        console.log('Updated quotation:', updated);
-        if (updated) {
-          setCurrentStatus(status);
-          setIsEditMode(false); // Switch to view mode after save
+        console.log('Updating quotation:', quotation.id, dbQuotation);
+        try {
+          await quotationsApi.update(quotation.id, dbQuotation);
+        } catch (updateErr) {
+          console.error('Update quotation error:', updateErr);
+          throw updateErr;
         }
+        try {
+          await quotationsApi.updateLineItems(quotation.id, dbLineItems);
+        } catch (lineItemsErr) {
+          console.error('Update line items error:', lineItemsErr);
+          throw lineItemsErr;
+        }
+        console.log('Updated quotation successfully');
+        setCurrentStatus(status);
+        setIsEditMode(false); // Switch to view mode after save
       } else {
-        const newQuotation = createQuotation(quotationData);
+        const newQuotation = await quotationsApi.create(dbQuotation, dbLineItems);
         console.log('Created quotation:', newQuotation);
         // Navigate to edit page for the newly created quotation
         if (newQuotation) {
-          router.push(`/accounting/manager/income/quotations/${newQuotation.id}`);
+          router.push(`/accounting/manager/income/quotations/${newQuotation.id}/edit`);
         }
       }
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Error saving quotation:', error);
-      alert('Failed to save quotation. Please try again.');
+      let errorMessage = 'Unknown error';
+      if (error instanceof Error) {
+        errorMessage = error.message;
+      } else if (typeof error === 'object' && error !== null) {
+        // Supabase errors often have code and message properties
+        const supabaseError = error as { code?: string; message?: string; details?: string };
+        errorMessage = supabaseError.message || supabaseError.code || JSON.stringify(error);
+        if (supabaseError.details) {
+          errorMessage += ` - ${supabaseError.details}`;
+        }
+      }
+      alert(`Failed to save quotation: ${errorMessage}`);
     } finally {
       setIsSaving(false);
     }
@@ -278,18 +577,16 @@ export default function QuotationForm({ quotation, onCancel }: QuotationFormProp
 
     setIsSaving(true);
     try {
-      const updated = updateQuotation(quotation.id, {
+      await quotationsApi.update(quotation.id, {
         status: 'void',
-        notes: voidReason ? `${notes}\n\nVoid Reason: ${voidReason}` : notes,
+        notes: voidReason ? `${notes}\n\nVoid Reason: ${voidReason}` : (notes || null),
       });
 
-      if (updated) {
-        setCurrentStatus('void');
-        setShowVoidModal(false);
-        setVoidReason('');
-        // Optionally navigate back to list
-        router.push('/accounting/manager/income/quotations');
-      }
+      setCurrentStatus('void');
+      setShowVoidModal(false);
+      setVoidReason('');
+      // Optionally navigate back to list
+      router.push('/accounting/manager/income/quotations');
     } catch (error) {
       console.error('Error voiding quotation:', error);
       alert('Failed to void quotation. Please try again.');
@@ -303,6 +600,18 @@ export default function QuotationForm({ quotation, onCancel }: QuotationFormProp
 
   // Fields are disabled when viewing an existing document (not in edit mode) or when voided
   const isFieldsDisabled = (isEditing && !isEditMode) || isVoided;
+
+  // Show loading state while initial data is being fetched
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center min-h-[400px]">
+        <div className="flex flex-col items-center gap-3">
+          <Loader2 className="h-8 w-8 animate-spin text-[#5A7A8F]" />
+          <p className="text-sm text-gray-500">Loading...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -568,39 +877,76 @@ export default function QuotationForm({ quotation, onCancel }: QuotationFormProp
             </select>
           </div>
 
-          {/* Charter Period From */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Charter Period From
-            </label>
-            <input
-              type="date"
-              value={charterPeriodFrom}
-              onChange={(e) => setCharterPeriodFrom(e.target.value)}
-              disabled={isFieldsDisabled}
-              className="w-full px-4 py-2.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#5A7A8F]/20 focus:border-[#5A7A8F] disabled:bg-gray-100 disabled:cursor-not-allowed"
-            />
-          </div>
+          {/* Exchange Rate (for non-THB) */}
+          {currency !== 'THB' && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Exchange Rate to THB
+              </label>
+              <div className="relative">
+                <input
+                  type="number"
+                  value={exchangeRate || ''}
+                  onChange={(e) => {
+                    setExchangeRate(parseFloat(e.target.value) || undefined);
+                    setFxRateSource('manual');
+                  }}
+                  disabled={isFieldsDisabled || isFetchingRate}
+                  step="0.0001"
+                  placeholder="e.g., 35.50"
+                  className="w-full px-4 py-2.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#5A7A8F]/20 focus:border-[#5A7A8F] disabled:bg-gray-100 disabled:cursor-not-allowed"
+                />
+                {isFetchingRate && (
+                  <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                    <Loader2 className="h-4 w-4 animate-spin text-[#5A7A8F]" />
+                  </div>
+                )}
+              </div>
+              <p className="mt-1 text-xs text-gray-500">
+                1 {currency} = {exchangeRate ? exchangeRate.toFixed(4) : '?'} THB
+                {fxRateSource === 'bot' && !isFetchingRate && (
+                  <span className="ml-2 text-green-600">• Bank of Thailand ({fxRateDate || dateCreated})</span>
+                )}
+                {fxRateSource === 'fallback' && !isFetchingRate && (
+                  <span className="ml-2 text-amber-600">• Frankfurt fallback ({fxRateDate || dateCreated})</span>
+                )}
+                {fxRateSource === 'api' && !isFetchingRate && (
+                  <span className="ml-2 text-green-600">• API rate ({fxRateDate || dateCreated})</span>
+                )}
+                {fxRateSource === 'manual' && !isFetchingRate && (
+                  <span className="ml-2 text-gray-600">• Manual rate</span>
+                )}
+              </p>
+              {exchangeRate && totals.totalAmount > 0 && (
+                <p className="mt-1 text-xs font-medium text-[#5A7A8F]">
+                  THB Total: ฿{(totals.totalAmount * exchangeRate).toLocaleString('th-TH', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                </p>
+              )}
+            </div>
+          )}
+        </div>
 
-          {/* Charter Period To */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Charter Period To
-            </label>
-            <input
-              type="date"
-              value={charterPeriodTo}
-              onChange={(e) => setCharterPeriodTo(e.target.value)}
-              disabled={isFieldsDisabled}
-              className={`w-full px-4 py-2.5 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-[#5A7A8F]/20 focus:border-[#5A7A8F] disabled:bg-gray-100 disabled:cursor-not-allowed ${
-                errors.charterPeriodTo ? 'border-red-500' : 'border-gray-300'
-              }`}
-            />
-            {errors.charterPeriodTo && (
-              <p className="mt-1 text-xs text-red-600">{errors.charterPeriodTo}</p>
-            )}
-          </div>
+        {/* Charter Information Box */}
+        <CharterInfoBox
+          boatId={boatId}
+          charterType={charterType}
+          charterDateFrom={charterDateFrom}
+          charterDateTo={charterDateTo}
+          charterTime={charterTime}
+          externalBoatName={externalBoatName}
+          projects={companyProjects}
+          disabled={isFieldsDisabled}
+          onBoatChange={setBoatId}
+          onCharterTypeChange={setCharterType}
+          onDateFromChange={setCharterDateFrom}
+          onDateToChange={setCharterDateTo}
+          onTimeChange={setCharterTime}
+          onExternalBoatNameChange={setExternalBoatName}
+          onUpdateDescription={handleUpdateDescription}
+          onAddToBooking={handleAddToBooking}
+        />
 
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6">
           {/* Date Created */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -707,6 +1053,7 @@ export default function QuotationForm({ quotation, onCancel }: QuotationFormProp
           currency={currency}
           projects={companyProjects}
           readOnly={isFieldsDisabled}
+          exchangeRate={exchangeRate}
         />
 
         {errors.lineItems && (
@@ -901,8 +1248,11 @@ export default function QuotationForm({ quotation, onCancel }: QuotationFormProp
           quotationNumber: quotationNumber || quotation?.quotationNumber,
           dateCreated,
           validUntil,
-          charterPeriodFrom: charterPeriodFrom || undefined,
-          charterPeriodTo: charterPeriodTo || undefined,
+          boatId: boatId || undefined,
+          charterType: charterType || undefined,
+          charterDateFrom: charterDateFrom || undefined,
+          charterDateTo: charterDateTo || undefined,
+          charterTime: charterTime || undefined,
           lineItems,
           pricingType: effectivePricingType,
           subtotal: totals.subtotal,

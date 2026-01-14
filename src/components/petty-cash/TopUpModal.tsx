@@ -1,10 +1,13 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { X, Loader2, ArrowUpCircle } from 'lucide-react';
 import type { PettyCashWallet } from '@/data/petty-cash/types';
-import { getActiveCompanies } from '@/data/company/companies';
-import { getActiveBankAccountsByCompany } from '@/data/banking/bankAccounts';
+import type { Company } from '@/data/company/types';
+import type { BankAccount } from '@/data/banking/types';
+import { companiesApi } from '@/lib/supabase/api/companies';
+import { bankAccountsApi } from '@/lib/supabase/api/bankAccounts';
+import { dbCompanyToFrontend, dbBankAccountToFrontend } from '@/lib/supabase/transforms';
 import { formatCurrency, getTodayISO } from '@/lib/petty-cash/utils';
 
 interface TopUpModalProps {
@@ -29,7 +32,10 @@ export default function TopUpModal({
   onSubmit,
   onClose,
 }: TopUpModalProps) {
-  const companies = useMemo(() => getActiveCompanies(), []);
+  // Async loaded data
+  const [companies, setCompanies] = useState<Company[]>([]);
+  const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
 
   const [companyId, setCompanyId] = useState('');
   const [bankAccountId, setBankAccountId] = useState('');
@@ -40,11 +46,38 @@ export default function TopUpModal({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
 
-  // Get bank accounts for selected company
-  const bankAccounts = useMemo(
-    () => (companyId ? getActiveBankAccountsByCompany(companyId) : []),
-    [companyId]
-  );
+  // Load companies on mount
+  useEffect(() => {
+    const loadCompanies = async () => {
+      setIsLoading(true);
+      try {
+        const companiesData = await companiesApi.getActive();
+        setCompanies(companiesData.map(dbCompanyToFrontend));
+      } catch (error) {
+        console.error('Failed to load companies:', error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    loadCompanies();
+  }, []);
+
+  // Load bank accounts when company changes
+  useEffect(() => {
+    const loadBankAccounts = async () => {
+      if (!companyId) {
+        setBankAccounts([]);
+        return;
+      }
+      try {
+        const accountsData = await bankAccountsApi.getByCompanyActive(companyId);
+        setBankAccounts(accountsData.map(dbBankAccountToFrontend));
+      } catch (error) {
+        console.error('Failed to load bank accounts:', error);
+      }
+    };
+    loadBankAccounts();
+  }, [companyId]);
 
   // Reset bank account when company changes
   const handleCompanyChange = (newCompanyId: string) => {

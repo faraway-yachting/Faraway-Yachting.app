@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useMemo, useRef, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { ChevronDown, Search, X } from 'lucide-react';
 import { chartOfAccounts, type ChartOfAccount, type AccountType } from '@/data/accounting/chartOfAccounts';
 
@@ -44,8 +45,18 @@ export default function AccountCodeSelector({
 }: AccountCodeSelectorProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [dropdownPosition, setDropdownPosition] = useState<{ top: number; left: number; width: number } | null>(null);
+  const [isMounted, setIsMounted] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Track if component is mounted (for portal)
+  useEffect(() => {
+    setIsMounted(true);
+    return () => setIsMounted(false);
+  }, []);
 
   // Filter accounts by type if specified
   const filteredByTypeAccounts = useMemo(() => {
@@ -78,7 +89,11 @@ export default function AccountCodeSelector({
   // Close dropdown when clicking outside
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+      const target = event.target as Node;
+      const isOutsideContainer = containerRef.current && !containerRef.current.contains(target);
+      const isOutsideDropdown = dropdownRef.current && !dropdownRef.current.contains(target);
+
+      if (isOutsideContainer && isOutsideDropdown) {
         setIsOpen(false);
         setSearchQuery('');
       }
@@ -93,6 +108,21 @@ export default function AccountCodeSelector({
       inputRef.current.focus();
     }
   }, [isOpen]);
+
+  // Handle opening dropdown and calculate position
+  const handleToggle = () => {
+    if (disabled) return;
+
+    if (!isOpen && triggerRef.current) {
+      const rect = triggerRef.current.getBoundingClientRect();
+      setDropdownPosition({
+        top: rect.bottom + 4, // 4px gap below trigger
+        left: rect.left,
+        width: Math.max(rect.width, 320), // Min width 320px
+      });
+    }
+    setIsOpen(!isOpen);
+  };
 
   const handleSelect = (code: string) => {
     onChange(code);
@@ -123,11 +153,12 @@ export default function AccountCodeSelector({
     : `truncate ${selectedAccount ? 'text-gray-900' : 'text-gray-500'}`;
 
   return (
-    <div ref={dropdownRef} className={`relative ${className}`}>
+    <div ref={containerRef} className={`relative ${className}`}>
       {/* Trigger Button */}
       <button
+        ref={triggerRef}
         type="button"
-        onClick={() => !disabled && setIsOpen(!isOpen)}
+        onClick={handleToggle}
         disabled={disabled}
         className={buttonClasses}
       >
@@ -148,9 +179,17 @@ export default function AccountCodeSelector({
         </div>
       </button>
 
-      {/* Dropdown */}
-      {isOpen && (
-        <div className="absolute z-50 mt-1 w-80 bg-white border border-gray-200 rounded-lg shadow-lg">
+      {/* Dropdown - rendered via portal to escape overflow clipping */}
+      {isOpen && isMounted && dropdownPosition && createPortal(
+        <div
+          ref={dropdownRef}
+          className="fixed bg-white border border-gray-200 rounded-lg shadow-lg z-[9999]"
+          style={{
+            top: dropdownPosition.top,
+            left: dropdownPosition.left,
+            width: dropdownPosition.width,
+          }}
+        >
           {/* Search Input */}
           <div className="p-2 border-b border-gray-200">
             <div className="relative">
@@ -207,7 +246,8 @@ export default function AccountCodeSelector({
               ))
             )}
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

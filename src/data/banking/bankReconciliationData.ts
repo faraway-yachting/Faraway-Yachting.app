@@ -13,320 +13,23 @@ import {
   MatchingRule,
   SuggestedMatch,
   ReconciliationStats,
-  TransactionType,
 } from './bankReconciliationTypes';
 import { BankAccount } from './types';
 import { Project, getProjectById } from './projects';
 import { Currency } from '../company/types';
 import { generateId } from '@/lib/income/utils';
 
-// Mock bank feed lines
-export const mockBankFeedLines: BankFeedLine[] = [
-  {
-    id: 'bf-001',
-    bankAccountId: 'bank-001',
-    companyId: 'company-001',
-    projectId: 'project-001', // Amadeus
-    currency: 'THB',
-    transactionDate: '2024-12-28',
-    valueDate: '2024-12-28',
-    description: 'TRANSFER FROM CUSTOMER - INV-2024-001',
-    reference: 'TRF202412280001',
-    amount: 150000,
-    runningBalance: 850000,
-    status: 'matched',
-    matchedAmount: 150000,
-    confidenceScore: 95,
-    matches: [
-      {
-        id: 'match-001',
-        bankFeedLineId: 'bf-001',
-        systemRecordType: 'receipt',
-        systemRecordId: 'inv-001',
-        projectId: 'project-001', // Amadeus
-        matchedAmount: 150000,
-        amountDifference: 0,
-        matchedBy: 'admin',
-        matchedAt: '2024-12-28T10:30:00.000Z',
-        matchScore: 95,
-        matchMethod: 'manual',
-        adjustmentRequired: false,
-      },
-    ],
-    importedAt: '2024-12-28T09:00:00.000Z',
-    importedBy: 'system',
-    importSource: 'api',
-  },
-  {
-    id: 'bf-002',
-    bankAccountId: 'bank-001',
-    companyId: 'company-001',
-    currency: 'THB',
-    transactionDate: '2024-12-27',
-    valueDate: '2024-12-27',
-    description: 'MARINA PORT FEES DEC 2024',
-    reference: 'PMT202412270045',
-    amount: -25000,
-    runningBalance: 700000,
-    status: 'missing_record',
-    matchedAmount: 0,
-    confidenceScore: 75,
-    matches: [],
-    importedAt: '2024-12-28T09:00:00.000Z',
-    importedBy: 'system',
-    importSource: 'api',
-    notes: 'Needs to create expense record',
-  },
-  {
-    id: 'bf-003',
-    bankAccountId: 'bank-001',
-    companyId: 'company-001',
-    projectId: 'project-002', // Hot Chilli
-    currency: 'THB',
-    transactionDate: '2024-12-26',
-    valueDate: '2024-12-26',
-    description: 'FUEL SUPPLY - PTT STATION',
-    reference: 'DEB202412260012',
-    amount: -15750,
-    runningBalance: 725000,
-    status: 'needs_review',
-    matchedAmount: 15000,
-    confidenceScore: 60,
-    matches: [
-      {
-        id: 'match-003',
-        bankFeedLineId: 'bf-003',
-        systemRecordType: 'expense',
-        systemRecordId: 'exp-003',
-        projectId: 'project-002', // Hot Chilli
-        matchedAmount: 15000,
-        amountDifference: -750,
-        matchedBy: 'admin',
-        matchedAt: '2024-12-26T14:00:00.000Z',
-        matchScore: 60,
-        matchMethod: 'suggested',
-        adjustmentRequired: true,
-        adjustmentReason: 'Amount difference - VAT or additional fees',
-      },
-    ],
-    importedAt: '2024-12-28T09:00:00.000Z',
-    importedBy: 'system',
-    importSource: 'api',
-  },
-  {
-    id: 'bf-004',
-    bankAccountId: 'bank-001',
-    companyId: 'company-001',
-    currency: 'THB',
-    transactionDate: '2024-12-25',
-    valueDate: '2024-12-25',
-    description: 'TRANSFER TO SAVINGS ACCOUNT',
-    reference: 'TRF202412250078',
-    amount: -100000,
-    runningBalance: 740750,
-    status: 'unmatched',
-    matchedAmount: 0,
-    confidenceScore: 0,
-    matches: [],
-    importedAt: '2024-12-28T09:00:00.000Z',
-    importedBy: 'system',
-    importSource: 'api',
-  },
-  {
-    id: 'bf-005',
-    bankAccountId: 'bank-001',
-    companyId: 'company-001',
-    currency: 'THB',
-    transactionDate: '2024-12-24',
-    valueDate: '2024-12-24',
-    description: 'MONTHLY BANK FEE',
-    reference: 'FEE202412',
-    amount: -350,
-    runningBalance: 840750,
-    status: 'ignored',
-    matchedAmount: 0,
-    matches: [],
-    importedAt: '2024-12-28T09:00:00.000Z',
-    importedBy: 'system',
-    importSource: 'api',
-    ignoredBy: 'admin',
-    ignoredAt: '2024-12-28T11:00:00.000Z',
-    ignoredReason: 'Recurring bank fee - auto-recorded',
-  },
-  {
-    id: 'bf-006',
-    bankAccountId: 'bank-002',
-    companyId: 'company-001',
-    currency: 'USD',
-    transactionDate: '2024-12-23',
-    valueDate: '2024-12-23',
-    description: 'WIRE TRANSFER - YACHT PARTS ORDER',
-    reference: 'WIRE202412230033',
-    amount: -5000,
-    runningBalance: 25000,
-    status: 'partially_matched',
-    matchedAmount: 4500,
-    confidenceScore: 85,
-    matches: [
-      {
-        id: 'match-006',
-        bankFeedLineId: 'bf-006',
-        systemRecordType: 'expense',
-        systemRecordId: 'exp-006',
-        matchedAmount: 4500,
-        amountDifference: -500,
-        matchedBy: 'admin',
-        matchedAt: '2024-12-23T16:00:00.000Z',
-        matchScore: 85,
-        matchMethod: 'manual',
-        adjustmentRequired: true,
-        adjustmentReason: 'Wire transfer fee not included in original invoice',
-      },
-    ],
-    importedAt: '2024-12-28T09:00:00.000Z',
-    importedBy: 'system',
-    importSource: 'api',
-  },
-];
+// Bank feed lines storage (empty - no mock data)
+export const mockBankFeedLines: BankFeedLine[] = [];
 
-// Mock bank account coverage
-export const mockBankAccountCoverage: BankAccountCoverage[] = [
-  {
-    bankAccountId: 'bank-001',
-    bankAccountName: 'Kasikorn Bank - THB Operating',
-    companyId: 'company-001',
-    companyName: 'Faraway Yachting',
-    currency: 'THB',
-    lastImportDate: '2024-12-28T09:00:00.000Z',
-    lastImportSource: 'api',
-    feedStatus: 'active',
-    totalLinesInRange: 12,
-    matchedLines: 8,
-    unmatchedLines: 2,
-    missingRecordLines: 2,
-    bankNetMovement: -150000,
-    systemNetMovement: -145000,
-    netDifference: -5000,
-    reconciledPercentage: 83.33,
-  },
-  {
-    bankAccountId: 'bank-002',
-    bankAccountName: 'Bangkok Bank - USD',
-    companyId: 'company-001',
-    companyName: 'Faraway Yachting',
-    currency: 'USD',
-    lastImportDate: '2024-12-28T09:00:00.000Z',
-    lastImportSource: 'api',
-    feedStatus: 'active',
-    totalLinesInRange: 8,
-    matchedLines: 6,
-    unmatchedLines: 1,
-    missingRecordLines: 1,
-    bankNetMovement: -12000,
-    systemNetMovement: -11500,
-    netDifference: -500,
-    reconciledPercentage: 95.83,
-  },
-  {
-    bankAccountId: 'bank-003',
-    bankAccountName: 'SCB - Project Account',
-    companyId: 'company-002',
-    companyName: 'Blue Horizon Yachts',
-    currency: 'THB',
-    lastImportDate: '2024-12-20T09:00:00.000Z',
-    lastImportSource: 'csv',
-    feedStatus: 'manual',
-    totalLinesInRange: 15,
-    matchedLines: 10,
-    unmatchedLines: 3,
-    missingRecordLines: 2,
-    bankNetMovement: 250000,
-    systemNetMovement: 248000,
-    netDifference: 2000,
-    reconciledPercentage: 66.67,
-  },
-];
+// Bank account coverage storage (empty - no mock data)
+export const mockBankAccountCoverage: BankAccountCoverage[] = [];
 
-// Mock suggested matches
-export const mockSuggestedMatches: Record<string, SuggestedMatch[]> = {
-  'bf-002': [
-    {
-      systemRecordType: 'expense',
-      systemRecordId: 'exp-draft-001',
-      counterparty: 'Royal Phuket Marina',
-      reference: 'Port Fees - December',
-      projectId: 'proj-001',
-      projectName: 'M/Y Azure Spirit',
-      amount: 25000,
-      date: '2024-12-27',
-      description: 'Monthly port fees',
-      matchScore: 75,
-      matchReasons: ['amount_exact', 'description_similar', 'date_exact'],
-    },
-  ],
-  'bf-004': [
-    {
-      systemRecordType: 'transfer',
-      systemRecordId: 'transfer-001',
-      reference: 'Internal Transfer',
-      amount: 100000,
-      date: '2024-12-25',
-      description: 'Transfer to savings',
-      matchScore: 90,
-      matchReasons: ['amount_exact', 'date_exact', 'description_match'],
-    },
-  ],
-};
+// Suggested matches storage (empty - no mock data)
+export const mockSuggestedMatches: Record<string, SuggestedMatch[]> = {};
 
-// Mock matching rules
-export const mockMatchingRules: MatchingRule[] = [
-  {
-    id: 'rule-001',
-    name: 'Marina Port Fees',
-    description: 'Auto-suggest port fees for marina transactions',
-    enabled: true,
-    priority: 10,
-    descriptionContains: ['MARINA', 'PORT', 'BERTH'],
-    amountSign: 'debit',
-    suggestType: 'expense',
-    suggestCategory: 'Port Fees',
-    autoMatchIfConfidence: 85,
-    createdBy: 'admin',
-    createdAt: '2024-01-15T10:00:00.000Z',
-    lastUsed: '2024-12-27T14:30:00.000Z',
-    useCount: 45,
-  },
-  {
-    id: 'rule-002',
-    name: 'Customer Payments',
-    description: 'Match customer invoice payments',
-    enabled: true,
-    priority: 20,
-    descriptionContains: ['TRANSFER FROM', 'CUSTOMER', 'INV-'],
-    amountSign: 'credit',
-    suggestType: 'receipt',
-    autoMatchIfConfidence: 90,
-    createdBy: 'admin',
-    createdAt: '2024-01-15T10:00:00.000Z',
-    lastUsed: '2024-12-28T10:30:00.000Z',
-    useCount: 128,
-  },
-  {
-    id: 'rule-003',
-    name: 'Fuel Expenses',
-    description: 'Auto-categorize fuel purchases',
-    enabled: true,
-    priority: 15,
-    descriptionContains: ['PTT', 'FUEL', 'DIESEL'],
-    amountSign: 'debit',
-    suggestType: 'expense',
-    suggestCategory: 'Fuel & Oil',
-    createdBy: 'admin',
-    createdAt: '2024-01-15T10:00:00.000Z',
-    lastUsed: '2024-12-26T14:00:00.000Z',
-    useCount: 67,
-  },
-];
+// Matching rules storage (empty - no mock data)
+export const mockMatchingRules: MatchingRule[] = [];
 
 // Utility functions
 export function getBankFeedLinesByFilter(
@@ -529,79 +232,14 @@ export interface ExpectedBankMovementRecord {
  * @returns Array of expected bank movement records
  */
 export function getExpectedBankMovement(
-  dateFrom: string,
-  dateTo: string,
-  companyId?: string,
-  projectId?: string
+  _dateFrom: string,
+  _dateTo: string,
+  _companyId?: string,
+  _projectId?: string
 ): ExpectedBankMovementRecord[] {
   // TODO: In production, fetch from API
-  // For now, return mock data showing records marked as paid but not in bank
-
-  const mockRecords: ExpectedBankMovementRecord[] = [
-    {
-      id: 'inv-999',
-      type: 'invoice',
-      reference: 'INV-2024-999',
-      date: '2024-12-20',
-      counterparty: 'Customer ABC',
-      amount: 50000,
-      currency: 'THB',
-      companyId: 'company-001',
-      companyName: 'Faraway Yachting',
-      projectId: 'project-001',
-      projectName: 'Amadeus',
-      paidDate: '2024-12-20',
-      expectedInBankDate: '2024-12-21',
-      notes: 'Marked as paid but not in bank feed',
-    },
-    {
-      id: 'exp-888',
-      type: 'expense',
-      reference: 'EXP-2024-888',
-      date: '2024-12-18',
-      counterparty: 'Supplier XYZ',
-      amount: -25000,
-      currency: 'THB',
-      companyId: 'company-001',
-      companyName: 'Faraway Yachting',
-      projectId: 'project-002',
-      projectName: 'Hot Chilli',
-      paidDate: '2024-12-18',
-      expectedInBankDate: '2024-12-19',
-      notes: 'Payment confirmed but not in bank statement',
-    },
-    {
-      id: 'inv-777',
-      type: 'invoice',
-      reference: 'INV-2024-777',
-      date: '2024-12-15',
-      counterparty: 'Client DEF',
-      amount: 75000,
-      currency: 'THB',
-      companyId: 'company-001',
-      companyName: 'Faraway Yachting',
-      paidDate: '2024-12-15',
-      expectedInBankDate: '2024-12-16',
-      notes: 'Customer confirmed payment',
-    },
-  ];
-
-  // Filter by date range
-  let filtered = mockRecords.filter(record => {
-    return record.date >= dateFrom && record.date <= dateTo;
-  });
-
-  // Filter by company if specified
-  if (companyId) {
-    filtered = filtered.filter(r => r.companyId === companyId);
-  }
-
-  // Filter by project if specified
-  if (projectId) {
-    filtered = filtered.filter(r => r.projectId === projectId);
-  }
-
-  return filtered;
+  // Returns empty array - no mock data
+  return [];
 }
 
 // ============================================================================
@@ -850,4 +488,28 @@ export function applyAutoMatches(matches: BankMatch[]): void {
       updateMatchingRuleUsage(match.ruleId);
     }
   }
+}
+
+/**
+ * Add imported bank feed lines from CSV
+ */
+export function addImportedBankFeedLines(lines: BankFeedLine[]): number {
+  // Filter out duplicates based on date + amount + description
+  const existingKeys = new Set(
+    mockBankFeedLines.map(line =>
+      `${line.transactionDate}|${line.amount}|${line.bankAccountId}|${line.description.substring(0, 50)}`
+    )
+  );
+
+  let addedCount = 0;
+  for (const line of lines) {
+    const key = `${line.transactionDate}|${line.amount}|${line.bankAccountId}|${line.description.substring(0, 50)}`;
+    if (!existingKeys.has(key)) {
+      mockBankFeedLines.push(line);
+      existingKeys.add(key);
+      addedCount++;
+    }
+  }
+
+  return addedCount;
 }

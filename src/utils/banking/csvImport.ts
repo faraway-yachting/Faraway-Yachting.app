@@ -65,6 +65,19 @@ export async function parseCSV(
       };
     }
 
+    // Extract all date values to detect format
+    const dateColumnIndex = headers.findIndex(
+      h => h.toLowerCase() === columnMapping.dateColumn.toLowerCase()
+    );
+    const allDateStrings: string[] = [];
+    for (let i = 1; i < lines.length; i++) {
+      const cells = parseCSVLine(lines[i]);
+      if (dateColumnIndex >= 0 && cells[dateColumnIndex]) {
+        allDateStrings.push(cells[dateColumnIndex]);
+      }
+    }
+    const detectedDateFormat = detectDateFormat(allDateStrings);
+
     // Parse data rows
     const bankLines: BankFeedLine[] = [];
     const errors: string[] = [];
@@ -86,7 +99,8 @@ export async function parseCSV(
           bankAccountId,
           companyId,
           currency,
-          rowNum
+          rowNum,
+          detectedDateFormat
         );
 
         // Validate the parsed line
@@ -168,16 +182,17 @@ function parseRow(
   bankAccountId: string,
   companyId: string,
   currency: Currency,
-  rowNum: number
+  rowNum: number,
+  dateFormat: DateFormat = 'DMY'
 ): BankFeedLine {
   const getCell = (columnName: string): string => {
     const index = headers.findIndex(h => h.toLowerCase() === columnName.toLowerCase());
     return index >= 0 ? cells[index] : '';
   };
 
-  // Parse date
+  // Parse date using detected format
   const dateStr = getCell(mapping.dateColumn);
-  const transactionDate = parseDate(dateStr);
+  const transactionDate = parseDate(dateStr, dateFormat);
   if (!transactionDate) {
     throw new Error(`Invalid date format: ${dateStr}`);
   }
@@ -224,33 +239,93 @@ function parseRow(
 }
 
 /**
- * Parse date string to ISO format
+ * Date format type for parsing
  */
-function parseDate(dateStr: string): string | null {
+type DateFormat = 'ISO' | 'DMY' | 'MDY';
+
+/**
+ * Extract date part from datetime string (strip time portion)
+ * Handles: "2025-12-31 16:19:53" -> "2025-12-31"
+ *          "31/12/2025 16:19:53" -> "31/12/2025"
+ */
+function extractDatePart(dateTimeStr: string): string {
+  if (!dateTimeStr) return '';
+  // Split by space and take the first part (date)
+  // Also handles T separator for ISO datetime (2025-12-31T16:19:53)
+  return dateTimeStr.trim().split(/[\sT]/)[0];
+}
+
+/**
+ * Auto-detect date format by analyzing all dates in the CSV
+ * - If any date has first number > 12, must be DD/MM/YYYY
+ * - If any date has second number > 12, must be MM/DD/YYYY
+ * - If year comes first, it's ISO format
+ * - Default to DD/MM/YYYY (Thai/European standard)
+ */
+function detectDateFormat(dateStrings: string[]): DateFormat {
+  let hasValueOver12InFirst = false;
+  let hasValueOver12InSecond = false;
+
+  for (const dateStr of dateStrings) {
+    if (!dateStr) continue;
+    // Extract date part only (strip time if present)
+    const datePart = extractDatePart(dateStr);
+
+    // Check for ISO format (year first)
+    if (datePart.match(/^\d{4}[\/\-]\d{1,2}[\/\-]\d{1,2}$/)) {
+      return 'ISO';
+    }
+
+    // Check DD/MM/YYYY or MM/DD/YYYY format
+    const match = datePart.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+    if (match) {
+      const first = parseInt(match[1], 10);
+      const second = parseInt(match[2], 10);
+
+      if (first > 12) hasValueOver12InFirst = true;
+      if (second > 12) hasValueOver12InSecond = true;
+    }
+  }
+
+  // If first position has value > 12, must be DD/MM/YYYY (day can't be > 12 in MM position)
+  if (hasValueOver12InFirst) return 'DMY';
+
+  // If second position has value > 12, must be MM/DD/YYYY (month can't be > 12)
+  if (hasValueOver12InSecond) return 'MDY';
+
+  // Default to DD/MM/YYYY (Thai/European standard)
+  return 'DMY';
+}
+
+/**
+ * Parse date string to ISO format using detected format
+ * Handles datetime strings by extracting date part only
+ */
+function parseDate(dateStr: string, format: DateFormat = 'DMY'): string | null {
   if (!dateStr) return null;
 
-  // Try various date formats
-  const formats = [
-    // DD/MM/YYYY
-    /^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/,
-    // MM/DD/YYYY
-    /^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/,
-    // YYYY-MM-DD
-    /^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})$/,
-  ];
+  // Extract date part only (strip time if present)
+  const datePart = extractDatePart(dateStr);
 
-  // Try YYYY-MM-DD first (ISO format)
-  const isoMatch = dateStr.match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})$/);
+  // ISO format: YYYY-MM-DD
+  const isoMatch = datePart.match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})$/);
   if (isoMatch) {
     const [, year, month, day] = isoMatch;
     return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
   }
 
-  // Try DD/MM/YYYY (common in Thailand, Europe)
-  const ddmmMatch = dateStr.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
-  if (ddmmMatch) {
-    const [, day, month, year] = ddmmMatch;
-    return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+  // DD/MM/YYYY or MM/DD/YYYY format
+  const match = datePart.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+  if (match) {
+    const [, first, second, year] = match;
+
+    if (format === 'DMY') {
+      // DD/MM/YYYY - first is day, second is month
+      return `${year}-${second.padStart(2, '0')}-${first.padStart(2, '0')}`;
+    } else if (format === 'MDY') {
+      // MM/DD/YYYY - first is month, second is day
+      return `${year}-${first.padStart(2, '0')}-${second.padStart(2, '0')}`;
+    }
   }
 
   return null;

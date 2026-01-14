@@ -22,8 +22,14 @@ interface QuotationPrintViewProps {
     dateCreated: string;
     validUntil: string;
     projectId?: string;
+    // Charter information (optional)
+    boatId?: string;
+    charterType?: string;
     charterPeriodFrom?: string;
     charterPeriodTo?: string;
+    charterDateFrom?: string;
+    charterDateTo?: string;
+    charterTime?: string;
     lineItems: LineItem[];
     pricingType: PricingType;
     subtotal: number;

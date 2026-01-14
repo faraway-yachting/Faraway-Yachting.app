@@ -3,7 +3,8 @@
 import { useParams, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import InvoiceForm from '@/components/income/InvoiceForm';
-import { getInvoiceById } from '@/data/income/invoices';
+import { invoicesApi } from '@/lib/supabase/api/invoices';
+import { dbInvoiceToFrontend } from '@/lib/supabase/transforms';
 import type { Invoice } from '@/data/income/types';
 
 export default function EditInvoicePage() {
@@ -14,16 +15,26 @@ export default function EditInvoicePage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const id = params.id as string;
-    if (id) {
-      const found = getInvoiceById(id);
-      if (found) {
-        setInvoice(found);
-      } else {
-        setError('Invoice not found');
+    const fetchInvoice = async () => {
+      const id = params.id as string;
+      if (id) {
+        try {
+          const result = await invoicesApi.getByIdWithLineItems(id);
+          if (result) {
+            const transformed = dbInvoiceToFrontend(result, result.line_items);
+            setInvoice(transformed);
+          } else {
+            setError('Invoice not found');
+          }
+        } catch (err) {
+          console.error('Error fetching invoice:', err);
+          setError('Failed to load invoice');
+        }
       }
-    }
-    setLoading(false);
+      setLoading(false);
+    };
+
+    fetchInvoice();
   }, [params.id]);
 
   if (loading) {

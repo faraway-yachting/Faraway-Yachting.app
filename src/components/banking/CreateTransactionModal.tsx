@@ -1,14 +1,21 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { X, Info, Plus } from 'lucide-react';
+import { useState, useEffect, useMemo } from 'react';
+import { X, Info, Plus, AlertCircle } from 'lucide-react';
 import {
   BankFeedLine,
   BankMatch,
   TransactionType,
 } from '@/data/banking/bankReconciliationTypes';
-import { getAllBankAccounts } from '@/data/banking/bankAccounts';
-import { getAllProjects } from '@/data/banking/projects';
+import { BankAccount } from '@/data/banking/types';
+import { expensesApi } from '@/lib/supabase/api/expenses';
+import { receiptsApi } from '@/lib/supabase/api/receipts';
+import { journalEntriesApi, chartOfAccountsApi } from '@/lib/supabase/api/journalEntries';
+import ClientSelector from '@/components/income/ClientSelector';
+import { VendorSelector } from '@/components/expenses/VendorSelector';
+import type { Database } from '@/lib/supabase/database.types';
+
+type ChartOfAccount = Database['public']['Tables']['chart_of_accounts']['Row'];
 
 interface CreateTransactionModalProps {
   isOpen: boolean;
@@ -16,22 +23,16 @@ interface CreateTransactionModalProps {
   transactionType: TransactionType | null;
   selectedLine: BankFeedLine | undefined;
   onCreateMatch: (match: Partial<BankMatch>) => void;
+  allBankAccounts: BankAccount[];
+  allProjects: { id: string; name: string; companyId: string; status: 'active' | 'completed' | 'archived' }[];
 }
 
-// Utility function to generate placeholder IDs
-function generatePlaceholderId(type: TransactionType): string {
-  const prefix = {
-    'receipt': 'RCP',
-    'expense': 'EXP',
-    'transfer': 'TRF',
-    'owner_contribution': 'OWN',
-    'bank_fee': 'FEE',
-    'interest': 'INT',
-    'refund': 'REF',
-  };
-  const date = new Date().toISOString().split('T')[0].replace(/-/g, '');
-  const random = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
-  return `${prefix[type]}-${date}-${random}`;
+// Utility function to generate document numbers
+function generateDocumentNumber(prefix: string): string {
+  const now = new Date();
+  const yymm = `${String(now.getFullYear()).slice(2)}${String(now.getMonth() + 1).padStart(2, '0')}`;
+  const random = String(Math.floor(Math.random() * 10000)).padStart(4, '0');
+  return `${prefix}-${yymm}${random}`;
 }
 
 // Utility function to get type-specific Tailwind classes
@@ -90,37 +91,10 @@ function getTypeClasses(type: TransactionType | null) {
   }
 }
 
-// GL Account options
-const revenueAccounts = [
-  { code: '4000', name: 'Sales Revenue' },
-  { code: '4100', name: 'Service Revenue' },
-  { code: '4200', name: 'Charter Revenue' },
-  { code: '4900', name: 'Other Revenue' },
-];
-
-const expenseAccounts = [
-  { code: '6000', name: 'Operating Expenses' },
-  { code: '6100', name: 'Fuel Costs' },
-  { code: '6200', name: 'Marina Fees' },
-  { code: '6300', name: 'Maintenance & Repairs' },
-  { code: '6400', name: 'Supplies' },
-  { code: '6500', name: 'Professional Services' },
-  { code: '6900', name: 'Other Expenses' },
-];
-
-const equityAccounts = [
-  { code: '3100', name: 'Owner Capital' },
-  { code: '3200', name: 'Owner Drawings' },
-];
-
-const expenseCategories = [
-  'Fuel',
-  'Marina Fees',
-  'Maintenance',
-  'Supplies',
-  'Professional Services',
-  'Other',
-];
+// Helper to filter accounts by type
+function filterAccountsByType(accounts: ChartOfAccount[], types: string[]): ChartOfAccount[] {
+  return accounts.filter(acc => acc.is_active && types.includes(acc.account_type));
+}
 
 export function CreateTransactionModal({
   isOpen,
@@ -128,26 +102,63 @@ export function CreateTransactionModal({
   transactionType,
   selectedLine,
   onCreateMatch,
+  allBankAccounts,
+  allProjects,
 }: CreateTransactionModalProps) {
   // Form state
   const [formData, setFormData] = useState<Record<string, any>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
-  // Get available bank accounts and projects
-  const allBankAccounts = getAllBankAccounts();
-  const allProjects = getAllProjects();
+  // Chart of Accounts state
+  const [chartOfAccounts, setChartOfAccounts] = useState<ChartOfAccount[]>([]);
+  const [accountsLoading, setAccountsLoading] = useState(true);
 
-  // Filter projects by selected line's company
-  const availableProjects = selectedLine
-    ? allProjects.filter((p) => p.companyId === selectedLine.companyId && p.status === 'active')
-    : [];
+  // Fetch Chart of Accounts on mount
+  useEffect(() => {
+    const fetchAccounts = async () => {
+      try {
+        const accounts = await chartOfAccountsApi.getAll();
+        setChartOfAccounts(accounts);
+      } catch (error) {
+        console.error('Failed to fetch chart of accounts:', error);
+      } finally {
+        setAccountsLoading(false);
+      }
+    };
+    fetchAccounts();
+  }, []);
 
-  // Filter bank accounts for transfers (same company, excluding current account)
+  // Filtered accounts by type (memoized to prevent infinite loops in useEffect)
+  const revenueAccounts = useMemo(
+    () => filterAccountsByType(chartOfAccounts, ['Revenue']),
+    [chartOfAccounts]
+  );
+  const expenseAccounts = useMemo(
+    () => filterAccountsByType(chartOfAccounts, ['Expense']),
+    [chartOfAccounts]
+  );
+  const equityAccounts = useMemo(
+    () => filterAccountsByType(chartOfAccounts, ['Equity']),
+    [chartOfAccounts]
+  );
+
+  // Get the bank account for the selected line
+  const sourceBankAccount = selectedLine
+    ? allBankAccounts.find((acc) => acc.id === selectedLine.bankAccountId)
+    : undefined;
+
+  // Determine the effective company ID (prefer bank account's company, fallback to line's company)
+  const effectiveCompanyId = sourceBankAccount?.companyId || selectedLine?.companyId;
+
+  // Show ALL active/completed projects in the system (not filtered by company)
+  // Users need to be able to assign any project to bank transactions
+  const availableProjects = allProjects.filter((p) => p.status !== 'archived');
+
+  // Filter bank accounts for transfers (exclude current account, but show all companies)
   const availableTransferAccounts = selectedLine
-    ? allBankAccounts.filter(
-        (acc) => acc.companyId === selectedLine.companyId && acc.id !== selectedLine.bankAccountId
-      )
+    ? allBankAccounts.filter((acc) => acc.id !== selectedLine.bankAccountId)
     : [];
 
   // Calculate remaining amount
@@ -167,10 +178,13 @@ export function CreateTransactionModal({
 
       // Type-specific defaults
       if (transactionType === 'receipt') {
-        defaultData.glAccount = '4000';
+        // Default to first revenue account if available
+        const defaultRevenue = revenueAccounts.find(a => a.code.startsWith('4')) || revenueAccounts[0];
+        defaultData.glAccount = defaultRevenue?.code || '';
       } else if (transactionType === 'expense') {
-        defaultData.glAccount = '6000';
-        defaultData.expenseCategory = 'Other';
+        // Default to first expense account if available
+        const defaultExpense = expenseAccounts.find(a => a.code.startsWith('6')) || expenseAccounts[0];
+        defaultData.glAccount = defaultExpense?.code || '';
       } else if (transactionType === 'transfer') {
         defaultData.fromAccount = selectedLine.bankAccountId;
         defaultData.transferType = 'internal';
@@ -178,14 +192,20 @@ export function CreateTransactionModal({
         // Auto-select type based on amount sign
         const isContribution = selectedLine.amount > 0;
         defaultData.ownerType = isContribution ? 'contribution' : 'draw';
-        defaultData.glAccount = isContribution ? '3100' : '3200';
+        // Find equity accounts by code pattern
+        const capitalAccount = equityAccounts.find(a => a.code.startsWith('31'));
+        const drawingsAccount = equityAccounts.find(a => a.code.startsWith('32'));
+        defaultData.glAccount = isContribution
+          ? (capitalAccount?.code || equityAccounts[0]?.code || '')
+          : (drawingsAccount?.code || equityAccounts[0]?.code || '');
         defaultData.taxTreatment = 'tbd';
       }
 
       setFormData(defaultData);
       setErrors({});
+      setSubmitError(null);
     }
-  }, [isOpen, selectedLine, transactionType, remainingAmount]);
+  }, [isOpen, selectedLine, transactionType, remainingAmount, revenueAccounts, expenseAccounts, equityAccounts]);
 
   if (!isOpen || !selectedLine || !transactionType) return null;
 
@@ -202,9 +222,13 @@ export function CreateTransactionModal({
 
     // Special handling for owner type change - update GL account
     if (field === 'ownerType' && transactionType === 'owner_contribution') {
+      const capitalAccount = equityAccounts.find(a => a.code.startsWith('31'));
+      const drawingsAccount = equityAccounts.find(a => a.code.startsWith('32'));
       setFormData((prev) => ({
         ...prev,
-        glAccount: value === 'contribution' ? '3100' : '3200',
+        glAccount: value === 'contribution'
+          ? (capitalAccount?.code || equityAccounts[0]?.code || '')
+          : (drawingsAccount?.code || equityAccounts[0]?.code || ''),
       }));
     }
   };
@@ -222,30 +246,30 @@ export function CreateTransactionModal({
     if (!formData.date) {
       newErrors.date = 'Date is required';
     }
-    if (new Date(formData.date) > new Date()) {
-      newErrors.date = 'Date cannot be in the future';
-    }
     if (!formData.description || formData.description.trim() === '') {
       newErrors.description = 'Description is required';
     }
 
     // Type-specific validations
     if (transactionType === 'receipt') {
-      if (!formData.counterparty || formData.counterparty.trim() === '') {
-        newErrors.counterparty = 'Customer name is required';
+      if (!formData.customerId || !formData.counterparty) {
+        newErrors.counterparty = 'Please select a customer';
       }
       if (!formData.glAccount) {
         newErrors.glAccount = 'GL Account is required';
+      }
+      if (!formData.projectId) {
+        newErrors.projectId = 'Project is required';
       }
     } else if (transactionType === 'expense') {
-      if (!formData.supplier || formData.supplier.trim() === '') {
-        newErrors.supplier = 'Supplier name is required';
+      if (!formData.vendorId || !formData.supplier) {
+        newErrors.supplier = 'Please select a vendor';
       }
       if (!formData.glAccount) {
         newErrors.glAccount = 'GL Account is required';
       }
-      if (!formData.expenseCategory) {
-        newErrors.expenseCategory = 'Expense category is required';
+      if (!formData.projectId) {
+        newErrors.projectId = 'Project is required';
       }
     } else if (transactionType === 'transfer') {
       if (!formData.toAccount) {
@@ -277,28 +301,219 @@ export function CreateTransactionModal({
     return Object.keys(newErrors).length === 0;
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!validateForm()) return;
 
     setIsSubmitting(true);
+    setSubmitError(null);
 
-    // Create match object
-    const match: Partial<BankMatch> = {
-      bankFeedLineId: selectedLine.id,
-      systemRecordType: transactionType,
-      systemRecordId: generatePlaceholderId(transactionType),
-      projectId: formData.projectId,
-      matchedAmount: formData.amount,
-      amountDifference: 0,
-      matchedBy: 'current-user', // TODO: Replace with actual auth
-      matchedAt: new Date().toISOString(),
-      matchScore: 100,
-      matchMethod: 'manual',
-      adjustmentRequired: false,
-    };
+    try {
+      let createdRecordId: string = '';
+      let createdRecordType: string = transactionType;
 
-    onCreateMatch(match);
-    setIsSubmitting(false);
+      if (transactionType === 'expense') {
+        // Create real expense record
+        const expenseNumber = generateDocumentNumber('EXP');
+
+        const expense = await expensesApi.create(
+          {
+            company_id: effectiveCompanyId!,
+            expense_number: expenseNumber,
+            vendor_id: formData.vendorId || null,
+            vendor_name: formData.supplier,
+            expense_date: formData.date,
+            subtotal: formData.amount,
+            vat_amount: 0, // Simple expense from bank reconciliation - no VAT
+            total_amount: formData.amount,
+            wht_amount: 0,
+            net_payable: formData.amount,
+            payment_status: 'paid', // Already paid since it's from bank
+            status: 'approved',
+            currency: selectedLine.currency,
+            notes: `Bank Reference: ${formData.bankReference || ''}\n${formData.description}`,
+          },
+          [
+            {
+              expense_id: '', // Will be set by API
+              project_id: formData.projectId,
+              description: formData.description,
+              quantity: 1,
+              unit_price: formData.amount,
+              tax_rate: 0,
+              wht_rate: '0',
+              amount: formData.amount,
+              account_code: formData.glAccount,
+            },
+          ]
+        );
+
+        createdRecordId = expense.id;
+
+        // Create payment record for the expense
+        await expensesApi.addPayment({
+          expense_id: expense.id,
+          payment_date: formData.date,
+          amount: formData.amount,
+          paid_from: selectedLine.bankAccountId,
+          reference: formData.bankReference || selectedLine.reference || '',
+        });
+
+      } else if (transactionType === 'receipt') {
+        // Create real receipt record
+        const receiptNumber = generateDocumentNumber('REC');
+
+        const receipt = await receiptsApi.create(
+          {
+            company_id: effectiveCompanyId!,
+            receipt_number: receiptNumber,
+            client_id: formData.customerId || null,
+            client_name: formData.counterparty,
+            receipt_date: formData.date,
+            reference: formData.invoiceRef || formData.bankReference || '',
+            subtotal: formData.amount,
+            tax_amount: 0, // Simple receipt from bank reconciliation - no VAT
+            total_amount: formData.amount,
+            total_received: formData.amount,
+            currency: selectedLine.currency,
+            status: 'paid',
+            notes: `Bank Reference: ${formData.bankReference || ''}\n${formData.description}`,
+          },
+          [
+            {
+              receipt_id: '', // Will be set by API
+              project_id: formData.projectId,
+              description: formData.description,
+              quantity: 1,
+              unit_price: formData.amount,
+              tax_rate: 0,
+              wht_rate: '0',
+              amount: formData.amount,
+            },
+          ]
+        );
+
+        createdRecordId = receipt.id;
+
+        // Create payment record for the receipt
+        await receiptsApi.addPaymentRecord({
+          receipt_id: receipt.id,
+          payment_date: formData.date,
+          amount: formData.amount,
+          received_at: selectedLine.bankAccountId,
+          remark: formData.bankReference || selectedLine.reference || '',
+        });
+
+      } else if (transactionType === 'transfer') {
+        // Create journal entry for bank transfer
+        const toAccount = allBankAccounts.find((a) => a.id === formData.toAccount);
+        const fromAccount = sourceBankAccount;
+
+        if (!fromAccount || !toAccount) {
+          throw new Error('Bank accounts not found');
+        }
+
+        const journalEntry = await journalEntriesApi.create({
+          company_id: effectiveCompanyId!,
+          entry_date: formData.date,
+          reference_number: generateDocumentNumber('TRF'),
+          description: `Bank Transfer: ${fromAccount.accountName} → ${toAccount.accountName}\n${formData.description}`,
+          status: 'draft',
+          total_debit: formData.amount,
+          total_credit: formData.amount,
+          source_document_type: 'bank_transfer',
+        }, [
+          {
+            account_code: toAccount.glAccountCode || '1010',
+            description: `Transfer from ${fromAccount.accountName}`,
+            entry_type: 'debit',
+            amount: formData.amount,
+          },
+          {
+            account_code: fromAccount.glAccountCode || '1010',
+            description: `Transfer to ${toAccount.accountName}`,
+            entry_type: 'credit',
+            amount: formData.amount,
+          },
+        ]);
+
+        createdRecordId = journalEntry.id;
+        createdRecordType = 'transfer';
+
+      } else if (transactionType === 'owner_contribution') {
+        // Create journal entry for owner contribution/draw
+        const bankGlCode = sourceBankAccount?.glAccountCode || '1010';
+        const equityGlCode = formData.glAccount;
+        const isContribution = formData.ownerType === 'contribution';
+
+        const journalEntry = await journalEntriesApi.create({
+          company_id: effectiveCompanyId!,
+          entry_date: formData.date,
+          reference_number: generateDocumentNumber(isContribution ? 'OWN' : 'DRW'),
+          description: `${isContribution ? 'Owner Capital Contribution' : 'Owner Draw'}: ${formData.ownerName}\n${formData.description}`,
+          status: 'draft',
+          total_debit: formData.amount,
+          total_credit: formData.amount,
+          source_document_type: 'owner_transaction',
+        }, isContribution
+          ? [
+              // Capital contribution: Debit Bank, Credit Owner Capital
+              {
+                account_code: bankGlCode,
+                description: `Capital contribution from ${formData.ownerName}`,
+                entry_type: 'debit',
+                amount: formData.amount,
+              },
+              {
+                account_code: equityGlCode,
+                description: `Capital contribution from ${formData.ownerName}`,
+                entry_type: 'credit',
+                amount: formData.amount,
+              },
+            ]
+          : [
+              // Owner draw: Debit Owner Drawings, Credit Bank
+              {
+                account_code: equityGlCode,
+                description: `Owner draw to ${formData.ownerName}`,
+                entry_type: 'debit',
+                amount: formData.amount,
+              },
+              {
+                account_code: bankGlCode,
+                description: `Owner draw to ${formData.ownerName}`,
+                entry_type: 'credit',
+                amount: formData.amount,
+              },
+            ]
+        );
+
+        createdRecordId = journalEntry.id;
+        createdRecordType = 'owner_contribution';
+      }
+
+      // Create the match record to link bank line to created record
+      const match: Partial<BankMatch> = {
+        bankFeedLineId: selectedLine.id,
+        systemRecordType: createdRecordType as TransactionType,
+        systemRecordId: createdRecordId,
+        projectId: formData.projectId,
+        matchedAmount: formData.amount,
+        amountDifference: 0,
+        matchedBy: 'current-user', // TODO: Replace with actual auth
+        matchedAt: new Date().toISOString(),
+        matchScore: 100,
+        matchMethod: 'manual',
+        adjustmentRequired: false,
+      };
+
+      onCreateMatch(match);
+      setIsSubmitting(false);
+
+    } catch (error) {
+      console.error('Failed to create transaction:', error);
+      setSubmitError(error instanceof Error ? error.message : 'Failed to create transaction. Please try again.');
+      setIsSubmitting(false);
+    }
   };
 
   const formatAmount = (amount: number, currency: string) => {
@@ -340,7 +555,7 @@ export function CreateTransactionModal({
             <div>
               <h2 className={`text-lg font-semibold ${typeClasses.headerText}`}>{getModalTitle()}</h2>
               <p className="text-sm text-gray-600 mt-1">
-                Match bank transaction to new {transactionType.replace('_', ' ')} record
+                Create real {transactionType?.replace('_', ' ')} record linked to bank transaction
               </p>
             </div>
             <button
@@ -366,6 +581,16 @@ export function CreateTransactionModal({
             </div>
           </div>
 
+          {/* Error Message */}
+          {submitError && (
+            <div className="px-6 py-3 bg-red-50 border-b border-red-100">
+              <div className="flex items-center gap-2 text-red-700">
+                <AlertCircle className="h-4 w-4" />
+                <p className="text-sm">{submitError}</p>
+              </div>
+            </div>
+          )}
+
           {/* Scrollable Content */}
           <div className="flex-1 overflow-y-auto px-6 py-4">
             {/* Render form based on transaction type */}
@@ -376,12 +601,13 @@ export function CreateTransactionModal({
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     Customer Name <span className="text-red-500">*</span>
                   </label>
-                  <input
-                    type="text"
-                    value={formData.counterparty || ''}
-                    onChange={(e) => handleChange('counterparty', e.target.value)}
-                    placeholder="e.g., John Doe, Yacht Charter Co."
-                    className={`w-full px-3 py-2 border ${errors.counterparty ? 'border-red-300' : 'border-gray-300'} rounded-lg focus:ring-2 focus:border-transparent ${typeClasses.focus}`}
+                  <ClientSelector
+                    value={formData.customerId || ''}
+                    onChange={(clientId, clientName) => {
+                      handleChange('customerId', clientId);
+                      handleChange('counterparty', clientName);
+                    }}
+                    required
                   />
                   {errors.counterparty && (
                     <p className="text-sm text-red-600 mt-1">{errors.counterparty}</p>
@@ -434,12 +660,12 @@ export function CreateTransactionModal({
                 {/* Project */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Project (Optional)
+                    Project <span className="text-red-500">*</span>
                   </label>
                   <select
                     value={formData.projectId || ''}
                     onChange={(e) => handleChange('projectId', e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:border-transparent ${typeClasses.focus}"
+                    className={`w-full px-3 py-2 border ${errors.projectId ? 'border-red-300' : 'border-gray-300'} rounded-lg focus:ring-2 focus:border-transparent ${typeClasses.focus}`}
                   >
                     <option value="">Select project...</option>
                     {availableProjects.map((project) => (
@@ -448,6 +674,9 @@ export function CreateTransactionModal({
                       </option>
                     ))}
                   </select>
+                  {errors.projectId && (
+                    <p className="text-sm text-red-600 mt-1">{errors.projectId}</p>
+                  )}
                 </div>
 
                 {/* GL Account */}
@@ -458,13 +687,23 @@ export function CreateTransactionModal({
                   <select
                     value={formData.glAccount || ''}
                     onChange={(e) => handleChange('glAccount', e.target.value)}
-                    className={`w-full px-3 py-2 border ${errors.glAccount ? 'border-red-300' : 'border-gray-300'} rounded-lg focus:ring-2 focus:border-transparent ${typeClasses.focus}`}
+                    disabled={accountsLoading}
+                    className={`w-full px-3 py-2 border ${errors.glAccount ? 'border-red-300' : 'border-gray-300'} rounded-lg focus:ring-2 focus:border-transparent ${typeClasses.focus} disabled:bg-gray-50`}
                   >
-                    {revenueAccounts.map((acc) => (
-                      <option key={acc.code} value={acc.code}>
-                        {acc.code} - {acc.name}
-                      </option>
-                    ))}
+                    {accountsLoading ? (
+                      <option value="">Loading accounts...</option>
+                    ) : revenueAccounts.length === 0 ? (
+                      <option value="">No revenue accounts available</option>
+                    ) : (
+                      <>
+                        <option value="">Select account...</option>
+                        {revenueAccounts.map((acc) => (
+                          <option key={acc.code} value={acc.code}>
+                            {acc.code} - {acc.name}
+                          </option>
+                        ))}
+                      </>
+                    )}
                   </select>
                   {errors.glAccount && (
                     <p className="text-sm text-red-600 mt-1">{errors.glAccount}</p>
@@ -481,7 +720,7 @@ export function CreateTransactionModal({
                     value={formData.invoiceRef || ''}
                     onChange={(e) => handleChange('invoiceRef', e.target.value)}
                     placeholder="e.g., INV-2024-001"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:border-transparent ${typeClasses.focus}"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:border-transparent"
                   />
                 </div>
 
@@ -537,12 +776,13 @@ export function CreateTransactionModal({
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     Supplier Name <span className="text-red-500">*</span>
                   </label>
-                  <input
-                    type="text"
-                    value={formData.supplier || ''}
-                    onChange={(e) => handleChange('supplier', e.target.value)}
-                    placeholder="e.g., Marina Services, Fuel Supplier"
-                    className={`w-full px-3 py-2 border ${errors.supplier ? 'border-red-300' : 'border-gray-300'} rounded-lg focus:ring-2 focus:border-transparent ${typeClasses.focus}`}
+                  <VendorSelector
+                    value={formData.vendorId || ''}
+                    onChange={(vendorId, vendorName) => {
+                      handleChange('vendorId', vendorId);
+                      handleChange('supplier', vendorName);
+                    }}
+                    required
                   />
                   {errors.supplier && (
                     <p className="text-sm text-red-600 mt-1">{errors.supplier}</p>
@@ -595,12 +835,12 @@ export function CreateTransactionModal({
                 {/* Project */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Project (Optional)
+                    Project <span className="text-red-500">*</span>
                   </label>
                   <select
                     value={formData.projectId || ''}
                     onChange={(e) => handleChange('projectId', e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:border-transparent ${typeClasses.focus}"
+                    className={`w-full px-3 py-2 border ${errors.projectId ? 'border-red-300' : 'border-gray-300'} rounded-lg focus:ring-2 focus:border-transparent ${typeClasses.focus}`}
                   >
                     <option value="">Select project...</option>
                     {availableProjects.map((project) => (
@@ -609,26 +849,8 @@ export function CreateTransactionModal({
                       </option>
                     ))}
                   </select>
-                </div>
-
-                {/* Expense Category */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Expense Category <span className="text-red-500">*</span>
-                  </label>
-                  <select
-                    value={formData.expenseCategory || ''}
-                    onChange={(e) => handleChange('expenseCategory', e.target.value)}
-                    className={`w-full px-3 py-2 border ${errors.expenseCategory ? 'border-red-300' : 'border-gray-300'} rounded-lg focus:ring-2 focus:border-transparent ${typeClasses.focus}`}
-                  >
-                    {expenseCategories.map((cat) => (
-                      <option key={cat} value={cat}>
-                        {cat}
-                      </option>
-                    ))}
-                  </select>
-                  {errors.expenseCategory && (
-                    <p className="text-sm text-red-600 mt-1">{errors.expenseCategory}</p>
+                  {errors.projectId && (
+                    <p className="text-sm text-red-600 mt-1">{errors.projectId}</p>
                   )}
                 </div>
 
@@ -640,13 +862,23 @@ export function CreateTransactionModal({
                   <select
                     value={formData.glAccount || ''}
                     onChange={(e) => handleChange('glAccount', e.target.value)}
-                    className={`w-full px-3 py-2 border ${errors.glAccount ? 'border-red-300' : 'border-gray-300'} rounded-lg focus:ring-2 focus:border-transparent ${typeClasses.focus}`}
+                    disabled={accountsLoading}
+                    className={`w-full px-3 py-2 border ${errors.glAccount ? 'border-red-300' : 'border-gray-300'} rounded-lg focus:ring-2 focus:border-transparent ${typeClasses.focus} disabled:bg-gray-50`}
                   >
-                    {expenseAccounts.map((acc) => (
-                      <option key={acc.code} value={acc.code}>
-                        {acc.code} - {acc.name}
-                      </option>
-                    ))}
+                    {accountsLoading ? (
+                      <option value="">Loading accounts...</option>
+                    ) : expenseAccounts.length === 0 ? (
+                      <option value="">No expense accounts available</option>
+                    ) : (
+                      <>
+                        <option value="">Select account...</option>
+                        {expenseAccounts.map((acc) => (
+                          <option key={acc.code} value={acc.code}>
+                            {acc.code} - {acc.name}
+                          </option>
+                        ))}
+                      </>
+                    )}
                   </select>
                   {errors.glAccount && (
                     <p className="text-sm text-red-600 mt-1">{errors.glAccount}</p>
@@ -663,7 +895,7 @@ export function CreateTransactionModal({
                     value={formData.expenseRef || ''}
                     onChange={(e) => handleChange('expenseRef', e.target.value)}
                     placeholder="e.g., EXP-2024-001, Invoice #12345"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:border-transparent ${typeClasses.focus}"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:border-transparent"
                   />
                 </div>
 
@@ -725,7 +957,7 @@ export function CreateTransactionModal({
                   </label>
                   <input
                     type="text"
-                    value={allBankAccounts.find((a) => a.id === formData.fromAccount)?.accountName || ''}
+                    value={sourceBankAccount?.accountName || ''}
                     readOnly
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-gray-50 text-gray-700"
                   />
@@ -863,7 +1095,7 @@ export function CreateTransactionModal({
                     onChange={(e) => handleChange('notes', e.target.value)}
                     rows={2}
                     placeholder="For exchange rate or additional context..."
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:border-transparent ${typeClasses.focus}"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:border-transparent"
                   />
                 </div>
 
@@ -994,13 +1226,23 @@ export function CreateTransactionModal({
                   <select
                     value={formData.glAccount || ''}
                     onChange={(e) => handleChange('glAccount', e.target.value)}
-                    className={`w-full px-3 py-2 border ${errors.glAccount ? 'border-red-300' : 'border-gray-300'} rounded-lg focus:ring-2 focus:border-transparent ${typeClasses.focus}`}
+                    disabled={accountsLoading}
+                    className={`w-full px-3 py-2 border ${errors.glAccount ? 'border-red-300' : 'border-gray-300'} rounded-lg focus:ring-2 focus:border-transparent ${typeClasses.focus} disabled:bg-gray-50`}
                   >
-                    {equityAccounts.map((acc) => (
-                      <option key={acc.code} value={acc.code}>
-                        {acc.code} - {acc.name}
-                      </option>
-                    ))}
+                    {accountsLoading ? (
+                      <option value="">Loading accounts...</option>
+                    ) : equityAccounts.length === 0 ? (
+                      <option value="">No equity accounts available</option>
+                    ) : (
+                      <>
+                        <option value="">Select account...</option>
+                        {equityAccounts.map((acc) => (
+                          <option key={acc.code} value={acc.code}>
+                            {acc.code} - {acc.name}
+                          </option>
+                        ))}
+                      </>
+                    )}
                   </select>
                   {errors.glAccount && (
                     <p className="text-sm text-red-600 mt-1">{errors.glAccount}</p>
@@ -1043,7 +1285,7 @@ export function CreateTransactionModal({
                   <select
                     value={formData.taxTreatment || 'tbd'}
                     onChange={(e) => handleChange('taxTreatment', e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:border-transparent ${typeClasses.focus}"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:border-transparent"
                   >
                     <option value="tbd">To Be Determined</option>
                     <option value="taxable">Taxable</option>
