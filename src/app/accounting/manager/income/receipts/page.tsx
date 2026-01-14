@@ -1,12 +1,18 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
-import { Plus, Filter, FileDown, FileText, XCircle, Building2, CheckCircle } from 'lucide-react';
-import { mockReceipts } from '@/data/income/mockData';
-import { getCompanyById, getActiveCompanies } from '@/data/company/companies';
-import type { ReceiptStatus } from '@/data/income/types';
-import type { Currency } from '@/data/company/types';
+import { Plus, Filter, FileDown, FileText, Building2, Eye, Printer } from 'lucide-react';
+import { receiptsApi } from '@/lib/supabase/api/receipts';
+import { companiesApi } from '@/lib/supabase/api/companies';
+import { bankAccountsApi } from '@/lib/supabase/api/bankAccounts';
+import { contactsApi } from '@/lib/supabase/api/contacts';
+import { dbReceiptToFrontend, dbCompanyToFrontend, dbBankAccountToFrontend, dbContactToFrontend, dbReceiptLineItemToFrontend, dbPaymentRecordToFrontend } from '@/lib/supabase/transforms';
+import ReceiptPrintView from '@/components/income/ReceiptPrintView';
+import type { Receipt, ReceiptStatus, LineItem, PaymentRecord } from '@/data/income/types';
+import type { Company, Currency } from '@/data/company/types';
+import type { BankAccount } from '@/data/banking/types';
+import type { Contact } from '@/data/contact/types';
 
 // Status tabs configuration
 const statusTabs = [
@@ -60,8 +66,45 @@ export default function ReceiptsPage() {
     dateFrom: '',
     dateTo: '',
   });
+  const [receipts, setReceipts] = useState<Receipt[]>([]);
+  const [companies, setCompanies] = useState<Company[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const companies = getActiveCompanies();
+  // PDF Preview state
+  const [showPdfPreview, setShowPdfPreview] = useState(false);
+  const [selectedReceiptForPdf, setSelectedReceiptForPdf] = useState<{
+    receipt: Receipt;
+    company: Company | undefined;
+    bankAccount: BankAccount | undefined;
+    client: Contact | undefined;
+    lineItems: LineItem[];
+    payments: PaymentRecord[];
+  } | null>(null);
+  const [loadingPdf, setLoadingPdf] = useState(false);
+
+  // Fetch receipts and companies on mount
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        const [receiptsData, companiesData] = await Promise.all([
+          receiptsApi.getAll(),
+          companiesApi.getAll(),
+        ]);
+        const transformedReceipts = receiptsData.map(r => dbReceiptToFrontend(r, [], []));
+        const transformedCompanies = companiesData.map(dbCompanyToFrontend);
+        setReceipts(transformedReceipts);
+        setCompanies(transformedCompanies.filter(c => c.isActive));
+      } catch (error) {
+        console.error('Error fetching data:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchData();
+  }, []);
+
+  // Helper to get company by ID
+  const getCompanyById = (id: string) => companies.find(c => c.id === id);
 
   // Check if any filters are active
   const hasActiveFilters = filters.companyId || filters.currency || filters.dateFrom || filters.dateTo;
@@ -77,7 +120,7 @@ export default function ReceiptsPage() {
   };
 
   // Filter receipts based on active tab and filters
-  const filteredReceipts = mockReceipts.filter((receipt) => {
+  const filteredReceipts = receipts.filter((receipt) => {
     // Status filter
     if (activeTab !== 'all' && activeTab !== 'recent') {
       if (receipt.status !== activeTab) return false;
@@ -154,11 +197,105 @@ export default function ReceiptsPage() {
     router.push(`/accounting/manager/income/receipts/${receiptId}`);
   };
 
-  // Calculate summary statistics
-  const stats = {
-    total: filteredReceipts.length,
-    totalReceived: filteredReceipts.filter(r => r.status === 'paid').reduce((sum, r) => sum + r.totalReceived, 0),
+  // Handle PDF preview
+  const handlePdfPreview = async (receipt: Receipt) => {
+    setLoadingPdf(true);
+    try {
+      // Fetch full receipt with line items and payments
+      const receiptWithItems = await receiptsApi.getByIdWithLineItems(receipt.id);
+      if (!receiptWithItems) {
+        console.error('Receipt not found');
+        return;
+      }
+
+      // Get company
+      const company = companies.find(c => c.id === receipt.companyId);
+
+      // Get bank account for the currency
+      let bankAccount: BankAccount | undefined;
+      if (company) {
+        const bankAccounts = await bankAccountsApi.getByCompanyActive(company.id);
+        bankAccount = bankAccounts
+          .map(dbBankAccountToFrontend)
+          .find(ba => ba.currency === receipt.currency);
+      }
+
+      // Get client contact
+      let client: Contact | undefined;
+      if (receipt.clientId) {
+        const contactData = await contactsApi.getById(receipt.clientId);
+        if (contactData) {
+          client = dbContactToFrontend(contactData);
+        }
+      }
+
+      // Transform line items and payments
+      const lineItems = receiptWithItems.line_items?.map(dbReceiptLineItemToFrontend) || [];
+      const payments = receiptWithItems.payment_records?.map(dbPaymentRecordToFrontend) || [];
+
+      setSelectedReceiptForPdf({
+        receipt: dbReceiptToFrontend(receiptWithItems, receiptWithItems.line_items || [], receiptWithItems.payment_records || []),
+        company,
+        bankAccount,
+        client,
+        lineItems,
+        payments,
+      });
+      setShowPdfPreview(true);
+    } catch (error) {
+      console.error('Error loading receipt for PDF:', error);
+    } finally {
+      setLoadingPdf(false);
+    }
   };
+
+  // Calculate summary statistics grouped by currency
+  const totalsByCurrency = useMemo(() => {
+    const byCurrency: Record<string, { total: number; thbEquiv: number }> = {};
+
+    // Only count paid receipts
+    filteredReceipts
+      .filter(r => r.status === 'paid')
+      .forEach((receipt) => {
+        const currency = receipt.currency;
+        if (!byCurrency[currency]) {
+          byCurrency[currency] = { total: 0, thbEquiv: 0 };
+        }
+        byCurrency[currency].total += receipt.totalAmount;
+        // Calculate THB equivalent
+        if (currency === 'THB') {
+          byCurrency[currency].thbEquiv += receipt.totalAmount;
+        } else if (receipt.fxRate) {
+          byCurrency[currency].thbEquiv += receipt.totalAmount * receipt.fxRate;
+        }
+      });
+
+    // Sort currencies: THB first, then alphabetically
+    const sortedCurrencies = Object.keys(byCurrency).sort((a, b) => {
+      if (a === 'THB') return -1;
+      if (b === 'THB') return 1;
+      return a.localeCompare(b);
+    });
+
+    return sortedCurrencies.map((currency) => ({
+      currency,
+      ...byCurrency[currency],
+    }));
+  }, [filteredReceipts]);
+
+  // Calculate grand total in THB
+  const grandTotalThb = useMemo(() => {
+    return totalsByCurrency.reduce((sum, item) => sum + item.thbEquiv, 0);
+  }, [totalsByCurrency]);
+
+  // Show loading state
+  if (loading) {
+    return (
+      <div className="p-6 flex items-center justify-center min-h-[400px]">
+        <div className="text-gray-500">Loading receipts...</div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -171,9 +308,9 @@ export default function ReceiptsPage() {
               let count: number;
 
               if (tab.value === 'all' || tab.value === 'recent') {
-                count = mockReceipts.length;
+                count = receipts.length;
               } else {
-                count = mockReceipts.filter(r => r.status === tab.value).length;
+                count = receipts.filter(r => r.status === tab.value).length;
               }
 
               return (
@@ -352,10 +489,13 @@ export default function ReceiptsPage() {
                   Currency
                 </th>
                 <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Total Received
+                  Total Amount
                 </th>
                 <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Status
+                </th>
+                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  THB Equiv.
                 </th>
                 <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Actions
@@ -365,7 +505,7 @@ export default function ReceiptsPage() {
             <tbody className="bg-white divide-y divide-gray-200">
               {filteredReceipts.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="px-6 py-12 text-center text-sm text-gray-500">
+                  <td colSpan={10} className="px-6 py-12 text-center text-sm text-gray-500">
                     No receipts found
                   </td>
                 </tr>
@@ -417,7 +557,7 @@ export default function ReceiptsPage() {
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-right">
                         <div className="text-sm font-medium text-gray-900">
-                          {receipt.totalReceived.toLocaleString('en-US', {
+                          {receipt.totalAmount.toLocaleString('en-US', {
                             minimumFractionDigits: 2,
                             maximumFractionDigits: 2,
                           })}
@@ -426,23 +566,35 @@ export default function ReceiptsPage() {
                       <td className="px-6 py-4 whitespace-nowrap text-center">
                         {getStatusBadge(receipt.status)}
                       </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-right">
+                        <div className="text-sm text-gray-500">
+                          {receipt.currency === 'THB'
+                            ? '-'
+                            : receipt.fxRate
+                            ? (receipt.totalAmount * receipt.fxRate).toLocaleString('en-US', {
+                                minimumFractionDigits: 2,
+                                maximumFractionDigits: 2,
+                              })
+                            : '-'}
+                        </div>
+                      </td>
                       <td className="px-6 py-4 whitespace-nowrap text-right text-sm">
-                        <div className="flex items-center justify-end gap-2" onClick={(e) => e.stopPropagation()}>
-                          {receipt.status === 'draft' && (
-                            <button className="p-1.5 text-green-600 hover:bg-green-50 rounded-lg transition-colors" title="Approve">
-                              <CheckCircle className="h-4 w-4" />
-                            </button>
-                          )}
-                          {receipt.status !== 'void' && (
-                            <button className="p-1.5 text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="Void">
-                              <XCircle className="h-4 w-4" />
-                            </button>
-                          )}
+                        <div className="flex items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>
                           <button
-                            onClick={() => handleRowClick(receipt.id)}
-                            className="px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
+                            onClick={() => handlePdfPreview(receipt)}
+                            disabled={loadingPdf}
+                            className="p-1.5 text-[#5A7A8F] hover:bg-[#5A7A8F]/10 rounded-lg transition-colors disabled:opacity-50"
+                            title="Preview PDF"
                           >
-                            View
+                            <Eye className="h-4 w-4" />
+                          </button>
+                          <button
+                            onClick={() => handlePdfPreview(receipt)}
+                            disabled={loadingPdf}
+                            className="p-1.5 text-[#5A7A8F] hover:bg-[#5A7A8F]/10 rounded-lg transition-colors disabled:opacity-50"
+                            title="Print PDF"
+                          >
+                            <Printer className="h-4 w-4" />
                           </button>
                         </div>
                       </td>
@@ -457,24 +609,85 @@ export default function ReceiptsPage() {
         {/* Summary Footer */}
         {filteredReceipts.length > 0 && (
           <div className="px-6 py-4 bg-gray-50 border-t border-gray-200">
-            <div className="flex justify-between items-center text-sm">
+            <div className="flex justify-between items-start text-sm">
               <div className="text-gray-600">
                 Showing <span className="font-semibold text-gray-900">{filteredReceipts.length}</span> receipt{filteredReceipts.length !== 1 ? 's' : ''}
               </div>
-              <div className="flex gap-6">
-                <div className="text-gray-600">
-                  Total Received (Paid): <span className="font-semibold text-green-600">
-                    USD {stats.totalReceived.toLocaleString('en-US', {
-                      minimumFractionDigits: 2,
-                      maximumFractionDigits: 2,
-                    })}
-                  </span>
-                </div>
+              <div className="text-right">
+                <div className="text-gray-600 mb-2">Total Received (Paid):</div>
+                {totalsByCurrency.length === 0 ? (
+                  <div className="text-gray-400">-</div>
+                ) : (
+                  <div className="space-y-1">
+                    {totalsByCurrency.map(({ currency, total, thbEquiv }) => (
+                      <div key={currency} className="flex items-center justify-end gap-4">
+                        <span className="font-semibold text-green-600">
+                          {currency} {total.toLocaleString('en-US', {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2,
+                          })}
+                        </span>
+                        {currency !== 'THB' && thbEquiv > 0 && (
+                          <span className="text-gray-500 text-xs">
+                            (THB {thbEquiv.toLocaleString('en-US', {
+                              minimumFractionDigits: 0,
+                              maximumFractionDigits: 0,
+                            })})
+                          </span>
+                        )}
+                      </div>
+                    ))}
+                    {totalsByCurrency.length > 1 && (
+                      <div className="pt-1 border-t border-gray-300 mt-1">
+                        <span className="text-gray-600">Grand Total: </span>
+                        <span className="font-semibold text-green-600">
+                          THB {grandTotalThb.toLocaleString('en-US', {
+                            minimumFractionDigits: 0,
+                            maximumFractionDigits: 0,
+                          })}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           </div>
         )}
       </div>
+
+      {/* PDF Preview Modal */}
+      {selectedReceiptForPdf && (
+        <ReceiptPrintView
+          receipt={{
+            receiptNumber: selectedReceiptForPdf.receipt.receiptNumber,
+            receiptDate: selectedReceiptForPdf.receipt.receiptDate,
+            boatId: selectedReceiptForPdf.receipt.boatId,
+            charterType: selectedReceiptForPdf.receipt.charterType,
+            charterDateFrom: selectedReceiptForPdf.receipt.charterDateFrom,
+            charterDateTo: selectedReceiptForPdf.receipt.charterDateTo,
+            charterTime: selectedReceiptForPdf.receipt.charterTime,
+            lineItems: selectedReceiptForPdf.lineItems,
+            payments: selectedReceiptForPdf.payments,
+            pricingType: selectedReceiptForPdf.receipt.pricingType,
+            subtotal: selectedReceiptForPdf.receipt.subtotal,
+            taxAmount: selectedReceiptForPdf.receipt.taxAmount,
+            totalAmount: selectedReceiptForPdf.receipt.totalAmount,
+            whtAmount: 0,
+            currency: selectedReceiptForPdf.receipt.currency,
+            reference: selectedReceiptForPdf.receipt.reference,
+          }}
+          company={selectedReceiptForPdf.company}
+          client={selectedReceiptForPdf.client}
+          clientName={selectedReceiptForPdf.receipt.clientName}
+          bankAccount={selectedReceiptForPdf.bankAccount}
+          isOpen={showPdfPreview}
+          onClose={() => {
+            setShowPdfPreview(false);
+            setSelectedReceiptForPdf(null);
+          }}
+        />
+      )}
     </div>
   );
 }

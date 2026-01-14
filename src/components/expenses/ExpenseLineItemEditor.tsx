@@ -37,6 +37,7 @@ interface ExpenseLineItemEditorProps {
   readOnly?: boolean;
   showAttachmentButton?: boolean;
   onAttachmentClick?: (lineItemId: string) => void;
+  exchangeRate?: number; // For THB conversion display
 }
 
 export function ExpenseLineItemEditor({
@@ -48,6 +49,7 @@ export function ExpenseLineItemEditor({
   readOnly = false,
   showAttachmentButton = false,
   onAttachmentClick,
+  exchangeRate,
 }: ExpenseLineItemEditorProps) {
   const handleAddLineItem = () => {
     const newItem: ExpenseLineItem = {
@@ -127,8 +129,22 @@ export function ExpenseLineItemEditor({
 
   return (
     <div className="space-y-4">
+      {/* Warning when no projects available */}
+      {projects.length === 0 && (
+        <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 flex items-center gap-3">
+          <AlertCircle className="h-5 w-5 text-amber-600 flex-shrink-0" />
+          <p className="text-sm text-amber-800">
+            No projects found. Please create a project in{' '}
+            <a href="/accounting/manager/settings" className="font-medium underline hover:text-amber-900">
+              Settings
+            </a>{' '}
+            first.
+          </p>
+        </div>
+      )}
+
       {/* Warning for missing projects */}
-      {hasMissingProjects && lineItems.length > 0 && (
+      {hasMissingProjects && lineItems.length > 0 && projects.length > 0 && (
         <div className="bg-yellow-50 border border-yellow-200 rounded-lg px-4 py-3 flex items-center gap-3">
           <AlertCircle className="h-5 w-5 text-yellow-600 flex-shrink-0" />
           <p className="text-sm text-yellow-800">
@@ -441,13 +457,23 @@ export function ExpenseLineItemEditor({
 
           <div className="flex justify-between w-full max-w-md border-t pt-2">
             <span className="text-base font-semibold text-gray-900">Total Amount:</span>
-            <span className="text-base font-bold text-gray-900">
-              {currency}{' '}
-              {totalAmount.toLocaleString('en-US', {
-                minimumFractionDigits: 2,
-                maximumFractionDigits: 2,
-              })}
-            </span>
+            <div className="text-right">
+              <span className="text-base font-bold text-gray-900">
+                {currency}{' '}
+                {totalAmount.toLocaleString('en-US', {
+                  minimumFractionDigits: 2,
+                  maximumFractionDigits: 2,
+                })}
+              </span>
+              {currency !== 'THB' && exchangeRate && totalAmount > 0 && (
+                <div className="text-sm text-orange-600">
+                  (THB {(totalAmount * exchangeRate).toLocaleString('th-TH', {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  })})
+                </div>
+              )}
+            </div>
           </div>
 
           {whtAmount > 0 && (

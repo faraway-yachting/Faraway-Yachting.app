@@ -1,20 +1,17 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
-import { X, Plus, Trash2, AlertCircle, Users, Anchor } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { X, Plus, Trash2, AlertCircle, Users, Anchor, Loader2 } from 'lucide-react';
 import type {
   Project,
   ProjectParticipant,
   ProjectType,
   ProjectStatus,
 } from '@/data/project/types';
-import { getAllCompanies } from '@/data/company/companies';
-import { Currency } from '@/data/company/types';
-import {
-  createProject,
-  updateProject,
-  validateParticipants,
-} from '@/data/project/projects';
+import { Currency, Company } from '@/data/company/types';
+import { validateParticipants } from '@/data/project/projects';
+import { companiesApi, projectsApi } from '@/lib/supabase/api';
+import { dbCompanyToFrontend, frontendProjectToDb } from '@/lib/supabase/transforms';
 
 interface ProjectFormModalProps {
   isOpen: boolean;
@@ -50,8 +47,28 @@ export function ProjectFormModal({
   editingProject,
   selectedCompanyId,
 }: ProjectFormModalProps) {
-  const companies = useMemo(() => getAllCompanies().filter((c) => c.isActive), []);
+  const [companies, setCompanies] = useState<Company[]>([]);
+  const [loadingCompanies, setLoadingCompanies] = useState(true);
+  const [saving, setSaving] = useState(false);
   const isEditing = !!editingProject;
+
+  // Fetch companies on mount
+  useEffect(() => {
+    const fetchCompanies = async () => {
+      setLoadingCompanies(true);
+      try {
+        const data = await companiesApi.getActive();
+        setCompanies(data.map(dbCompanyToFrontend));
+      } catch (e) {
+        console.error('Failed to fetch companies:', e);
+      } finally {
+        setLoadingCompanies(false);
+      }
+    };
+    if (isOpen) {
+      fetchCompanies();
+    }
+  }, [isOpen]);
 
   // Form state
   const [name, setName] = useState('');
@@ -207,10 +224,10 @@ export function ProjectFormModal({
   };
 
   // Save handler
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!validate()) return;
 
-    const projectData = {
+    const projectData: Partial<Project> = {
       name: name.trim(),
       code: code.trim().toUpperCase(),
       companyId,
@@ -230,13 +247,21 @@ export function ProjectFormModal({
       })),
     };
 
-    if (isEditing && editingProject) {
-      updateProject(editingProject.id, projectData);
-    } else {
-      createProject(projectData as Omit<Project, 'id' | 'createdAt' | 'updatedAt'>);
+    setSaving(true);
+    try {
+      const dbData = frontendProjectToDb(projectData);
+      if (isEditing && editingProject) {
+        await projectsApi.update(editingProject.id, dbData);
+      } else {
+        await projectsApi.create(dbData);
+      }
+      onSave();
+    } catch (e) {
+      console.error('Failed to save project:', e);
+      setErrors({ save: e instanceof Error ? e.message : 'Failed to save project' });
+    } finally {
+      setSaving(false);
     }
-
-    onSave();
   };
 
   // Calculate totals for display
@@ -629,19 +654,29 @@ export function ProjectFormModal({
             </div>
           </div>
 
+          {/* Save Error Display */}
+          {errors.save && (
+            <div className="mx-6 mb-4 p-3 bg-red-50 border border-red-200 rounded-lg">
+              <p className="text-sm text-red-600">{errors.save}</p>
+            </div>
+          )}
+
           {/* Footer Buttons */}
           <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-gray-200 flex-shrink-0 bg-white rounded-b-lg">
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+              disabled={saving}
+              className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50"
             >
               Cancel
             </button>
             <button
               type="submit"
-              className="px-4 py-2 text-sm font-medium text-white bg-[#5A7A8F] rounded-lg hover:bg-[#2c3e50] transition-colors"
+              disabled={saving || loadingCompanies}
+              className="px-4 py-2 text-sm font-medium text-white bg-[#5A7A8F] rounded-lg hover:bg-[#2c3e50] transition-colors disabled:opacity-50 flex items-center gap-2"
             >
+              {saving && <Loader2 className="h-4 w-4 animate-spin" />}
               {isEditing ? 'Save Changes' : 'Create Project'}
             </button>
           </div>

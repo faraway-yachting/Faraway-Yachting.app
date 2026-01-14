@@ -8,6 +8,40 @@ export type PricingType = 'exclude_vat' | 'include_vat' | 'no_vat';
 // WHT rate options (percentage values, 'custom' for manual input)
 export type WhtRate = 0 | 0.75 | 1 | 1.5 | 2 | 3 | 5 | 10 | 15 | 'custom';
 
+// Charter type options (aligned with Chart of Accounts revenue categories)
+export type CharterType =
+  | 'day_charter'        // 4010: Charter Revenue - Day Charters
+  | 'overnight_charter'  // 4020: Charter Revenue - Overnight charter
+  | 'cabin_charter'      // 4030: Charter Revenue - Cabin charter
+  | 'other_charter'      // 4040: Other charter Revenue
+  | 'bareboat_charter'   // 4050: Commission Revenue - Bareboat charter
+  | 'crewed_charter'     // 4060: Commission Revenue - Crewed charter
+  | 'outsource_commission'; // 4070: Commission Revenue - Outsource services Commission
+
+export const charterTypeLabels: Record<CharterType, string> = {
+  day_charter: 'Day Charter',
+  overnight_charter: 'Overnight Charter',
+  cabin_charter: 'Cabin Charter',
+  other_charter: 'Other Charter',
+  bareboat_charter: 'Bareboat Charter (Commission)',
+  crewed_charter: 'Crewed Charter (Commission)',
+  outsource_commission: 'Outsource Services (Commission)',
+};
+
+// Map charter types to their default revenue account codes
+export const charterTypeAccountCodes: Record<CharterType, string> = {
+  day_charter: '4010',
+  overnight_charter: '4020',
+  cabin_charter: '4030',
+  other_charter: '4040',
+  bareboat_charter: '4050',
+  crewed_charter: '4060',
+  outsource_commission: '4070',
+};
+
+// Single-day charter types (auto-set dateTo = dateFrom)
+export const singleDayCharterTypes: CharterType[] = ['day_charter'];
+
 export interface LineItem {
   id: string;
   description: string;
@@ -35,8 +69,14 @@ export interface Quotation {
   // projectId moved to LineItem level for multi-project support
   clientId: string;
   clientName: string;
-  charterPeriodFrom?: string; // ISO date
-  charterPeriodTo?: string; // ISO date
+  // Charter information (optional)
+  boatId?: string; // Links to project (boat)
+  charterType?: CharterType;
+  charterPeriodFrom?: string; // ISO date (legacy, use charterDateFrom)
+  charterPeriodTo?: string; // ISO date (legacy, use charterDateTo)
+  charterDateFrom?: string; // ISO date
+  charterDateTo?: string; // ISO date
+  charterTime?: string; // e.g., "09:00 - 17:00"
   dateCreated: string; // ISO date
   validUntil: string; // ISO date
   pricingType: PricingType; // Exclude VAT / Include VAT / No VAT
@@ -76,8 +116,14 @@ export interface Invoice {
   clientId: string;
   clientName: string;
   quotationId?: string; // If created from quotation
-  charterPeriodFrom?: string; // ISO date - for P&L reports
-  charterPeriodTo?: string; // ISO date - for P&L reports
+  // Charter information (optional)
+  boatId?: string; // Links to project (boat)
+  charterType?: CharterType;
+  charterPeriodFrom?: string; // ISO date (legacy, use charterDateFrom)
+  charterPeriodTo?: string; // ISO date (legacy, use charterDateTo)
+  charterDateFrom?: string; // ISO date
+  charterDateTo?: string; // ISO date
+  charterTime?: string; // e.g., "09:00 - 17:00"
   invoiceDate: string; // ISO date
   dueDate: string; // ISO date
   paymentTerms: PaymentTerms;
@@ -135,8 +181,17 @@ export interface Receipt {
   // projectId moved to LineItem level for multi-project support
   clientId: string;
   clientName: string;
+  invoiceId?: string; // When created from an invoice
   receiptDate: string; // ISO date (receipt date)
   reference?: string; // Reference number (invoice number when created from invoice)
+  // Charter information (optional)
+  boatId?: string; // Links to project (boat)
+  charterType?: CharterType;
+  charterPeriodFrom?: string; // ISO date (legacy)
+  charterPeriodTo?: string; // ISO date (legacy)
+  charterDateFrom?: string; // ISO date
+  charterDateTo?: string; // ISO date
+  charterTime?: string; // e.g., "09:00 - 17:00"
 
   // Line items (same as Invoice/Quotation)
   lineItems: LineItem[];
@@ -164,7 +219,10 @@ export interface Receipt {
   currency: Currency; // Transactional currency (per document)
   // FX Rate fields (for THB P&L reporting)
   fxRate?: number; // Exchange rate to THB at receipt time (locked on save)
-  fxRateSource?: FxRateSource; // 'api' or 'manual'
+  fxRateSource?: FxRateSource; // 'bot' | 'fallback' | 'manual' | 'api' (legacy)
+  fxBaseCurrency?: string; // Source currency (e.g., 'USD')
+  fxTargetCurrency?: string; // Target currency (always 'THB')
+  fxRateDate?: string; // Actual date the rate is from (may differ if weekend/holiday)
   thbSubtotal?: number; // subtotal × fxRate
   thbTaxAmount?: number; // taxAmount × fxRate
   thbWhtAmount?: number; // whtAmount × fxRate

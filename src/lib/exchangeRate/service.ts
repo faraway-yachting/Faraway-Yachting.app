@@ -2,7 +2,8 @@
  * Exchange Rate Service
  *
  * Client-side service for fetching and managing exchange rates.
- * Uses caching to minimize API calls.
+ * Uses Bank of Thailand (BOT) as primary source with Frankfurt fallback.
+ * Rates are cached to minimize API calls.
  */
 
 import { Currency } from '@/data/company/types';
@@ -20,7 +21,7 @@ import {
  *
  * @param currency - The source currency (e.g., 'USD', 'EUR')
  * @param date - The date in ISO format (YYYY-MM-DD)
- * @returns The exchange rate to THB
+ * @returns The exchange rate to THB with source information
  */
 export async function getExchangeRate(
   currency: Currency,
@@ -32,6 +33,9 @@ export async function getExchangeRate(
       success: true,
       rate: 1,
       source: 'manual' as FxRateSource,
+      date: date,
+      baseCurrency: 'THB',
+      targetCurrency: 'THB',
     };
   }
 
@@ -42,11 +46,14 @@ export async function getExchangeRate(
     return {
       success: true,
       rate: cachedRate,
-      source: record?.source || 'api',
+      source: record?.source || 'bot',
+      date: record?.date || date,
+      baseCurrency: currency,
+      targetCurrency: 'THB',
     };
   }
 
-  // Fetch from API
+  // Fetch from API (BOT primary, Frankfurt fallback)
   try {
     const response = await fetch(
       `/api/exchange-rate?currency=${currency}&date=${date}`
@@ -55,13 +62,19 @@ export async function getExchangeRate(
     const data = await response.json();
 
     if (data.success && data.rate) {
-      // Cache the result
-      saveToCache(currency, date, data.rate, 'api');
+      // Map API source to FxRateSource ('bot' or 'fallback')
+      const source: FxRateSource = data.source === 'fallback' ? 'fallback' : 'bot';
+
+      // Cache the result with the actual source
+      saveToCache(currency, data.date || date, data.rate, source);
 
       return {
         success: true,
         rate: data.rate,
-        source: 'api',
+        source: source,
+        date: data.date || date,
+        baseCurrency: data.baseCurrency || currency,
+        targetCurrency: data.targetCurrency || 'THB',
       };
     }
 

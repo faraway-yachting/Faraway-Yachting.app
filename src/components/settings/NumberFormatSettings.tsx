@@ -18,7 +18,10 @@ import {
   formatConfigAsPattern,
   getDefaultFormat,
 } from "@/data/settings/numberFormats";
-import { getActiveCompanies } from "@/data/company/companies";
+import { companiesApi } from "@/lib/supabase/api/companies";
+import type { Database } from "@/lib/supabase/database.types";
+
+type DbCompany = Database['public']['Tables']['companies']['Row'];
 
 interface EditModalProps {
   isOpen: boolean;
@@ -130,6 +133,7 @@ function EditModal({ isOpen, onClose, docType, config, onSave }: EditModalProps)
               onChange={(e) => setSequenceDigits(Number(e.target.value))}
               className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
             >
+              <option value={3}>3 digits (001)</option>
               <option value={4}>4 digits (0001)</option>
               <option value={5}>5 digits (00001)</option>
               <option value={6}>6 digits (000001)</option>
@@ -168,10 +172,9 @@ function EditModal({ isOpen, onClose, docType, config, onSave }: EditModalProps)
 }
 
 export function NumberFormatSettings() {
-  const companies = getActiveCompanies();
-  const [selectedCompanyId, setSelectedCompanyId] = useState(
-    companies[0]?.id || ""
-  );
+  const [companies, setCompanies] = useState<DbCompany[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [selectedCompanyId, setSelectedCompanyId] = useState("");
   const [formats, setFormats] = useState<Record<DocumentType, NumberFormatConfig>>(
     {} as Record<DocumentType, NumberFormatConfig>
   );
@@ -183,7 +186,28 @@ export function NumberFormatSettings() {
     "receipt",
     "creditNote",
     "debitNote",
+    "whtCertificate",
   ];
+
+  // Load companies from Supabase
+  useEffect(() => {
+    async function loadCompanies() {
+      setIsLoading(true);
+      try {
+        const companiesData = await companiesApi.getAll();
+        const activeCompanies = companiesData.filter(c => c.is_active);
+        setCompanies(activeCompanies);
+        if (activeCompanies.length > 0 && !selectedCompanyId) {
+          setSelectedCompanyId(activeCompanies[0].id);
+        }
+      } catch (error) {
+        console.error('Error loading companies:', error);
+      } finally {
+        setIsLoading(false);
+      }
+    }
+    loadCompanies();
+  }, []);
 
   useEffect(() => {
     if (selectedCompanyId) {
@@ -202,6 +226,27 @@ export function NumberFormatSettings() {
   };
 
   const selectedCompany = companies.find((c) => c.id === selectedCompanyId);
+
+  if (isLoading) {
+    return (
+      <div className="bg-white rounded-lg border border-gray-200 p-6">
+        <div className="flex items-center justify-center py-8">
+          <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-[#5A7A8F]"></div>
+          <span className="ml-2 text-sm text-gray-500">Loading companies...</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (companies.length === 0) {
+    return (
+      <div className="bg-white rounded-lg border border-gray-200 p-6">
+        <div className="text-center py-8">
+          <p className="text-sm text-gray-500">No companies found. Please add a company first.</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="bg-white rounded-lg border border-gray-200 p-6">

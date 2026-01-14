@@ -2,12 +2,35 @@
 
 import { AlertCircle, Clock, FileText } from 'lucide-react';
 import Link from 'next/link';
-import { Invoice, Quotation, Receipt } from '@/data/income/types';
+
+// Simplified types for alerts - only the fields we actually use
+interface AlertInvoice {
+  id: string;
+  invoiceNumber: string;
+  clientName: string;
+  amountOutstanding: number;
+  dueDate: string;
+}
+
+interface AlertQuotation {
+  id: string;
+  quotationNumber: string;
+  clientName: string;
+  totalAmount: number;
+  validUntil: string;
+}
+
+interface AlertReceipt {
+  id: string;
+  receiptNumber: string;
+  clientName: string;
+  totalReceived: number;
+}
 
 interface AlertsPanelProps {
-  overdueInvoices: Invoice[];
-  expiringQuotations: Quotation[];
-  unreconciledReceipts: Receipt[];
+  overdueInvoices: AlertInvoice[];
+  expiringQuotations: AlertQuotation[];
+  unreconciledReceipts: AlertReceipt[];
 }
 
 export function AlertsPanel({

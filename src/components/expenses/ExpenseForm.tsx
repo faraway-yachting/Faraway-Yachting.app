@@ -2,32 +2,39 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { X, Save, FileText, XCircle, AlertCircle, ChevronDown, Pencil, Printer } from 'lucide-react';
+import { X, Save, FileText, XCircle, AlertCircle, ChevronDown, Pencil, Printer, Loader2 } from 'lucide-react';
 import { VendorSelector } from './VendorSelector';
 import { ExpenseLineItemEditor } from './ExpenseLineItemEditor';
 import { ExpenseAttachments } from './ExpenseAttachments';
+import { RelatedJournalEntries } from '@/components/accounting/RelatedJournalEntries';
 import type {
   ExpenseRecord,
   ExpenseLineItem,
   ExpensePricingType,
   ReceiptStatus,
 } from '@/data/expenses/types';
-import type { Currency } from '@/data/company/types';
+import type { Currency, Company } from '@/data/company/types';
+import type { Project } from '@/data/project/types';
+import type { Contact } from '@/data/contact/types';
 import type { Attachment } from '@/data/accounting/journalEntryTypes';
-import { getActiveCompanies } from '@/data/company/companies';
-import { createExpenseRecord, updateExpenseRecord, createWhtCertificate } from '@/data/expenses/expenses';
-import { getActiveProjectsByCompany } from '@/data/project/projects';
-import { getContactById } from '@/data/contact/contacts';
+import { companiesApi } from '@/lib/supabase/api/companies';
+import { projectsApi } from '@/lib/supabase/api/projects';
+import { contactsApi } from '@/lib/supabase/api/contacts';
+import { expensesApi } from '@/lib/supabase/api/expenses';
+import { bankAccountsApi } from '@/lib/supabase/api/bankAccounts';
+import { whtCertificatesApi } from '@/lib/supabase/api/whtCertificates';
+import { dbCompanyToFrontend, dbProjectToFrontend, dbContactToFrontend, dbBankAccountToFrontend, frontendExpenseToDb, frontendExpenseLineItemToDb } from '@/lib/supabase/transforms';
+import type { BankAccount } from '@/data/banking/types';
 import {
   calculateDocumentTotals,
   getTodayISO,
   addDays,
   generateId,
 } from '@/lib/expenses/utils';
+import { getExchangeRate } from '@/lib/exchangeRate/service';
+import type { FxRateSource } from '@/data/exchangeRate/types';
 import ExpensePrintView from './ExpensePrintView';
 import WhtCertificatePrintView from '@/components/finances/WhtCertificatePrintView';
-import { getCompanyById } from '@/data/company/companies';
-import { getWhtToSupplierByExpenseId } from '@/data/finances/mockWhtToSupplier';
 import type { WhtToSupplier } from '@/data/finances/types';
 
 interface ExpenseFormProps {
@@ -39,8 +46,12 @@ export default function ExpenseForm({ expense, onCancel }: ExpenseFormProps) {
   const router = useRouter();
   const isEditing = !!expense;
 
-  // Get available companies
-  const companies = getActiveCompanies();
+  // Async loaded data
+  const [companies, setCompanies] = useState<Company[]>([]);
+  const [companyProjects, setCompanyProjects] = useState<Project[]>([]);
+  const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([]);
+  const [vendorContact, setVendorContact] = useState<Contact | undefined>(undefined);
+  const [isLoading, setIsLoading] = useState(true);
 
   // Form state
   const [companyId, setCompanyId] = useState(expense?.companyId || '');
@@ -57,6 +68,13 @@ export default function ExpenseForm({ expense, onCancel }: ExpenseFormProps) {
   const [currency, setCurrency] = useState<Currency>(expense?.currency || 'THB');
   const [exchangeRate, setExchangeRate] = useState<number | undefined>(
     expense?.fxRate
+  );
+  const [isFetchingRate, setIsFetchingRate] = useState(false);
+  const [fxRateSource, setFxRateSource] = useState<FxRateSource>(
+    expense?.fxRateSource || 'bot'
+  );
+  const [fxRateDate, setFxRateDate] = useState<string | undefined>(
+    expense?.fxRateDate
   );
   const [pricingType, setPricingType] = useState<ExpensePricingType>(
     expense?.pricingType || 'exclude_vat'
@@ -87,6 +105,7 @@ export default function ExpenseForm({ expense, onCancel }: ExpenseFormProps) {
   const [receiptStatus, setReceiptStatus] = useState<ReceiptStatus>(
     expense?.receiptStatus || 'pending'
   );
+  const [paidFromBankAccountId, setPaidFromBankAccountId] = useState<string>('');
   const [attachments, setAttachments] = useState<Attachment[]>(expense?.attachments || []);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [isSaving, setIsSaving] = useState(false);
@@ -102,14 +121,81 @@ export default function ExpenseForm({ expense, onCancel }: ExpenseFormProps) {
   // Get selected company
   const selectedCompany = companies.find((c) => c.id === companyId);
 
-  // Get all projects (expenses have project per line, not per document)
-  const allProjects = companyId ? getActiveProjectsByCompany(companyId) : [];
-
   // Check if VAT is available for selected company
   const isVatAvailable = selectedCompany?.isVatRegistered ?? true;
 
   // Force "No VAT" if company is not VAT registered
   const effectivePricingType = !isVatAvailable ? 'no_vat' : pricingType;
+
+  // Load initial data (companies)
+  useEffect(() => {
+    const loadInitialData = async () => {
+      setIsLoading(true);
+      try {
+        const companiesData = await companiesApi.getActive();
+        setCompanies(companiesData.map(dbCompanyToFrontend));
+      } catch (error) {
+        console.error('Failed to load initial data:', error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    loadInitialData();
+  }, []);
+
+  // Load all projects (projects can be assigned from any company in the group)
+  useEffect(() => {
+    const loadProjects = async () => {
+      try {
+        // Get all projects across all companies (active and inactive, not completed)
+        // Note: Projects belong to a Company for legal registration, but transactions
+        // for P&L calculation can come from any company in the Faraway Yachting group
+        const projectsData = await projectsApi.getAll();
+        // Filter to show active and inactive projects (not completed)
+        const filteredProjects = projectsData.filter(p => p.status !== 'completed');
+        setCompanyProjects(filteredProjects.map(dbProjectToFrontend));
+      } catch (error) {
+        console.error('Failed to load projects:', error);
+      }
+    };
+    loadProjects();
+  }, []);
+
+  // Load bank accounts when company changes
+  useEffect(() => {
+    const loadBankAccounts = async () => {
+      if (!companyId) {
+        setBankAccounts([]);
+        return;
+      }
+      try {
+        const accountsData = await bankAccountsApi.getByCompanyActive(companyId);
+        setBankAccounts(accountsData.map(dbBankAccountToFrontend));
+      } catch (error) {
+        console.error('Failed to load bank accounts:', error);
+      }
+    };
+    loadBankAccounts();
+  }, [companyId]);
+
+  // Load vendor contact when vendor changes
+  useEffect(() => {
+    const loadVendorContact = async () => {
+      if (!vendorId) {
+        setVendorContact(undefined);
+        return;
+      }
+      try {
+        const contact = await contactsApi.getById(vendorId);
+        if (contact) {
+          setVendorContact(dbContactToFrontend(contact));
+        }
+      } catch (error) {
+        console.error('Failed to load vendor contact:', error);
+      }
+    };
+    loadVendorContact();
+  }, [vendorId]);
 
   // Close options menu when clicking outside
   useEffect(() => {
@@ -132,11 +218,44 @@ export default function ExpenseForm({ expense, onCancel }: ExpenseFormProps) {
     }
   }, [effectivePricingType]);
 
+  // Auto-fetch exchange rate when currency or expense date changes
+  useEffect(() => {
+    const fetchRate = async () => {
+      // Skip if THB (no conversion needed)
+      if (currency === 'THB') {
+        setExchangeRate(1);
+        return;
+      }
+
+      // Skip if no expense date set
+      if (!expenseDate) return;
+
+      // Skip if editing and rate already set (user may have manually entered)
+      if (isEditing && expense?.fxRate && fxRateSource === 'manual') return;
+
+      setIsFetchingRate(true);
+      try {
+        const result = await getExchangeRate(currency, expenseDate);
+        if (result.success && result.rate) {
+          setExchangeRate(result.rate);
+          setFxRateSource(result.source || 'bot');
+          setFxRateDate(result.date || expenseDate);
+        }
+      } catch (error) {
+        console.error('Failed to fetch exchange rate:', error);
+      } finally {
+        setIsFetchingRate(false);
+      }
+    };
+
+    fetchRate();
+  }, [currency, expenseDate]);
+
   // Calculate totals
   const totals = calculateDocumentTotals(lineItems, effectivePricingType);
 
-  // Get vendor details for WHT certificate
-  const selectedVendor = vendorId ? getContactById(vendorId) : undefined;
+  // Use vendorContact for WHT certificate
+  const selectedVendor = vendorContact;
 
   // Helper to get the effective WHT rate from line items
   const getEffectiveWhtRate = (items: ExpenseLineItem[]): number => {
@@ -155,23 +274,16 @@ export default function ExpenseForm({ expense, onCancel }: ExpenseFormProps) {
     return Number(Object.entries(rateCount).sort((a, b) => b[1] - a[1])[0][0]);
   };
 
-  // Format address for WHT certificate
-  const formatAddress = (address?: { street?: string; city?: string; state?: string; postalCode?: string; country?: string }): string => {
-    if (!address) return '';
-    const parts = [address.street, address.city, address.state, address.postalCode, address.country].filter(Boolean);
-    return parts.join(', ');
-  };
-
   // Validation
   const validate = (status: 'draft' | 'approved'): boolean => {
     const newErrors: Record<string, string> = {};
 
     if (!companyId) newErrors.companyId = 'Company is required';
 
-    // For approval, vendor is required
+    // For approval, check required fields (vendor is optional)
     if (status === 'approved') {
-      if (!vendorId) newErrors.vendorId = 'Vendor is required';
       if (!expenseDate) newErrors.expenseDate = 'Expense date is required';
+      if (!paidFromBankAccountId) newErrors.paidFromBankAccountId = 'Bank account is required';
 
       // Check line items
       if (lineItems.length === 0) {
@@ -206,75 +318,208 @@ export default function ExpenseForm({ expense, onCancel }: ExpenseFormProps) {
     setIsSaving(true);
 
     try {
-      const expenseData = {
+      // Generate expense number if new
+      const expenseNumber = expense?.expenseNumber || `EXP-${getTodayISO().replace(/-/g, '').slice(2, 6)}${String(Math.floor(Math.random() * 10000)).padStart(4, '0')}`;
+
+      // Prepare expense data for Supabase
+      console.log('[ExpenseForm] Saving with attachments:', attachments);
+      const expenseDbData = frontendExpenseToDb({
         companyId,
+        expenseNumber,
         vendorId,
         vendorName,
         supplierInvoiceNumber: supplierInvoiceNumber || undefined,
-        supplierInvoiceDate: supplierInvoiceDate || undefined,
         expenseDate,
         dueDate: dueDate || undefined,
         pricingType: effectivePricingType,
         currency,
-        exchangeRate: currency !== 'THB' ? exchangeRate : undefined,
-        lineItems,
+        fxRate: currency !== 'THB' ? exchangeRate : undefined,
+        fxRateSource: currency !== 'THB' ? fxRateSource : undefined,
+        fxBaseCurrency: currency !== 'THB' ? currency : undefined,
+        fxTargetCurrency: currency !== 'THB' ? 'THB' : undefined,
+        fxRateDate: currency !== 'THB' ? fxRateDate : undefined,
         subtotal: totals.subtotal,
         vatAmount: totals.vatAmount,
         totalAmount: totals.totalAmount,
         whtAmount: totals.whtAmount,
         netPayable: totals.netPayable,
-        paymentStatus: expense?.paymentStatus || 'unpaid' as const,
-        amountPaid: expense?.amountPaid || 0,
-        amountOutstanding: totals.netPayable - (expense?.amountPaid || 0),
-        receiptStatus,
-        attachments: attachments.length > 0 ? attachments : undefined,
+        paymentStatus: expense?.paymentStatus || 'unpaid',
         status,
-        approvedDate: status === 'approved' ? getTodayISO() : undefined,
         notes: notes || undefined,
-        createdBy: expense?.createdBy || 'current-user',
-      };
+        attachments: attachments.length > 0 ? attachments : undefined,
+        createdBy: expense?.createdBy || undefined,
+      });
+      console.log('[ExpenseForm] Expense DB data attachments:', expenseDbData.attachments);
+
+      // Prepare line items for Supabase
+      const lineItemsDbData = lineItems.map((item) => frontendExpenseLineItemToDb(item, ''));
 
       let savedExpenseId: string | undefined;
 
       if (isEditing && expense) {
-        const updated = updateExpenseRecord(expense.id, expenseData);
-        if (updated) {
-          setCurrentStatus(status);
-          savedExpenseId = expense.id;
-        }
+        // Update existing expense
+        await expensesApi.update(expense.id, expenseDbData);
+        await expensesApi.updateLineItems(expense.id, lineItemsDbData.map(li => ({ ...li, expense_id: expense.id })));
+        setCurrentStatus(status);
+        savedExpenseId = expense.id;
       } else {
-        const newExpense = createExpenseRecord(expenseData);
-        if (newExpense) {
-          savedExpenseId = newExpense.id;
+        // Create new expense
+        const newExpense = await expensesApi.create(expenseDbData, lineItemsDbData);
+        savedExpenseId = newExpense.id;
+      }
+
+      // Create WHT certificate when expense is approved and has WHT amount
+      if (savedExpenseId && status === 'approved' && totals.whtAmount > 0) {
+        try {
+          const company = companies.find(c => c.id === companyId);
+          const companyCode = company?.name?.substring(0, 3).toUpperCase() || 'FYL';
+
+          // Generate certificate number
+          const certificateNumber = await whtCertificatesApi.generateCertificateNumber(companyId, companyCode);
+
+          // Format address from billing address JSON if available
+          const formatAddress = (addr: { street?: string; city?: string; state?: string; country?: string } | null | undefined): string => {
+            if (!addr) return '';
+            const parts = [addr.street, addr.city, addr.state, addr.country].filter(Boolean);
+            return parts.join(', ');
+          };
+
+          // Determine if vendor is a company (PND53) or individual (PND3)
+          const isVendorCompany = vendorContact?.taxId?.startsWith('0') ?? true; // Thai company tax IDs start with 0
+
+          // Get tax period from expense date
+          const taxPeriod = expenseDate.substring(0, 7); // YYYY-MM format
+
+          // Create WHT certificate
+          const certificate = await whtCertificatesApi.create({
+            company_id: companyId,
+            certificate_number: certificateNumber,
+            form_type: isVendorCompany ? 'pnd53' : 'pnd3',
+            payer_name: company?.name || '',
+            payer_address: formatAddress(company?.billingAddress as { street?: string; city?: string; state?: string; country?: string } | null),
+            payer_tax_id: company?.taxId || '',
+            payee_vendor_id: vendorId || null,
+            payee_name: vendorName,
+            payee_address: formatAddress(vendorContact?.billingAddress as { street?: string; city?: string; state?: string; country?: string } | null),
+            payee_tax_id: vendorContact?.taxId || null,
+            payee_is_company: isVendorCompany,
+            payment_date: expenseDate,
+            income_type: '40(8)', // Default to "Other services"
+            amount_paid: totals.subtotal,
+            wht_rate: getEffectiveWhtRate(lineItems),
+            wht_amount: totals.whtAmount,
+            tax_period: taxPeriod,
+            status: 'issued',
+            issued_date: getTodayISO(),
+          });
+
+          // Link certificate to expense
+          await whtCertificatesApi.linkToExpense(certificate.id, savedExpenseId);
+
+          console.log('WHT certificate created:', certificate.certificate_number);
+        } catch (whtError) {
+          console.error('Failed to create WHT certificate:', whtError);
+          // Don't fail the expense save, just log the error
         }
       }
 
-      // Auto-create WHT certificate when approving with WHT > 0
-      if (savedExpenseId && status === 'approved' && totals.whtAmount > 0) {
-        const expenseDateObj = new Date(expenseDate);
-        const taxPeriod = `${expenseDateObj.getFullYear()}-${String(expenseDateObj.getMonth() + 1).padStart(2, '0')}`;
+      // Create payment record if bank account is selected
+      if (savedExpenseId && paidFromBankAccountId && totals.netPayable > 0) {
+        try {
+          const paymentRecord = await expensesApi.addPayment({
+            expense_id: savedExpenseId,
+            payment_date: expenseDate,
+            amount: totals.netPayable,
+            paid_from: paidFromBankAccountId,
+            reference: supplierInvoiceNumber || undefined,
+            remark: `Paid from bank account`,
+          });
 
-        createWhtCertificate({
-          formType: 'pnd53', // Default for company payee
-          payerCompanyId: companyId,
-          payerName: selectedCompany?.name || '',
-          payerAddress: formatAddress(selectedCompany?.registeredAddress),
-          payerTaxId: selectedCompany?.taxId || '',
-          payeeVendorId: vendorId,
-          payeeName: vendorName,
-          payeeAddress: formatAddress(selectedVendor?.billingAddress),
-          payeeTaxId: selectedVendor?.taxId || '',
-          payeeIsCompany: true, // Default to company
-          paymentDate: expenseDate,
-          incomeType: '40(7)', // Default: รับเหมา/Contracting (most common for expenses)
-          amountPaid: totals.subtotal,
-          whtRate: getEffectiveWhtRate(lineItems),
-          whtAmount: totals.whtAmount,
-          taxPeriod,
-          expenseRecordIds: [savedExpenseId],
-          status: 'draft',
-          createdBy: 'current-user',
-        }, 'FYL');
+          // Update expense payment status to 'paid'
+          await expensesApi.update(savedExpenseId, {
+            payment_status: 'paid',
+          });
+
+          // Create payment journal entry using event-driven system
+          try {
+            const { accountingEventsApi } = await import('@/lib/supabase/api/accountingEvents');
+
+            // Get bank account GL code
+            const bankAccount = bankAccounts.find(ba => ba.id === paidFromBankAccountId);
+            const bankGlCode = bankAccount?.glAccountCode || '1010';
+
+            const paymentEventResult = await accountingEventsApi.createAndProcess(
+              'EXPENSE_PAID',
+              expenseDate,
+              [companyId],
+              {
+                expenseId: savedExpenseId,
+                paymentId: paymentRecord.id,
+                expenseNumber,
+                vendorName,
+                paymentDate: expenseDate,
+                paymentAmount: totals.netPayable,
+                bankAccountId: paidFromBankAccountId,
+                bankAccountGlCode: bankGlCode,
+                currency,
+              },
+              'expense_payment',
+              paymentRecord.id
+            );
+
+            if (paymentEventResult.success) {
+              console.log('Payment event processed, journal IDs:', paymentEventResult.journalEntryIds);
+            } else {
+              console.warn('Payment event warning:', paymentEventResult.error);
+            }
+          } catch (journalError) {
+            console.error('Failed to create payment event:', journalError);
+          }
+
+          console.log('Payment record created for expense:', savedExpenseId);
+        } catch (paymentError) {
+          console.error('Failed to create payment record:', paymentError);
+          // Don't fail the expense save, just log the error
+        }
+      }
+
+      // Create approval journal entry when expense is approved (using event-driven system)
+      if (savedExpenseId && status === 'approved') {
+        try {
+          const { accountingEventsApi } = await import('@/lib/supabase/api/accountingEvents');
+
+          const approvalEventResult = await accountingEventsApi.createAndProcess(
+            'EXPENSE_APPROVED',
+            expenseDate,
+            [companyId],
+            {
+              expenseId: savedExpenseId,
+              expenseNumber,
+              vendorName,
+              expenseDate,
+              lineItems: lineItems.map(li => ({
+                description: li.description,
+                accountCode: li.accountCode || null,
+                amount: li.preVatAmount || li.amount,
+              })),
+              totalSubtotal: totals.subtotal,
+              totalVatAmount: totals.vatAmount,
+              totalAmount: totals.totalAmount,
+              currency,
+            },
+            'expense',
+            savedExpenseId
+          );
+
+          if (approvalEventResult.success) {
+            console.log('Expense approval event processed, journal IDs:', approvalEventResult.journalEntryIds);
+          } else {
+            console.warn('Expense approval event warning:', approvalEventResult.error);
+          }
+        } catch (journalError) {
+          console.error('Failed to create expense approval event:', journalError);
+          // Don't fail the expense save, just log the error
+        }
       }
 
       // Navigate after save
@@ -285,9 +530,18 @@ export default function ExpenseForm({ expense, onCancel }: ExpenseFormProps) {
           router.push(`/accounting/manager/expenses/expense-records/${savedExpenseId}`);
         }
       }
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Error saving expense:', error);
-      alert('Failed to save expense. Please try again.');
+      // Extract error message from Supabase error
+      let errorMessage = 'Failed to save expense. Please try again.';
+      if (error && typeof error === 'object') {
+        const err = error as { message?: string; details?: string; hint?: string; code?: string };
+        if (err.message) errorMessage = err.message;
+        if (err.details) errorMessage += `\n\nDetails: ${err.details}`;
+        if (err.hint) errorMessage += `\n\nHint: ${err.hint}`;
+        console.error('Error details:', { message: err.message, details: err.details, hint: err.hint, code: err.code });
+      }
+      alert(errorMessage);
     } finally {
       setIsSaving(false);
     }
@@ -307,18 +561,13 @@ export default function ExpenseForm({ expense, onCancel }: ExpenseFormProps) {
 
     setIsSaving(true);
     try {
-      const updated = updateExpenseRecord(expense.id, {
-        status: 'void',
-        voidedDate: getTodayISO(),
-        voidReason: voidReason || undefined,
-      });
+      // Use void function which also deletes related journal entries
+      await expensesApi.void(expense.id, voidReason || undefined);
 
-      if (updated) {
-        setCurrentStatus('void');
-        setShowVoidModal(false);
-        setVoidReason('');
-        router.push('/accounting/manager/expenses/expense-records');
-      }
+      setCurrentStatus('void');
+      setShowVoidModal(false);
+      setVoidReason('');
+      router.push('/accounting/manager/expenses/expense-records');
     } catch (error) {
       console.error('Error voiding expense:', error);
       alert('Failed to void expense. Please try again.');
@@ -330,6 +579,18 @@ export default function ExpenseForm({ expense, onCancel }: ExpenseFormProps) {
   const isVoided = currentStatus === 'void';
   const isApproved = currentStatus === 'approved';
   const canEdit = !isVoided && (!isApproved || isEditingApproved);
+
+  // Loading state
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center min-h-[400px]">
+        <div className="flex flex-col items-center gap-3">
+          <Loader2 className="h-8 w-8 animate-spin text-[#5A7A8F]" />
+          <p className="text-sm text-gray-500">Loading...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -430,13 +691,44 @@ export default function ExpenseForm({ expense, onCancel }: ExpenseFormProps) {
                           {totals.whtAmount > 0 && expense && (
                             <button
                               type="button"
-                              onClick={() => {
-                                const whtRecords = getWhtToSupplierByExpenseId(expense.id);
-                                if (whtRecords.length > 0) {
-                                  setWhtTransaction(whtRecords[0]);
-                                  setShowWhtView(true);
-                                }
+                              onClick={async () => {
                                 setShowOptionsMenu(false);
+                                try {
+                                  // Fetch WHT certificate linked to this expense
+                                  const certificates = await whtCertificatesApi.getByExpense(expense.id);
+                                  if (certificates.length === 0) {
+                                    alert('No WHT certificate found for this expense. It may not have been paid yet.');
+                                    return;
+                                  }
+                                  // Use the first certificate
+                                  const cert = certificates[0];
+                                  // Convert to WhtToSupplier format for the print view
+                                  const whtData: WhtToSupplier = {
+                                    id: cert.id,
+                                    date: cert.payment_date,
+                                    documentNumber: cert.certificate_number,
+                                    documentType: 'payment',
+                                    supplierId: cert.payee_vendor_id || '',
+                                    supplierName: cert.payee_name,
+                                    supplierTaxId: cert.payee_tax_id || '',
+                                    companyId: cert.company_id,
+                                    companyName: selectedCompany?.name || '',
+                                    paymentAmount: cert.amount_paid,
+                                    whtType: cert.form_type as 'pnd3' | 'pnd53',
+                                    whtRate: cert.wht_rate,
+                                    whtAmount: cert.wht_amount,
+                                    whtCertificateNumber: cert.certificate_number,
+                                    status: cert.status === 'filed' ? 'filed' : cert.status === 'issued' ? 'submitted' : 'pending',
+                                    submissionDate: cert.filed_date || undefined,
+                                    period: cert.tax_period,
+                                    currency: 'THB',
+                                  };
+                                  setWhtTransaction(whtData);
+                                  setShowWhtView(true);
+                                } catch (error) {
+                                  console.error('Error loading WHT certificate:', error);
+                                  alert('Failed to load WHT certificate. Please try again.');
+                                }
                               }}
                               className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2"
                             >
@@ -582,7 +874,7 @@ export default function ExpenseForm({ expense, onCancel }: ExpenseFormProps) {
           {/* Vendor Selector */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
-              Vendor <span className="text-red-500">*</span>
+              Vendor
             </label>
             <VendorSelector
               value={vendorId}
@@ -590,12 +882,11 @@ export default function ExpenseForm({ expense, onCancel }: ExpenseFormProps) {
                 setVendorId(id);
                 setVendorName(name);
               }}
-              required
               disabled={!canEdit}
             />
-            {errors.vendorId && (
-              <p className="mt-1 text-xs text-red-600">{errors.vendorId}</p>
-            )}
+            <p className="mt-1 text-xs text-gray-500">
+              Optional for drafts, recommended for approved expenses
+            </p>
           </div>
 
           {/* Supplier Invoice Number */}
@@ -691,20 +982,45 @@ export default function ExpenseForm({ expense, onCancel }: ExpenseFormProps) {
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 Exchange Rate to THB
               </label>
-              <input
-                type="number"
-                value={exchangeRate || ''}
-                onChange={(e) =>
-                  setExchangeRate(parseFloat(e.target.value) || undefined)
-                }
-                disabled={!canEdit}
-                step="0.0001"
-                placeholder="e.g., 35.50"
-                className="w-full px-4 py-2.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#5A7A8F]/20 focus:border-[#5A7A8F] disabled:bg-gray-100 disabled:cursor-not-allowed"
-              />
+              <div className="relative">
+                <input
+                  type="number"
+                  value={exchangeRate || ''}
+                  onChange={(e) => {
+                    setExchangeRate(parseFloat(e.target.value) || undefined);
+                    setFxRateSource('manual');
+                  }}
+                  disabled={!canEdit || isFetchingRate}
+                  step="0.0001"
+                  placeholder="e.g., 35.50"
+                  className="w-full px-4 py-2.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#5A7A8F]/20 focus:border-[#5A7A8F] disabled:bg-gray-100 disabled:cursor-not-allowed"
+                />
+                {isFetchingRate && (
+                  <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                    <Loader2 className="h-4 w-4 animate-spin text-[#5A7A8F]" />
+                  </div>
+                )}
+              </div>
               <p className="mt-1 text-xs text-gray-500">
-                1 {currency} = ? THB
+                1 {currency} = {exchangeRate ? exchangeRate.toFixed(4) : '?'} THB
+                {fxRateSource === 'bot' && !isFetchingRate && (
+                  <span className="ml-2 text-green-600">• Bank of Thailand ({fxRateDate || expenseDate})</span>
+                )}
+                {fxRateSource === 'fallback' && !isFetchingRate && (
+                  <span className="ml-2 text-amber-600">• Frankfurt fallback ({fxRateDate || expenseDate})</span>
+                )}
+                {fxRateSource === 'api' && !isFetchingRate && (
+                  <span className="ml-2 text-green-600">• API rate ({fxRateDate || expenseDate})</span>
+                )}
+                {fxRateSource === 'manual' && !isFetchingRate && (
+                  <span className="ml-2 text-gray-600">• Manual rate</span>
+                )}
               </p>
+              {exchangeRate && totals.totalAmount > 0 && (
+                <p className="mt-1 text-xs font-medium text-[#5A7A8F]">
+                  THB Total: ฿{(totals.totalAmount * exchangeRate).toLocaleString('th-TH', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                </p>
+              )}
             </div>
           )}
 
@@ -723,6 +1039,43 @@ export default function ExpenseForm({ expense, onCancel }: ExpenseFormProps) {
               <option value="received">Received</option>
               <option value="not_required">Not Required</option>
             </select>
+          </div>
+
+          {/* Paid From Bank Account */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Paid From Bank Account <span className="text-red-500">*</span>
+            </label>
+            <select
+              value={paidFromBankAccountId}
+              onChange={(e) => setPaidFromBankAccountId(e.target.value)}
+              disabled={!canEdit || !companyId}
+              className={`w-full px-4 py-2.5 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-[#5A7A8F]/20 focus:border-[#5A7A8F] disabled:bg-gray-100 disabled:cursor-not-allowed ${
+                errors.paidFromBankAccountId ? 'border-red-500' : 'border-gray-300'
+              }`}
+            >
+              <option value="">Select bank account...</option>
+              {bankAccounts.map((account) => (
+                <option key={account.id} value={account.id}>
+                  {account.accountName} - {account.bankInformation?.bankName} ({account.currency})
+                </option>
+              ))}
+            </select>
+            {errors.paidFromBankAccountId && (
+              <p className="mt-1 text-xs text-red-500">
+                {errors.paidFromBankAccountId}
+              </p>
+            )}
+            {!companyId && !errors.paidFromBankAccountId && (
+              <p className="mt-1 text-xs text-gray-500">
+                Select a company first to load bank accounts
+              </p>
+            )}
+            {companyId && bankAccounts.length === 0 && !errors.paidFromBankAccountId && (
+              <p className="mt-1 text-xs text-amber-600">
+                No bank accounts found for this company
+              </p>
+            )}
           </div>
         </div>
 
@@ -811,8 +1164,9 @@ export default function ExpenseForm({ expense, onCancel }: ExpenseFormProps) {
             onChange={setLineItems}
             pricingType={effectivePricingType}
             currency={currency}
-            projects={allProjects}
+            projects={companyProjects}
             readOnly={!canEdit}
+            exchangeRate={exchangeRate}
           />
         )}
 
@@ -833,6 +1187,7 @@ export default function ExpenseForm({ expense, onCancel }: ExpenseFormProps) {
           readOnly={!canEdit}
           label="Document Attachments"
           description="Upload supplier invoices, receipts, or supporting documents"
+          expenseId={expense?.id}
         />
       </div>
 
@@ -946,6 +1301,14 @@ export default function ExpenseForm({ expense, onCancel }: ExpenseFormProps) {
           approvedBy={expense.approvedBy}
           isOpen={showPrintView}
           onClose={() => setShowPrintView(false)}
+        />
+      )}
+
+      {/* Related Journal Entries - Only show for existing expenses */}
+      {isEditing && expense && (
+        <RelatedJournalEntries
+          documentType="expense"
+          documentId={expense.id}
         />
       )}
 

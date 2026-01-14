@@ -87,7 +87,10 @@ export const quotationsApi = {
       .eq('id', id)
       .select()
       .single();
-    if (error) throw error;
+    if (error) {
+      console.error('Supabase update error:', error);
+      throw new Error(error.message || error.code || 'Failed to update quotation');
+    }
     return data;
   },
 
@@ -152,7 +155,10 @@ export const quotationsApi = {
       .from('quotation_line_items')
       .delete()
       .eq('quotation_id', quotationId);
-    if (deleteError) throw deleteError;
+    if (deleteError) {
+      console.error('Delete line items error:', deleteError);
+      throw new Error(deleteError.message || 'Failed to delete existing line items');
+    }
 
     if (lineItems.length > 0) {
       const lineItemsWithOrder = lineItems.map((item, index) => ({
@@ -164,7 +170,10 @@ export const quotationsApi = {
       const { error: insertError } = await supabase
         .from('quotation_line_items')
         .insert(lineItemsWithOrder);
-      if (insertError) throw insertError;
+      if (insertError) {
+        console.error('Insert line items error:', insertError);
+        throw new Error(insertError.message || 'Failed to insert line items');
+      }
     }
   },
 

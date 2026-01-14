@@ -1,11 +1,12 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
-import { X } from "lucide-react";
+import { X, Loader2 } from "lucide-react";
 import type { PettyCashWallet, WalletStatus } from "@/data/petty-cash/types";
-import type { Currency } from "@/data/company/types";
-import { getActiveCompanies } from "@/data/company/companies";
-import { createWallet, updateWallet, CreateWalletInput } from "@/data/petty-cash/wallets";
+import type { Currency, Company } from "@/data/company/types";
+import { companiesApi } from "@/lib/supabase/api/companies";
+import { pettyCashApi } from "@/lib/supabase/api/pettyCash";
+import { dbCompanyToFrontend } from "@/lib/supabase/transforms";
 
 interface WalletFormModalProps {
   isOpen: boolean;
@@ -34,6 +35,11 @@ export function WalletFormModal({
   onSave,
   editingWallet,
 }: WalletFormModalProps) {
+  // Async loaded data
+  const [companies, setCompanies] = useState<Company[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+
   // Form state
   const [walletName, setWalletName] = useState("");
   const [userName, setUserName] = useState("");
@@ -49,8 +55,22 @@ export function WalletFormModal({
   // Validation errors
   const [errors, setErrors] = useState<Record<string, string>>({});
 
-  // Get data for dropdowns
-  const companies = useMemo(() => getActiveCompanies(), []);
+  // Load companies on mount
+  useEffect(() => {
+    const loadCompanies = async () => {
+      if (!isOpen) return;
+      setIsLoading(true);
+      try {
+        const companiesData = await companiesApi.getActive();
+        setCompanies(companiesData.map(dbCompanyToFrontend));
+      } catch (error) {
+        console.error('Failed to load companies:', error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    loadCompanies();
+  }, [isOpen]);
 
   // Get company name for the selected company
   const selectedCompany = useMemo(() => {
@@ -154,48 +174,49 @@ export function WalletFormModal({
     return Object.keys(newErrors).length === 0;
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
     if (!validateForm()) {
       return;
     }
 
-    const companyName = selectedCompany?.name || "";
+    setIsSaving(true);
 
-    if (editingWallet) {
-      // Update existing wallet
-      updateWallet(editingWallet.id, {
-        walletName,
-        userName,
-        userEmail: userEmail || undefined,
-        userRole: userRole || undefined,
-        companyId,
-        companyName,
-        currency,
-        balanceLimit: balanceLimit ? parseFloat(balanceLimit) : undefined,
-        lowBalanceThreshold: lowBalanceThreshold ? parseFloat(lowBalanceThreshold) : undefined,
-        status,
-      });
-    } else {
-      // Create new wallet
-      const input: CreateWalletInput = {
-        walletName,
-        userName,
-        userEmail: userEmail || undefined,
-        userRole: userRole || undefined,
-        companyId,
-        companyName,
-        beginningBalance: beginningBalance ? parseFloat(beginningBalance) : 0,
-        currency,
-        balanceLimit: balanceLimit ? parseFloat(balanceLimit) : undefined,
-        lowBalanceThreshold: lowBalanceThreshold ? parseFloat(lowBalanceThreshold) : undefined,
-      };
-      createWallet(input);
+    try {
+      if (editingWallet) {
+        // Update existing wallet
+        await pettyCashApi.updateWallet(editingWallet.id, {
+          wallet_name: walletName,
+          user_name: userName,
+          company_id: companyId,
+          currency,
+          balance_limit: balanceLimit ? parseFloat(balanceLimit) : null,
+          low_balance_threshold: lowBalanceThreshold ? parseFloat(lowBalanceThreshold) : null,
+          status,
+        });
+      } else {
+        // Create new wallet
+        await pettyCashApi.createWallet({
+          wallet_name: walletName,
+          user_name: userName,
+          company_id: companyId,
+          balance: beginningBalance ? parseFloat(beginningBalance) : 0,
+          currency,
+          balance_limit: balanceLimit ? parseFloat(balanceLimit) : null,
+          low_balance_threshold: lowBalanceThreshold ? parseFloat(lowBalanceThreshold) : null,
+          status: 'active',
+        });
+      }
+
+      onSave();
+      onClose();
+    } catch (error) {
+      console.error('Failed to save wallet:', error);
+      setErrors({ submit: 'Failed to save wallet. Please try again.' });
+    } finally {
+      setIsSaving(false);
     }
-
-    onSave();
-    onClose();
   };
 
   if (!isOpen) return null;

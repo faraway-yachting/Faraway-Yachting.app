@@ -1,9 +1,11 @@
 'use client';
 
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo, useEffect } from 'react';
 import { X, Upload, FileText, Trash2, Loader2, Camera } from 'lucide-react';
 import type { Attachment } from '@/data/petty-cash/types';
-import { getAllProjects } from '@/data/project/projects';
+import type { Project } from '@/data/project/types';
+import { projectsApi } from '@/lib/supabase/api/projects';
+import { dbProjectToFrontend } from '@/lib/supabase/transforms';
 import {
   formatCurrency,
   getTodayISO,
@@ -25,8 +27,24 @@ export default function ExpenseForm({
   onSave,
   onCancel,
 }: ExpenseFormProps) {
-  // Get all projects (accountant will assign company later)
-  const projects = useMemo(() => getAllProjects(), []);
+  // Async loaded data
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [isLoadingProjects, setIsLoadingProjects] = useState(true);
+
+  // Load projects on mount
+  useEffect(() => {
+    const loadProjects = async () => {
+      try {
+        const projectsData = await projectsApi.getActive();
+        setProjects(projectsData.map(dbProjectToFrontend));
+      } catch (error) {
+        console.error('Failed to load projects:', error);
+      } finally {
+        setIsLoadingProjects(false);
+      }
+    };
+    loadProjects();
+  }, []);
 
   // Form state
   const [projectId, setProjectId] = useState('');

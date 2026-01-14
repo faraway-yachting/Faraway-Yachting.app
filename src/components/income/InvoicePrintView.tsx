@@ -22,6 +22,11 @@ interface InvoicePrintViewProps {
     invoiceDate: string;
     dueDate: string;
     projectId?: string;
+    boatId?: string;
+    charterType?: string;
+    charterDateFrom?: string;
+    charterDateTo?: string;
+    charterTime?: string;
     lineItems: LineItem[];
     pricingType: PricingType;
     subtotal: number;
@@ -30,6 +35,7 @@ interface InvoicePrintViewProps {
     whtAmount: number;
     currency: string;
     notes?: string;
+    reference?: string;
   };
   company: Company | undefined;
   client: Contact | undefined;

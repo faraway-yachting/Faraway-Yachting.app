@@ -47,7 +47,7 @@ export function ModuleCard({ module, onNotify }: ModuleCardProps) {
     </div>
   );
 
-  if (status === "live" && href) {
+  if (href) {
     return <Link href={href}>{cardContent}</Link>;
   }
 

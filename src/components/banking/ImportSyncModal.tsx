@@ -3,14 +3,15 @@
 import { useState, useRef } from 'react';
 import { X, Download, Upload, RefreshCw, CheckCircle, AlertCircle, Loader2, FileText } from 'lucide-react';
 import { BankAccount } from '@/data/banking/types';
-import { getCompanyById } from '@/data/company/companies';
 import { syncBankFeed, syncAllBankFeeds, getBankFeedStatus, getLastImportDate } from '@/data/banking/bankFeedAPI';
 import { parseCSV, CSVImportResult } from '@/utils/banking/csvImport';
+import { bankFeedLinesApi, type BankFeedLineInsert } from '@/lib/supabase/api/bankFeedLines';
 
 interface ImportSyncModalProps {
   isOpen: boolean;
   onClose: () => void;
   bankAccountsInScope: BankAccount[];
+  companies: { id: string; name: string }[];
   onImportComplete: () => void;
 }
 
@@ -29,6 +30,7 @@ export function ImportSyncModal({
   isOpen,
   onClose,
   bankAccountsInScope,
+  companies,
   onImportComplete,
 }: ImportSyncModalProps) {
   const [syncStates, setSyncStates] = useState<Record<string, AccountSyncState>>({});
@@ -42,7 +44,7 @@ export function ImportSyncModal({
     account,
     feedStatus: getBankFeedStatus(account.id),
     lastImport: getLastImportDate(account.id),
-    company: getCompanyById(account.companyId),
+    company: companies.find(c => c.id === account.companyId),
   }));
 
   const activeFeeds = accountsWithStatus.filter(a => a.feedStatus === 'active');
@@ -183,6 +185,46 @@ export function ImportSyncModal({
 
       setUploadResult(result);
 
+      // Save parsed lines to Supabase if successful
+      let actuallyAdded = 0;
+      if (result.success && result.data && result.data.length > 0) {
+        try {
+          // Convert parsed BankFeedLine data to Supabase insert format
+          const linesToInsert: BankFeedLineInsert[] = result.data.map(line => ({
+            bank_account_id: line.bankAccountId,
+            company_id: line.companyId,
+            project_id: line.projectId || null,
+            currency: line.currency,
+            transaction_date: line.transactionDate,
+            value_date: line.valueDate,
+            description: line.description,
+            reference: line.reference || null,
+            amount: line.amount,
+            running_balance: line.runningBalance ?? null,
+            status: line.status || 'unmatched',
+            matched_amount: line.matchedAmount || 0,
+            imported_by: line.importedBy || null,
+            import_source: line.importSource || 'csv',
+          }));
+
+          // Insert lines one by one to handle duplicates gracefully
+          for (const lineToInsert of linesToInsert) {
+            try {
+              await bankFeedLinesApi.create(lineToInsert);
+              actuallyAdded++;
+            } catch (insertError) {
+              // Skip duplicates (unique constraint violation)
+              const error = insertError as { code?: string };
+              if (error?.code !== '23505') {
+                console.error('Error inserting bank feed line:', insertError);
+              }
+            }
+          }
+        } catch (dbError) {
+          console.error('Error saving to database:', dbError);
+        }
+      }
+
       setSyncStates(prev => ({
         ...prev,
         [selectedAccountForUpload]: {
@@ -192,14 +234,14 @@ export function ImportSyncModal({
           result: {
             success: result.success,
             message: result.success
-              ? `Successfully imported ${result.imported} transaction${result.imported !== 1 ? 's' : ''}${result.duplicates ? ` (${result.duplicates} duplicates found)` : ''}`
+              ? `Successfully imported ${actuallyAdded} transaction${actuallyAdded !== 1 ? 's' : ''}${result.duplicates ? ` (${result.duplicates} duplicates in CSV)` : ''}${actuallyAdded < (result.imported || 0) ? ` (${(result.imported || 0) - actuallyAdded} already existed)` : ''}`
               : result.errors?.join(', ') || 'Upload failed',
-            newLines: result.imported,
+            newLines: actuallyAdded,
           },
         },
       }));
 
-      if (result.success && result.imported && result.imported > 0) {
+      if (result.success && actuallyAdded > 0) {
         setTimeout(() => {
           onImportComplete();
         }, 2000);

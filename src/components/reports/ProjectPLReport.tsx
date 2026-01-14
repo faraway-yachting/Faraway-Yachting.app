@@ -9,18 +9,17 @@ import {
   formatTHBAmount,
   ProjectPLReport as ProjectPLReportData,
 } from "@/lib/reports/projectPLCalculation";
+import { projectsApi } from "@/lib/supabase/api/projects";
 
 interface ProjectPLReportProps {
   projectId: string;
   projectName?: string;
 }
 
-// Projects for selection - matches projectId in income line items
-const mockProjects = [
-  { id: "project-ocean-star", name: "Ocean Star" },
-  { id: "project-wave-rider", name: "Wave Rider" },
-  { id: "project-sea-breeze", name: "Sea Breeze" },
-];
+interface ProjectOption {
+  id: string;
+  name: string;
+}
 
 export function ProjectPLReport({ projectId: initialProjectId, projectName }: ProjectPLReportProps) {
   const [isLoading, setIsLoading] = useState(false);
@@ -29,6 +28,7 @@ export function ProjectPLReport({ projectId: initialProjectId, projectName }: Pr
   // Default to "all" if no initialProjectId provided (empty string or undefined)
   const [projectId, setProjectId] = useState(initialProjectId && initialProjectId.length > 0 ? initialProjectId : "all");
   const [fiscalYear, setFiscalYear] = useState(getRecentFiscalYears(1)[0]);
+  const [projects, setProjects] = useState<ProjectOption[]>([]);
 
   // Drill-down modal state
   const [drillDownOpen, setDrillDownOpen] = useState(false);
@@ -39,13 +39,29 @@ export function ProjectPLReport({ projectId: initialProjectId, projectName }: Pr
 
   const fiscalYears = getRecentFiscalYears(5);
 
+  // Load projects from Supabase
+  useEffect(() => {
+    const loadProjects = async () => {
+      try {
+        const projectsData = await projectsApi.getActive();
+        setProjects(projectsData.map(p => ({ id: p.id, name: p.name })));
+      } catch (error) {
+        console.error("Error loading projects:", error);
+      }
+    };
+    loadProjects();
+  }, []);
+
   const loadReport = useCallback(async () => {
+    if (projects.length === 0 && projectId === "all") {
+      return; // Wait for projects to load
+    }
     setIsLoading(true);
     try {
       if (projectId === "all") {
         // Load all projects in parallel
         const allReports = await Promise.all(
-          mockProjects.map(p => generateProjectPL(p.id, fiscalYear))
+          projects.map(p => generateProjectPL(p.id, fiscalYear))
         );
         // Filter out any null reports
         setReports(allReports.filter((r): r is ProjectPLReportData => r !== null));
@@ -61,13 +77,13 @@ export function ProjectPLReport({ projectId: initialProjectId, projectName }: Pr
     } finally {
       setIsLoading(false);
     }
-  }, [projectId, fiscalYear]);
+  }, [projectId, fiscalYear, projects]);
 
   useEffect(() => {
-    if (projectId) {
+    if (projectId && (projectId !== "all" || projects.length > 0)) {
       loadReport();
     }
-  }, [projectId, fiscalYear, loadReport]);
+  }, [projectId, fiscalYear, loadReport, projects]);
 
   const handleCellClick = (month: string, type: "income" | "expense", clickedProjectId?: string, clickedProjectName?: string) => {
     setDrillDownMonth(month);
@@ -134,7 +150,7 @@ export function ProjectPLReport({ projectId: initialProjectId, projectName }: Pr
     URL.revokeObjectURL(link.href);
   };
 
-  const selectedProject = mockProjects.find((p) => p.id === projectId);
+  const selectedProject = projects.find((p) => p.id === projectId);
 
   return (
     <div>
@@ -184,7 +200,7 @@ export function ProjectPLReport({ projectId: initialProjectId, projectName }: Pr
               className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
             >
               <option value="all">All Projects</option>
-              {mockProjects.map((project) => (
+              {projects.map((project) => (
                 <option key={project.id} value={project.id}>
                   {project.name}
                 </option>

@@ -4,15 +4,17 @@ import { useState } from "react";
 import { AppShell } from "@/components/accounting/AppShell";
 import { PLReport } from "@/components/reports/PLReport";
 import { ProjectPLReport } from "@/components/reports/ProjectPLReport";
-import { BarChart3, FileText, TrendingUp, Building2, Ship, Download } from "lucide-react";
+import { BalanceSheetReport } from "@/components/reports/BalanceSheetReport";
+import { BarChart3, FileText, TrendingUp, Building2, Ship } from "lucide-react";
 
-type ReportTab = "pl" | "project-pl" | "other";
+type ReportTab = "pl" | "balance-sheet" | "project-pl" | "other";
 
 export default function ReportsPage() {
   const [activeTab, setActiveTab] = useState<ReportTab>("pl");
 
   const tabs = [
     { id: "pl" as ReportTab, label: "P&L Report", icon: TrendingUp },
+    { id: "balance-sheet" as ReportTab, label: "Balance Sheet", icon: Building2 },
     { id: "project-pl" as ReportTab, label: "Project P&L", icon: Ship },
     { id: "other" as ReportTab, label: "Other Reports", icon: FileText },
   ];
@@ -47,6 +49,8 @@ export default function ReportsPage() {
       {/* Tab Content */}
       {activeTab === "pl" && <PLReport />}
 
+      {activeTab === "balance-sheet" && <BalanceSheetReport />}
+
       {activeTab === "project-pl" && <ProjectPLReport projectId="" />}
 
       {activeTab === "other" && (
@@ -59,34 +63,6 @@ export default function ReportsPage() {
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {/* Balance Sheet */}
-            <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
-              <div className="flex items-start gap-4">
-                <div className="flex h-12 w-12 items-center justify-center rounded-full bg-blue-50">
-                  <Building2 className="h-6 w-6 text-blue-600" />
-                </div>
-                <div className="flex-1">
-                  <h3 className="text-lg font-semibold text-gray-900 mb-1">
-                    Balance Sheet
-                  </h3>
-                  <p className="text-sm text-gray-600 mb-3">
-                    Assets, liabilities, and equity overview
-                  </p>
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs text-gray-500">
-                      Period: Monthly, Yearly
-                    </span>
-                    <button
-                      disabled
-                      className="inline-flex items-center gap-2 rounded-lg bg-gray-100 px-3 py-1.5 text-xs font-medium text-gray-400 cursor-not-allowed"
-                    >
-                      Coming Soon
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-
             {/* Cash Flow Statement */}
             <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
               <div className="flex items-start gap-4">

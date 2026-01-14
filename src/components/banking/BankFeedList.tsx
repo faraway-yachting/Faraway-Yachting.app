@@ -121,6 +121,17 @@ export function BankFeedList({
               const hasMatches = line.matches.length > 0;
               const hasSuggestions = line.confidenceScore && line.confidenceScore > 0;
 
+              // Derive actual status from matches - if matches exist, it's matched
+              // This handles cases where database status is out of sync
+              const actualStatus: BankFeedStatus = hasMatches
+                ? 'matched'
+                : line.status;
+
+              // Calculate actual matched amount from matches if database value is incorrect
+              const actualMatchedAmount = hasMatches
+                ? line.matches.reduce((sum, m) => sum + m.matchedAmount, 0)
+                : line.matchedAmount;
+
               return (
                 <div
                   key={line.id}
@@ -137,8 +148,8 @@ export function BankFeedList({
                       <span className="text-xs font-medium text-gray-600">
                         {formatDate(line.transactionDate)}
                       </span>
-                      {getStatusBadge(line.status)}
-                      {hasSuggestions && getConfidenceBadge(line.confidenceScore)}
+                      {getStatusBadge(actualStatus)}
+                      {hasSuggestions && !hasMatches && getConfidenceBadge(line.confidenceScore)}
                     </div>
                     <div className={`text-sm font-bold ${getAmountColor(line.amount)}`}>
                       {formatAmount(line.amount, line.currency)}
@@ -158,11 +169,11 @@ export function BankFeedList({
                     <div className="mb-2">
                       <div className="text-xs text-gray-600">
                         {line.matches.length} match{line.matches.length > 1 ? 'es' : ''} •{' '}
-                        {formatAmount(line.matchedAmount, line.currency)} matched
+                        {formatAmount(actualMatchedAmount, line.currency)} matched
                       </div>
-                      {line.matchedAmount < Math.abs(line.amount) && (
+                      {actualMatchedAmount < Math.abs(line.amount) && (
                         <div className="text-xs text-orange-600 font-medium">
-                          Remaining: {formatAmount(Math.abs(line.amount) - line.matchedAmount, line.currency)}
+                          Remaining: {formatAmount(Math.abs(line.amount) - actualMatchedAmount, line.currency)}
                         </div>
                       )}
                     </div>
@@ -170,7 +181,7 @@ export function BankFeedList({
 
                   {/* Quick actions */}
                   <div className="flex items-center gap-2 mt-2">
-                    {line.status === 'unmatched' && hasSuggestions && (
+                    {actualStatus === 'unmatched' && hasSuggestions && (
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
@@ -182,7 +193,7 @@ export function BankFeedList({
                         Quick Match
                       </button>
                     )}
-                    {line.status === 'unmatched' && (
+                    {actualStatus === 'unmatched' && (
                       <button
                         onClick={(e) => {
                           e.stopPropagation();

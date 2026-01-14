@@ -1,26 +1,23 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { AppShell } from "@/components/accounting/AppShell";
-import { Settings as SettingsIcon, Building2, Users, Bell, CreditCard, Edit2, Anchor, FileText, Wallet, Trash2, Hash } from "lucide-react";
-import { getAllCompanies, getCompanyById } from "@/data/company/companies";
+import { Settings as SettingsIcon, Building2, Users, Bell, CreditCard, Edit2, Anchor, FileText, Wallet, Trash2, Hash, Loader2, Upload } from "lucide-react";
 import { Company } from "@/data/company/types";
 import { CompanyFormModal } from "@/components/company/CompanyFormModal";
-import { companiesApi } from "@/lib/supabase/api";
-import { frontendCompanyToDb } from "@/lib/supabase/transforms";
-import { BankAccountFormModal } from "@/components/banking/BankAccountFormModal";
+import { companiesApi, projectsApi, bankAccountsApi } from "@/lib/supabase/api";
 import {
-  getBankAccountsByCompany,
-  toggleBankAccountStatus,
-  deleteBankAccount,
-} from "@/data/banking/bankAccounts";
+  frontendCompanyToDb,
+  dbCompanyToFrontend,
+  dbProjectToFrontend,
+  frontendProjectToDb,
+  dbBankAccountToFrontend,
+  frontendBankAccountToDb
+} from "@/lib/supabase/transforms";
+import { BankAccountFormModal } from "@/components/banking/BankAccountFormModal";
 import { BankAccount } from "@/data/banking/types";
 import { ProjectFormModal } from "@/components/project/ProjectFormModal";
-import {
-  getAllProjects,
-  deleteProject,
-} from "@/data/project/projects";
 import { Project } from "@/data/project/types";
 import {
   getDocumentPdfSettings,
@@ -30,15 +27,21 @@ import {
 } from "@/data/settings/pdfSettings";
 import type { DocumentType, PdfFieldSettings } from "@/data/settings/types";
 import { PdfPreviewPanel } from "@/components/settings/PdfPreviewPanel";
-import { getAllWallets, deleteWallet } from "@/data/petty-cash/wallets";
+import { pettyCashApi } from "@/lib/supabase/api/pettyCash";
 import type { PettyCashWallet } from "@/data/petty-cash/types";
 import { WalletFormModal } from "@/components/petty-cash/WalletFormModal";
 import { NumberFormatSettings } from "@/components/settings/NumberFormatSettings";
+import { UserManagementModal } from "@/components/settings/UserManagementModal";
+import { ImportPriorYearModal } from "@/components/accounting/ImportPriorYearModal";
+import { JournalEventSettings } from "@/components/accounting/JournalEventSettings";
 
 export default function SettingsPage() {
-  const companies = getAllCompanies();
+  // Loading and error states
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   // Company state
+  const [companies, setCompanies] = useState<Company[]>([]);
   const [showInactiveCompanies, setShowInactiveCompanies] = useState(true);
   const [isCompanyModalOpen, setIsCompanyModalOpen] = useState(false);
   const [editingCompany, setEditingCompany] = useState<Company | null>(null);
@@ -47,40 +50,111 @@ export default function SettingsPage() {
     : companies.filter(c => c.isActive);
 
   // Bank account state
-  const [selectedCompanyId, setSelectedCompanyId] = useState<string>(
-    companies[0]?.id || ""
-  );
+  const [selectedCompanyId, setSelectedCompanyId] = useState<string>("");
+  const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([]);
   const [isBankAccountModalOpen, setIsBankAccountModalOpen] = useState(false);
   const [editingBankAccount, setEditingBankAccount] = useState<BankAccount | null>(null);
   const [showInactiveBankAccounts, setShowInactiveBankAccounts] = useState(true);
-  const [refreshKey, setRefreshKey] = useState(0);
 
-  const companyBankAccounts = getBankAccountsByCompany(selectedCompanyId);
   const filteredBankAccounts = showInactiveBankAccounts
-    ? companyBankAccounts
-    : companyBankAccounts.filter(ba => ba.isActive);
+    ? bankAccounts
+    : bankAccounts.filter(ba => ba.isActive);
 
-  const selectedCompany = getCompanyById(selectedCompanyId);
+  const selectedCompany = companies.find(c => c.id === selectedCompanyId);
 
   // Project state
+  const [projects, setProjects] = useState<Project[]>([]);
   const [isProjectModalOpen, setIsProjectModalOpen] = useState(false);
   const [editingProject, setEditingProject] = useState<Project | null>(null);
   const [showInactiveProjects, setShowInactiveProjects] = useState(true);
 
-  const allProjects = getAllProjects();
   const filteredProjects = showInactiveProjects
-    ? allProjects
-    : allProjects.filter(p => p.status === 'active');
+    ? projects
+    : projects.filter(p => p.status === 'active');
+
+  // Fetch all data on mount
+  useEffect(() => {
+    const fetchData = async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const [companiesData, projectsData, walletsData] = await Promise.all([
+          companiesApi.getAll(),
+          projectsApi.getAll(),
+          pettyCashApi.getAllWallets(),
+        ]);
+        const transformedCompanies = companiesData.map(dbCompanyToFrontend);
+        setCompanies(transformedCompanies);
+        setProjects(projectsData.map(dbProjectToFrontend));
+
+        // Transform wallets from DB format to frontend format
+        setWallets(walletsData.map(w => ({
+          id: w.id,
+          walletName: w.wallet_name,
+          userId: w.user_id || '',
+          userName: w.user_name,
+          companyId: w.company_id,
+          companyName: transformedCompanies.find(c => c.id === w.company_id)?.name || 'Unknown',
+          balance: w.balance,
+          beginningBalance: w.balance, // DB doesn't have separate beginning balance
+          currency: w.currency as PettyCashWallet['currency'],
+          status: w.status as PettyCashWallet['status'],
+          balanceLimit: w.balance_limit || undefined,
+          lowBalanceThreshold: w.low_balance_threshold || undefined,
+          createdAt: w.created_at,
+          updatedAt: w.updated_at,
+        })));
+
+        // Set initial selected company to "all" to show all bank accounts
+        if (!selectedCompanyId) {
+          setSelectedCompanyId('all');
+        }
+      } catch (e) {
+        setError(e instanceof Error ? e.message : 'Failed to load data');
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchData();
+  }, []);
+
+  // Fetch bank accounts when selected company changes
+  useEffect(() => {
+    const fetchBankAccounts = async () => {
+      if (!selectedCompanyId) {
+        setBankAccounts([]);
+        return;
+      }
+      try {
+        let bankAccountsData;
+        if (selectedCompanyId === 'all') {
+          bankAccountsData = await bankAccountsApi.getAll();
+        } else {
+          bankAccountsData = await bankAccountsApi.getByCompany(selectedCompanyId);
+        }
+        setBankAccounts(bankAccountsData.map(dbBankAccountToFrontend));
+      } catch (e) {
+        console.error('Failed to fetch bank accounts:', e);
+      }
+    };
+    fetchBankAccounts();
+  }, [selectedCompanyId]);
 
   // Wallet state
+  const [wallets, setWallets] = useState<PettyCashWallet[]>([]);
   const [isWalletModalOpen, setIsWalletModalOpen] = useState(false);
   const [editingWallet, setEditingWallet] = useState<PettyCashWallet | null>(null);
   const [showClosedWallets, setShowClosedWallets] = useState(false);
 
-  const allWallets = getAllWallets();
   const filteredWallets = showClosedWallets
-    ? allWallets
-    : allWallets.filter(w => w.status === 'active');
+    ? wallets
+    : wallets.filter(w => w.status === 'active');
+
+  // User Management state
+  const [isUserManagementModalOpen, setIsUserManagementModalOpen] = useState(false);
+
+  // Import Prior Year state
+  const [isImportPriorYearModalOpen, setIsImportPriorYearModalOpen] = useState(false);
 
   // PDF Settings state
   const [pdfDocumentType, setPdfDocumentType] = useState<DocumentType>('quotation');
@@ -117,6 +191,62 @@ export default function SettingsPage() {
     updateDefaultValidityDays(pdfDocumentType, days);
   };
 
+  // Refresh functions
+  const refreshCompanies = async () => {
+    try {
+      const companiesData = await companiesApi.getAll();
+      setCompanies(companiesData.map(dbCompanyToFrontend));
+    } catch (e) {
+      console.error('Failed to refresh companies:', e);
+    }
+  };
+
+  const refreshProjects = async () => {
+    try {
+      const projectsData = await projectsApi.getAll();
+      setProjects(projectsData.map(dbProjectToFrontend));
+    } catch (e) {
+      console.error('Failed to refresh projects:', e);
+    }
+  };
+
+  const refreshBankAccounts = async () => {
+    if (!selectedCompanyId) return;
+    try {
+      // If "all" is selected, fetch all bank accounts, otherwise filter by company
+      const bankAccountsData = selectedCompanyId === 'all'
+        ? await bankAccountsApi.getAll()
+        : await bankAccountsApi.getByCompany(selectedCompanyId);
+      setBankAccounts(bankAccountsData.map(dbBankAccountToFrontend));
+    } catch (e) {
+      console.error('Failed to refresh bank accounts:', e);
+    }
+  };
+
+  const refreshWallets = async () => {
+    try {
+      const walletsData = await pettyCashApi.getAllWallets();
+      setWallets(walletsData.map(w => ({
+        id: w.id,
+        walletName: w.wallet_name,
+        userId: w.user_id || '',
+        userName: w.user_name,
+        companyId: w.company_id,
+        companyName: companies.find(c => c.id === w.company_id)?.name || 'Unknown',
+        balance: w.balance,
+        beginningBalance: w.balance,
+        currency: w.currency as PettyCashWallet['currency'],
+        status: w.status as PettyCashWallet['status'],
+        balanceLimit: w.balance_limit || undefined,
+        lowBalanceThreshold: w.low_balance_threshold || undefined,
+        createdAt: w.created_at,
+        updatedAt: w.updated_at,
+      })));
+    } catch (e) {
+      console.error('Failed to refresh wallets:', e);
+    }
+  };
+
   // Company event handlers
   const handleEditCompany = (company: Company) => {
     setEditingCompany(company);
@@ -132,7 +262,7 @@ export default function SettingsPage() {
     }
     setIsCompanyModalOpen(false);
     setEditingCompany(null);
-    setRefreshKey(prev => prev + 1);
+    await refreshCompanies();
   };
 
   // Bank account event handlers
@@ -141,22 +271,30 @@ export default function SettingsPage() {
     setIsBankAccountModalOpen(true);
   };
 
-  const handleToggleBankAccountStatus = (id: string) => {
-    toggleBankAccountStatus(id);
-    setRefreshKey(prev => prev + 1);
-  };
-
-  const handleDeleteBankAccount = (id: string) => {
-    if (confirm('Are you sure you want to delete this bank account?')) {
-      deleteBankAccount(id);
-      setRefreshKey(prev => prev + 1);
+  const handleToggleBankAccountStatus = async (id: string) => {
+    try {
+      await bankAccountsApi.toggleStatus(id);
+      await refreshBankAccounts();
+    } catch (e) {
+      console.error('Failed to toggle bank account status:', e);
     }
   };
 
-  const handleBankAccountSave = () => {
+  const handleDeleteBankAccount = async (id: string) => {
+    if (confirm('Are you sure you want to delete this bank account?')) {
+      try {
+        await bankAccountsApi.delete(id);
+        await refreshBankAccounts();
+      } catch (e) {
+        console.error('Failed to delete bank account:', e);
+      }
+    }
+  };
+
+  const handleBankAccountSave = async () => {
     setIsBankAccountModalOpen(false);
     setEditingBankAccount(null);
-    setRefreshKey(prev => prev + 1);
+    await refreshBankAccounts();
   };
 
   // Project event handlers
@@ -165,17 +303,21 @@ export default function SettingsPage() {
     setIsProjectModalOpen(true);
   };
 
-  const handleDeleteProject = (id: string) => {
+  const handleDeleteProject = async (id: string) => {
     if (confirm('Are you sure you want to delete this project?')) {
-      deleteProject(id);
-      setRefreshKey(prev => prev + 1);
+      try {
+        await projectsApi.delete(id);
+        await refreshProjects();
+      } catch (e) {
+        console.error('Failed to delete project:', e);
+      }
     }
   };
 
-  const handleProjectSave = () => {
+  const handleProjectSave = async () => {
     setIsProjectModalOpen(false);
     setEditingProject(null);
-    setRefreshKey(prev => prev + 1);
+    await refreshProjects();
   };
 
   // Wallet event handlers
@@ -184,18 +326,20 @@ export default function SettingsPage() {
     setIsWalletModalOpen(true);
   };
 
-  const handleDeleteWallet = (id: string) => {
-    const result = deleteWallet(id);
-    if (!result.success) {
-      alert(result.error || 'Failed to delete wallet');
+  const handleDeleteWallet = async (id: string) => {
+    try {
+      await pettyCashApi.deleteWallet(id);
+      await refreshWallets();
+    } catch (e) {
+      console.error('Failed to delete wallet:', e);
+      alert('Failed to delete wallet');
     }
-    setRefreshKey(prev => prev + 1);
   };
 
-  const handleWalletSave = () => {
+  const handleWalletSave = async () => {
     setIsWalletModalOpen(false);
     setEditingWallet(null);
-    setRefreshKey(prev => prev + 1);
+    await refreshWallets();
   };
 
   const formatCurrency = (amount: number, currency: string): string => {
@@ -217,6 +361,22 @@ export default function SettingsPage() {
         </p>
       </div>
 
+      {/* Error Display */}
+      {error && (
+        <div className="mb-6 rounded-md bg-red-50 p-4">
+          <p className="text-sm text-red-700">{error}</p>
+        </div>
+      )}
+
+      {/* Loading State */}
+      {loading ? (
+        <div className="text-center py-12">
+          <div className="flex items-center justify-center gap-2 text-gray-500">
+            <Loader2 className="h-5 w-5 animate-spin" />
+            <span>Loading settings...</span>
+          </div>
+        </div>
+      ) : (
       <div className="space-y-6">
         {/* Company Settings */}
         <div className="rounded-lg border border-gray-200 bg-white p-6">
@@ -336,6 +496,7 @@ export default function SettingsPage() {
               onChange={(e) => setSelectedCompanyId(e.target.value)}
               className="w-full rounded-md border-gray-300 shadow-sm focus:border-[#5A7A8F] focus:ring-[#5A7A8F]"
             >
+              <option value="all">All Companies</option>
               {companies.map((company) => (
                 <option key={company.id} value={company.id}>
                   {company.name} {!company.isActive && "(Inactive)"}
@@ -361,7 +522,7 @@ export default function SettingsPage() {
           {/* Bank Accounts Table */}
           {filteredBankAccounts.length === 0 ? (
             <div className="text-center py-8 text-gray-500">
-              <p>No bank accounts found for {selectedCompany?.name}</p>
+              <p>No bank accounts found{selectedCompanyId !== 'all' ? ` for ${selectedCompany?.name}` : ''}</p>
             </div>
           ) : (
             <div className="overflow-x-auto">
@@ -369,6 +530,9 @@ export default function SettingsPage() {
                 <thead className="bg-gray-50">
                   <tr>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Account Name</th>
+                    {selectedCompanyId === 'all' && (
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Company</th>
+                    )}
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Bank / Branch</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Account Number</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Currency</th>
@@ -380,11 +544,16 @@ export default function SettingsPage() {
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
                   {filteredBankAccounts.map((account) => (
-                    <tr key={`${account.id}-${refreshKey}`} className={!account.isActive ? 'bg-gray-50' : ''}>
+                    <tr key={account.id} className={!account.isActive ? 'bg-gray-50' : ''}>
                       <td className="px-4 py-3 text-sm font-medium text-gray-900">
                         {account.accountName}
                         {!account.isActive && <span className="ml-2 text-gray-500">(Inactive)</span>}
                       </td>
+                      {selectedCompanyId === 'all' && (
+                        <td className="px-4 py-3 text-sm text-gray-600">
+                          {companies.find(c => c.id === account.companyId)?.name || 'Unknown'}
+                        </td>
+                      )}
                       <td className="px-4 py-3 text-sm text-gray-600">
                         {account.bankInformation.bankName}
                         {account.bankInformation.bankBranch && (
@@ -479,7 +648,7 @@ export default function SettingsPage() {
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
                   {filteredProjects.map((project) => (
-                    <tr key={`${project.id}-${refreshKey}`} className={project.status !== 'active' ? 'bg-gray-50' : ''}>
+                    <tr key={project.id} className={project.status !== 'active' ? 'bg-gray-50' : ''}>
                       <td className="px-4 py-3 text-sm font-mono text-gray-900">
                         {project.code}
                       </td>
@@ -490,7 +659,7 @@ export default function SettingsPage() {
                         )}
                       </td>
                       <td className="px-4 py-3 text-sm text-gray-600">
-                        {getCompanyById(project.companyId)?.name || 'Unknown'}
+                        {companies.find(c => c.id === project.companyId)?.name || 'Unknown'}
                       </td>
                       <td className="px-4 py-3 text-sm text-gray-600 capitalize">{project.type}</td>
                       <td className="px-4 py-3 text-sm text-gray-600">
@@ -589,7 +758,7 @@ export default function SettingsPage() {
                   {filteredWallets.map((wallet) => {
                     const isLowBalance = wallet.lowBalanceThreshold && wallet.balance <= wallet.lowBalanceThreshold;
                     return (
-                      <tr key={`${wallet.id}-${refreshKey}`} className={wallet.status !== 'active' ? 'bg-gray-50' : ''}>
+                      <tr key={wallet.id} className={wallet.status !== 'active' ? 'bg-gray-50' : ''}>
                         <td className="px-4 py-3 text-sm font-medium text-gray-900">
                           {wallet.walletName}
                         </td>
@@ -666,8 +835,32 @@ export default function SettingsPage() {
           <p className="text-sm text-gray-600">
             Manage user roles and access levels for the accounting module.
           </p>
-          <button className="mt-4 inline-flex items-center gap-2 rounded-lg bg-[#5A7A8F] px-4 py-2 text-sm font-medium text-white hover:bg-[#2c3e50] transition-colors">
+          <button
+            onClick={() => setIsUserManagementModalOpen(true)}
+            className="mt-4 inline-flex items-center gap-2 rounded-lg bg-[#5A7A8F] px-4 py-2 text-sm font-medium text-white hover:bg-[#2c3e50] transition-colors"
+          >
             Manage Users
+          </button>
+        </div>
+
+        {/* Data Import - Super Admin Only */}
+        <div className="rounded-lg border border-amber-200 bg-amber-50 p-6">
+          <div className="flex items-center gap-3 mb-4">
+            <Upload className="h-5 w-5 text-amber-600" />
+            <h2 className="text-lg font-semibold text-gray-900">Data Import</h2>
+            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-800">
+              Super Admin
+            </span>
+          </div>
+          <p className="text-sm text-gray-600 mb-4">
+            Import historical financial data from previous accounting periods. This creates journal entries to record prior year retained earnings.
+          </p>
+          <button
+            onClick={() => setIsImportPriorYearModalOpen(true)}
+            className="inline-flex items-center gap-2 rounded-lg bg-amber-600 px-4 py-2 text-sm font-medium text-white hover:bg-amber-700 transition-colors"
+          >
+            <Upload className="h-4 w-4" />
+            Import Prior Year Data
           </button>
         </div>
 
@@ -980,6 +1173,11 @@ export default function SettingsPage() {
           </div>
         </div>
 
+        {/* Journal Event Settings Section */}
+        <div className="rounded-lg border border-gray-200 bg-white p-6">
+          <JournalEventSettings companies={companies} />
+        </div>
+
         {/* Auto-save indicator */}
         <div className="flex justify-end">
           <p className="text-sm text-gray-500 italic">
@@ -987,6 +1185,7 @@ export default function SettingsPage() {
           </p>
         </div>
       </div>
+      )}
 
       {/* Company Modal */}
       <CompanyFormModal
@@ -1022,6 +1221,18 @@ export default function SettingsPage() {
         onClose={() => setIsWalletModalOpen(false)}
         onSave={handleWalletSave}
         editingWallet={editingWallet}
+      />
+
+      {/* User Management Modal */}
+      <UserManagementModal
+        isOpen={isUserManagementModalOpen}
+        onClose={() => setIsUserManagementModalOpen(false)}
+      />
+
+      {/* Import Prior Year Modal */}
+      <ImportPriorYearModal
+        isOpen={isImportPriorYearModalOpen}
+        onClose={() => setIsImportPriorYearModalOpen(false)}
       />
     </AppShell>
   );

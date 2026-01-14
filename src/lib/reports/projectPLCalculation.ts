@@ -6,7 +6,9 @@
  * All amounts in THB.
  */
 
-import { mockReceipts } from '@/data/income/mockData';
+import { projectsApi } from '@/lib/supabase/api/projects';
+import { receiptsApi, type ReceiptWithDetails } from '@/lib/supabase/api/receipts';
+import { expensesApi, type ExpenseWithDetails } from '@/lib/supabase/api/expenses';
 
 // ============================================================================
 // Types
@@ -170,40 +172,25 @@ export function formatFiscalYearLabel(fiscalYear: string): string {
 }
 
 // ============================================================================
-// Project Data
-// ============================================================================
-
-// Project info map - maps project IDs to their details
-const projectInfoMap: Record<string, ProjectInfo> = {
-  'project-ocean-star': {
-    id: 'project-ocean-star',
-    name: 'Ocean Star',
-    managementFeePercent: 15,
-    managementCompanyId: 'company-001',
-    managementCompanyName: 'Faraway Yachting Co., Ltd.',
-  },
-  'project-wave-rider': {
-    id: 'project-wave-rider',
-    name: 'Wave Rider',
-    managementFeePercent: 15,
-    managementCompanyId: 'company-001',
-    managementCompanyName: 'Faraway Yachting Co., Ltd.',
-  },
-  'project-sea-breeze': {
-    id: 'project-sea-breeze',
-    name: 'Sea Breeze',
-    managementFeePercent: 15,
-    managementCompanyId: 'company-001',
-    managementCompanyName: 'Faraway Yachting Co., Ltd.',
-  },
-};
-
-// ============================================================================
 // Data Fetching
 // ============================================================================
 
 async function fetchProjectInfo(projectId: string): Promise<ProjectInfo | null> {
-  return projectInfoMap[projectId] || null;
+  try {
+    const project = await projectsApi.getById(projectId);
+    if (!project) return null;
+
+    return {
+      id: project.id,
+      name: project.name,
+      managementFeePercent: project.management_fee_percentage,
+      managementCompanyId: project.company_id,
+      managementCompanyName: 'Faraway Yachting Co., Ltd.', // Could be fetched from companies table if needed
+    };
+  } catch (error) {
+    console.error('Error fetching project info:', error);
+    return null;
+  }
 }
 
 interface ProjectTransaction {
@@ -220,8 +207,14 @@ interface ProjectTransaction {
   projectId: string;
 }
 
-// Currency conversion rate (simplified - in production, use actual exchange rates)
-const USD_TO_THB = 35;
+// LEGACY FALLBACK RATES - Only used when fx_rate is null on older documents
+// New documents should always have fx_rate populated from the exchange rate API
+const CURRENCY_TO_THB: Record<string, number> = {
+  THB: 1,
+  USD: 35,
+  EUR: 38,
+  GBP: 44,
+};
 
 async function fetchProjectIncome(
   projectId: string,
@@ -230,31 +223,36 @@ async function fetchProjectIncome(
 ): Promise<ProjectTransaction[]> {
   const transactions: ProjectTransaction[] = [];
 
-  for (const receipt of mockReceipts) {
-    // Only include paid receipts (exclude void, draft, etc.)
-    if (receipt.status !== 'paid') continue;
+  try {
+    const receipts = await receiptsApi.getWithLineItemsByDateRange(startDate, endDate);
 
-    // Check if receipt date is within the date range
-    if (receipt.receiptDate < startDate || receipt.receiptDate > endDate) continue;
+    for (const receipt of receipts) {
+      // Process each line item
+      for (const item of receipt.line_items) {
+        // Filter by projectId
+        if (item.project_id === projectId) {
+          const currency = (receipt as ReceiptWithDetails & { currency?: string }).currency || 'THB';
+          // Use stored fx_rate from document, fall back to hardcoded only for legacy data
+          const storedFxRate = (receipt as ReceiptWithDetails & { fx_rate?: number | null }).fx_rate;
+          const fxRate = storedFxRate ?? CURRENCY_TO_THB[currency] ?? 1;
 
-    // Process each line item
-    for (const item of receipt.lineItems) {
-      // Filter by projectId
-      if (item.projectId === projectId) {
-        transactions.push({
-          id: item.id,
-          date: receipt.receiptDate,
-          description: item.description,
-          category: 'Charter Income',
-          amount: item.amount,
-          thbAmount: item.amount * USD_TO_THB, // Convert to THB
-          documentNumber: receipt.receiptNumber,
-          documentType: 'Receipt',
-          hasAttachment: false,
-          projectId: item.projectId,
-        });
+          transactions.push({
+            id: item.id,
+            date: receipt.receipt_date,
+            description: item.description,
+            category: 'Charter Income',
+            amount: item.amount,
+            thbAmount: item.amount * fxRate,
+            documentNumber: receipt.receipt_number,
+            documentType: 'Receipt',
+            hasAttachment: false,
+            projectId: item.project_id,
+          });
+        }
       }
     }
+  } catch (error) {
+    console.error('Error fetching project income:', error);
   }
 
   return transactions;
@@ -265,12 +263,42 @@ async function fetchProjectExpenses(
   startDate: string,
   endDate: string
 ): Promise<ProjectTransaction[]> {
-  // TODO: Implement when expense module is built
-  // This will fetch expense transactions for the project from:
-  // - Purchase orders
-  // - Bills/invoices from vendors
-  // - Other expense documents
-  return [];
+  const transactions: ProjectTransaction[] = [];
+
+  try {
+    const expenses = await expensesApi.getWithLineItemsByDateRange(startDate, endDate);
+
+    for (const expense of expenses) {
+      // Process each line item
+      for (const item of expense.line_items) {
+        // Filter by projectId
+        if (item.project_id === projectId) {
+          const currency = (expense as ExpenseWithDetails & { currency?: string }).currency || 'THB';
+          // Use stored fx_rate from document, fall back to hardcoded only for legacy data
+          const storedFxRate = (expense as ExpenseWithDetails & { fx_rate?: number | null }).fx_rate;
+          const fxRate = storedFxRate ?? CURRENCY_TO_THB[currency] ?? 1;
+          const amount = item.amount || 0;
+
+          transactions.push({
+            id: item.id,
+            date: expense.expense_date,
+            description: item.description,
+            category: item.account_code || 'Operating Expense',
+            amount: amount,
+            thbAmount: amount * fxRate,
+            documentNumber: expense.expense_number,
+            documentType: 'Expense',
+            hasAttachment: false,
+            projectId: item.project_id,
+          });
+        }
+      }
+    }
+  } catch (error) {
+    console.error('Error fetching project expenses:', error);
+  }
+
+  return transactions;
 }
 
 // ============================================================================

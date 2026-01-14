@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { AppShell } from "@/components/accounting/AppShell";
 import { ReconciliationScopeBar } from "@/components/banking/ReconciliationScopeBar";
 import { CoverageCards } from "@/components/banking/CoverageCards";
@@ -14,7 +14,6 @@ import { ExportOptionsModal } from "@/components/banking/ExportOptionsModal";
 import { FilterInfoBanner } from "@/components/banking/FilterInfoBanner";
 import { CreateTransactionModal } from "@/components/banking/CreateTransactionModal";
 import {
-  mockBankFeedLines,
   mockBankAccountCoverage,
   getReconciliationStats,
   parseDataScope,
@@ -22,16 +21,13 @@ import {
   filterBankLinesByScope,
   getActiveMatchingRules,
   getDynamicSuggestedMatches,
-  createBankMatch,
-  removeBankMatch,
-  ignoreBankFeedLine,
   updateSuggestionsFromMatchingEngine,
-  applyAutoMatches,
 } from "@/data/banking/bankReconciliationData";
-import { getAllCompanies } from "@/data/company/companies";
-import { getAllBankAccounts } from "@/data/banking/bankAccounts";
-import { getAllProjects } from "@/data/banking/projects";
+import { companiesApi, projectsApi, bankAccountsApi, expensesApi } from "@/lib/supabase/api";
+import { bankFeedLinesApi, type BankFeedLineWithMatches } from "@/lib/supabase/api/bankFeedLines";
+import type { ExpenseWithDetails } from "@/lib/supabase/api/expenses";
 import { getAllReceipts } from "@/data/income/receipts";
+import { BankAccount } from "@/data/banking/types";
 import { Currency } from "@/data/company/types";
 import {
   ViewMode,
@@ -39,20 +35,25 @@ import {
   TransactionType,
   BankMatch,
   SuggestedMatch,
+  BankFeedLine,
 } from "@/data/banking/bankReconciliationTypes";
 import {
   autoMatchBankLines,
   generateSuggestedMatches,
   createMatchFromSuggestion,
   getUnreconciledReceiptsAsSystemRecords,
+  getUnreconciledExpensesAsSystemRecords,
   SystemRecord,
 } from "@/lib/banking/matchingEngine";
 
 export default function BankReconciliationPage() {
   // Scope bar state
   const [dataScope, setDataScope] = useState("all-companies");
-  const [dateFrom, setDateFrom] = useState("2024-01-01");
-  const [dateTo, setDateTo] = useState("2024-12-31");
+  // Default date range: 1 year from today
+  const today = new Date();
+  const oneYearAgo = new Date(today.getFullYear() - 1, today.getMonth(), today.getDate());
+  const [dateFrom, setDateFrom] = useState(oneYearAgo.toISOString().split('T')[0]);
+  const [dateTo, setDateTo] = useState(today.toISOString().split('T')[0]);
   const [selectedBankAccountIds, setSelectedBankAccountIds] = useState<string[]>([]);
   const [selectedCurrencies, setSelectedCurrencies] = useState<Currency[]>([]);
   const [selectedStatuses, setSelectedStatuses] = useState<BankFeedStatus[]>([]);
@@ -76,10 +77,109 @@ export default function BankReconciliationPage() {
   const [refreshKey, setRefreshKey] = useState(0);
   const triggerRefresh = useCallback(() => setRefreshKey(k => k + 1), []);
 
-  // Get data
-  const companies = getAllCompanies();
-  const allBankAccounts = getAllBankAccounts();
-  const allProjects = getAllProjects();
+  // Data from Supabase
+  const [companies, setCompanies] = useState<{ id: string; name: string }[]>([]);
+  const [allBankAccounts, setAllBankAccounts] = useState<BankAccount[]>([]);
+  const [allProjects, setAllProjects] = useState<{ id: string; name: string; companyId: string; status: 'active' | 'completed' | 'archived' }[]>([]);
+  const [allBankFeedLines, setAllBankFeedLines] = useState<BankFeedLine[]>([]);
+  const [allExpenses, setAllExpenses] = useState<ExpenseWithDetails[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  // Load data from Supabase
+  useEffect(() => {
+    const loadData = async () => {
+      try {
+        setIsLoading(true);
+        const [companiesData, bankAccountsData, projectsData, bankFeedLinesData, expensesData] = await Promise.all([
+          companiesApi.getAll(),
+          bankAccountsApi.getAll(),
+          projectsApi.getAll(),
+          bankFeedLinesApi.getByDateRange(dateFrom, dateTo),
+          expensesApi.getWithLineItemsByDateRange(dateFrom, dateTo),
+        ]);
+
+        setCompanies(companiesData.map(c => ({ id: c.id, name: c.name })));
+
+        // Map Supabase bank accounts to match BankAccount type
+        setAllBankAccounts(bankAccountsData.map(ba => ({
+          id: ba.id,
+          bankInformation: ba.bank_information as unknown as BankAccount['bankInformation'],
+          accountName: ba.account_name,
+          accountNumber: ba.account_number,
+          currency: ba.currency as Currency,
+          companyId: ba.company_id,
+          glAccountCode: ba.gl_account_code,
+          openingBalance: ba.opening_balance ?? 0,
+          openingBalanceDate: ba.opening_balance_date ?? '',
+          isActive: ba.is_active,
+          createdAt: ba.created_at,
+          updatedAt: ba.updated_at,
+        })));
+
+        setAllProjects(projectsData.map(p => ({
+          id: p.id,
+          name: p.name,
+          companyId: p.company_id,
+          // Map database status: 'inactive' -> 'archived' for component, otherwise keep as-is
+          status: p.status === 'inactive' ? 'archived' : (p.status as 'active' | 'completed') ?? 'active',
+        })));
+
+        // Map Supabase bank feed lines to match BankFeedLine type
+        setAllBankFeedLines(bankFeedLinesData.map((line: BankFeedLineWithMatches): BankFeedLine => ({
+          id: line.id,
+          bankAccountId: line.bank_account_id,
+          companyId: line.company_id,
+          projectId: line.project_id || undefined,
+          currency: line.currency as Currency,
+          transactionDate: line.transaction_date,
+          valueDate: line.value_date,
+          description: line.description,
+          reference: line.reference || undefined,
+          amount: line.amount,
+          runningBalance: line.running_balance ?? undefined,
+          status: line.status as BankFeedStatus,
+          matchedAmount: line.matched_amount,
+          confidenceScore: line.confidence_score ?? undefined,
+          matches: (line.matches || []).map(m => ({
+            id: m.id,
+            bankFeedLineId: m.bank_feed_line_id,
+            systemRecordType: m.system_record_type as TransactionType,
+            systemRecordId: m.system_record_id,
+            projectId: m.project_id || undefined,
+            matchedAmount: m.matched_amount,
+            amountDifference: m.amount_difference,
+            matchedBy: m.matched_by,
+            matchedAt: m.matched_at,
+            matchScore: m.match_score,
+            matchMethod: m.match_method as 'manual' | 'rule' | 'suggested',
+            ruleId: m.rule_id || undefined,
+            adjustmentRequired: m.adjustment_required,
+            adjustmentReason: m.adjustment_reason || undefined,
+            adjustmentJournalId: m.adjustment_journal_id || undefined,
+          })),
+          importedAt: line.imported_at,
+          importedBy: line.imported_by || 'system',
+          importSource: line.import_source,
+          notes: line.notes || undefined,
+          attachments: line.attachments || undefined,
+          matchedBy: line.matched_by || undefined,
+          matchedAt: line.matched_at || undefined,
+          ignoredBy: line.ignored_by || undefined,
+          ignoredAt: line.ignored_at || undefined,
+          ignoredReason: line.ignored_reason || undefined,
+        })));
+
+        // Set expenses
+        setAllExpenses(expensesData);
+      } catch (error) {
+        console.error('Failed to load data:', error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    loadData();
+  }, [refreshKey, dateFrom, dateTo]);
 
   // Format projects for dropdown
   const projects = allProjects.map(p => ({
@@ -106,7 +206,7 @@ export default function BankReconciliationPage() {
 
   // Filter bank lines by scope FIRST
   const bankLinesInScope = filterBankLinesByScope(
-    mockBankFeedLines,
+    allBankFeedLines,
     scopeFilter,
     showUnassignedLines
   );
@@ -155,13 +255,31 @@ export default function BankReconciliationPage() {
 
   const selectedLine = filteredBankLines.find((line) => line.id === selectedLineId);
 
-  // Get system records for matching (receipts for now)
+  // Collect all system record IDs that are already matched to bank feed lines
+  // This prevents already-matched records from appearing as suggestions
+  const matchedRecordIds = new Set<string>();
+  for (const line of allBankFeedLines) {
+    for (const match of line.matches) {
+      matchedRecordIds.add(match.systemRecordId);
+    }
+  }
+
+  // Get system records for matching (receipts + expenses)
+  // Pass matchedRecordIds to exclude already-matched records from suggestions
   const receipts = getAllReceipts();
-  const systemRecords: SystemRecord[] = getUnreconciledReceiptsAsSystemRecords(
+  const receiptRecords = getUnreconciledReceiptsAsSystemRecords(
     receipts,
     scopeFilter.type === 'company' ? scopeFilter.id : undefined,
-    scopeFilter.type === 'project' ? scopeFilter.id : undefined
+    scopeFilter.type === 'project' ? scopeFilter.id : undefined,
+    matchedRecordIds
   );
+  const expenseRecords = getUnreconciledExpensesAsSystemRecords(
+    allExpenses,
+    scopeFilter.type === 'company' ? scopeFilter.id : undefined,
+    scopeFilter.type === 'project' ? scopeFilter.id : undefined,
+    matchedRecordIds
+  );
+  const systemRecords: SystemRecord[] = [...receiptRecords, ...expenseRecords];
 
   // Get matching rules
   const matchingRules = getActiveMatchingRules();
@@ -236,9 +354,15 @@ export default function BankReconciliationPage() {
     setSelectedLineId(lineId);
   };
 
-  const handleQuickMatch = (lineId: string) => {
+  const handleQuickMatch = async (lineId: string) => {
     const line = filteredBankLines.find(l => l.id === lineId);
     if (!line) return;
+
+    // Check if the bank feed line already has a match
+    if (line.matches.length > 0) {
+      alert('This bank transaction already has a match. Please remove the existing match first.');
+      return;
+    }
 
     // Get suggestions for this line
     const suggestions = getDynamicSuggestedMatches(lineId);
@@ -248,77 +372,117 @@ export default function BankReconciliationPage() {
       const topSuggestion = onTheFly[0];
       // Create match from top suggestion
       const match = createMatchFromSuggestion(line, topSuggestion, 'current-user');
-      createBankMatch(lineId, {
-        systemRecordType: match.systemRecordType,
-        systemRecordId: match.systemRecordId,
-        projectId: match.projectId,
-        matchedAmount: match.matchedAmount,
-        amountDifference: match.amountDifference,
-        matchedBy: match.matchedBy,
-        matchedAt: match.matchedAt,
-        matchScore: match.matchScore,
-        matchMethod: 'suggested',
-        adjustmentRequired: match.adjustmentRequired,
-        adjustmentReason: match.adjustmentReason,
-      });
-      triggerRefresh();
+      try {
+        await bankFeedLinesApi.createMatch({
+          bank_feed_line_id: lineId,
+          system_record_type: match.systemRecordType,
+          system_record_id: match.systemRecordId,
+          project_id: match.projectId,
+          matched_amount: match.matchedAmount,
+          amount_difference: match.amountDifference,
+          matched_by: match.matchedBy,
+          match_score: match.matchScore,
+          match_method: 'suggested',
+          adjustment_required: match.adjustmentRequired,
+          adjustment_reason: match.adjustmentReason,
+        });
+        // Update bank feed line status
+        await bankFeedLinesApi.updateStatus(lineId, 'matched', match.matchedAmount);
+        triggerRefresh();
+      } catch (error) {
+        console.error('Failed to create match:', error);
+      }
     }
   };
 
-  const handleIgnore = (lineId: string) => {
-    ignoreBankFeedLine(lineId, 'current-user', 'Marked as non-business transaction');
-    triggerRefresh();
+  const handleIgnore = async (lineId: string) => {
+    try {
+      await bankFeedLinesApi.markAsIgnored(lineId, 'current-user', 'Marked as non-business transaction');
+      triggerRefresh();
+    } catch (error) {
+      console.error('Failed to ignore line:', error);
+    }
   };
 
-  const handleCreateMatch = (match: Partial<BankMatch>) => {
+  const handleCreateMatch = async (match: Partial<BankMatch>) => {
     if (!match.bankFeedLineId) return;
 
-    createBankMatch(match.bankFeedLineId, {
-      systemRecordType: match.systemRecordType || 'receipt',
-      systemRecordId: match.systemRecordId || '',
-      projectId: match.projectId,
-      matchedAmount: match.matchedAmount || 0,
-      amountDifference: match.amountDifference || 0,
-      matchedBy: 'current-user',
-      matchedAt: new Date().toISOString(),
-      matchScore: match.matchScore || 100,
-      matchMethod: 'manual',
-      adjustmentRequired: match.adjustmentRequired || false,
-      adjustmentReason: match.adjustmentReason,
-    });
-    triggerRefresh();
+    // Check if the bank feed line already has a match
+    const line = filteredBankLines.find(l => l.id === match.bankFeedLineId);
+    if (line && line.matches.length > 0) {
+      alert('This bank transaction already has a match. Please remove the existing match first.');
+      return;
+    }
+
+    try {
+      await bankFeedLinesApi.createMatch({
+        bank_feed_line_id: match.bankFeedLineId,
+        system_record_type: match.systemRecordType || 'receipt',
+        system_record_id: match.systemRecordId || '',
+        project_id: match.projectId,
+        matched_amount: match.matchedAmount || 0,
+        amount_difference: match.amountDifference || 0,
+        matched_by: 'current-user',
+        match_score: match.matchScore || 100,
+        match_method: 'manual',
+        adjustment_required: match.adjustmentRequired || false,
+        adjustment_reason: match.adjustmentReason,
+      });
+      // Update bank feed line status
+      await bankFeedLinesApi.updateStatus(match.bankFeedLineId, 'matched', match.matchedAmount);
+      triggerRefresh();
+    } catch (error) {
+      console.error('Failed to create match:', error);
+    }
   };
 
-  const handleRemoveMatch = (matchId: string) => {
+  const handleRemoveMatch = async (matchId: string) => {
     if (!selectedLineId) return;
-    removeBankMatch(selectedLineId, matchId);
-    triggerRefresh();
+    try {
+      await bankFeedLinesApi.deleteMatch(matchId);
+      await bankFeedLinesApi.updateStatus(selectedLineId, 'unmatched', 0);
+      triggerRefresh();
+    } catch (error) {
+      console.error('Failed to remove match:', error);
+    }
   };
 
-  const handleAcceptSuggestion = (suggestion: SuggestedMatch) => {
+  const handleAcceptSuggestion = async (suggestion: SuggestedMatch) => {
     if (!selectedLine) return;
 
+    // Check if the bank feed line already has a match
+    if (selectedLine.matches.length > 0) {
+      alert('This bank transaction already has a match. Please remove the existing match first.');
+      return;
+    }
+
     const match = createMatchFromSuggestion(selectedLine, suggestion, 'current-user');
-    createBankMatch(selectedLine.id, {
-      systemRecordType: match.systemRecordType,
-      systemRecordId: match.systemRecordId,
-      projectId: match.projectId,
-      matchedAmount: match.matchedAmount,
-      amountDifference: match.amountDifference,
-      matchedBy: match.matchedBy,
-      matchedAt: match.matchedAt,
-      matchScore: match.matchScore,
-      matchMethod: 'suggested',
-      adjustmentRequired: match.adjustmentRequired,
-      adjustmentReason: match.adjustmentReason,
-    });
-    triggerRefresh();
+    try {
+      await bankFeedLinesApi.createMatch({
+        bank_feed_line_id: selectedLine.id,
+        system_record_type: match.systemRecordType,
+        system_record_id: match.systemRecordId,
+        project_id: match.projectId,
+        matched_amount: match.matchedAmount,
+        amount_difference: match.amountDifference,
+        matched_by: match.matchedBy,
+        match_score: match.matchScore,
+        match_method: 'suggested',
+        adjustment_required: match.adjustmentRequired,
+        adjustment_reason: match.adjustmentReason,
+      });
+      await bankFeedLinesApi.updateStatus(selectedLine.id, 'matched', match.matchedAmount);
+      triggerRefresh();
+    } catch (error) {
+      console.error('Failed to accept suggestion:', error);
+    }
   };
 
   // Run auto-matching on all unmatched lines
-  const handleRunAutoMatch = useCallback(() => {
+  const handleRunAutoMatch = useCallback(async () => {
+    // Only include lines without existing matches
     const unmatchedLines = filteredBankLines.filter(
-      l => l.status === 'unmatched' || l.status === 'missing_record'
+      l => (l.status === 'unmatched' || l.status === 'missing_record') && l.matches.length === 0
     );
 
     if (unmatchedLines.length === 0) {
@@ -328,19 +492,39 @@ export default function BankReconciliationPage() {
 
     const result = autoMatchBankLines(unmatchedLines, systemRecords, matchingRules);
 
-    // Apply auto-matches
-    if (result.matches.length > 0) {
-      applyAutoMatches(result.matches);
+    // Apply auto-matches to Supabase
+    let matchedCount = 0;
+    for (const match of result.matches) {
+      try {
+        await bankFeedLinesApi.createMatch({
+          bank_feed_line_id: match.bankFeedLineId,
+          system_record_type: match.systemRecordType,
+          system_record_id: match.systemRecordId,
+          project_id: match.projectId,
+          matched_amount: match.matchedAmount,
+          amount_difference: match.amountDifference,
+          matched_by: match.matchedBy,
+          match_score: match.matchScore,
+          match_method: match.matchMethod,
+          rule_id: match.ruleId,
+          adjustment_required: match.adjustmentRequired,
+          adjustment_reason: match.adjustmentReason,
+        });
+        await bankFeedLinesApi.updateStatus(match.bankFeedLineId, 'matched', match.matchedAmount);
+        matchedCount++;
+      } catch (error) {
+        console.error('Failed to apply auto-match:', error);
+      }
     }
 
-    // Update suggestions
+    // Update suggestions in local state
     if (result.suggestions.size > 0) {
       updateSuggestionsFromMatchingEngine(result.suggestions);
     }
 
     triggerRefresh();
 
-    alert(`Auto-matching complete!\n\nMatched: ${result.matches.length} transactions\nSuggestions generated: ${result.suggestions.size} transactions`);
+    alert(`Auto-matching complete!\n\nMatched: ${matchedCount} transactions\nSuggestions generated: ${result.suggestions.size} transactions`);
   }, [filteredBankLines, systemRecords, matchingRules, triggerRefresh]);
 
   const handleCreateNew = (transactionType: TransactionType) => {
@@ -357,14 +541,26 @@ export default function BankReconciliationPage() {
 
   const handleImportComplete = () => {
     // Refresh data after import
-    // In a real app, this would refetch from the API/database
-    console.log('Import complete - data would be refreshed here');
+    triggerRefresh();
     setShowImportSyncModal(false);
   };
 
   const handleClearBankAccountFilter = () => {
     setSelectedBankAccountIds([]);
   };
+
+  if (isLoading) {
+    return (
+      <AppShell currentRole="manager">
+        <div className="flex items-center justify-center min-h-[400px]">
+          <div className="flex flex-col items-center gap-3">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#5A7A8F]"></div>
+            <p className="text-sm text-gray-500">Loading bank reconciliation data...</p>
+          </div>
+        </div>
+      </AppShell>
+    );
+  }
 
   return (
     <AppShell currentRole="manager">
@@ -482,9 +678,9 @@ export default function BankReconciliationPage() {
               </button>
             </div>
           </div>
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4" style={{ minHeight: "600px" }}>
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4" style={{ height: "calc(100vh - 400px)", minHeight: "500px" }}>
             {/* Left: Bank Feed List */}
-            <div className="lg:col-span-1">
+            <div className="lg:col-span-1 h-full overflow-hidden">
               <BankFeedList
                 bankLines={filteredBankLines}
                 selectedLineId={selectedLineId}
@@ -495,7 +691,7 @@ export default function BankReconciliationPage() {
             </div>
 
             {/* Middle + Right: Match Workbench */}
-            <div className="lg:col-span-2">
+            <div className="lg:col-span-2 h-full overflow-hidden">
               <MatchWorkbench
                 selectedLine={selectedLine}
                 suggestedMatches={suggestedMatches}
@@ -533,6 +729,7 @@ export default function BankReconciliationPage() {
         isOpen={showImportSyncModal}
         onClose={() => setShowImportSyncModal(false)}
         bankAccountsInScope={bankAccountsInScope}
+        companies={companies}
         onImportComplete={handleImportComplete}
       />
 
@@ -555,6 +752,8 @@ export default function BankReconciliationPage() {
           handleCreateMatch(match);
           setCreateTransactionModal({ isOpen: false, type: null });
         }}
+        allBankAccounts={allBankAccounts}
+        allProjects={allProjects}
       />
     </AppShell>
   );

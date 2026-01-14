@@ -51,13 +51,30 @@ export function CompanyFormModal({
   // Initialize form with editing company data
   useEffect(() => {
     if (editingCompany) {
-      setName(editingCompany.name);
-      setTaxId(editingCompany.taxId);
-      setRegisteredAddress(editingCompany.registeredAddress);
-      setBillingAddress(editingCompany.billingAddress);
-      setSameAsBillingAddress(editingCompany.sameAsBillingAddress);
-      setContactInformation(editingCompany.contactInformation);
-      setIsActive(editingCompany.isActive);
+      setName(editingCompany.name || "");
+      setTaxId(editingCompany.taxId || "");
+      // Ensure all address fields have string values (not undefined)
+      setRegisteredAddress({
+        street: editingCompany.registeredAddress?.street || "",
+        city: editingCompany.registeredAddress?.city || "",
+        state: editingCompany.registeredAddress?.state || "",
+        postalCode: editingCompany.registeredAddress?.postalCode || "",
+        country: editingCompany.registeredAddress?.country || "",
+      });
+      setBillingAddress({
+        street: editingCompany.billingAddress?.street || "",
+        city: editingCompany.billingAddress?.city || "",
+        state: editingCompany.billingAddress?.state || "",
+        postalCode: editingCompany.billingAddress?.postalCode || "",
+        country: editingCompany.billingAddress?.country || "",
+      });
+      setSameAsBillingAddress(editingCompany.sameAsBillingAddress ?? true);
+      setContactInformation({
+        primaryContactName: editingCompany.contactInformation?.primaryContactName || "",
+        phoneNumber: editingCompany.contactInformation?.phoneNumber || "",
+        email: editingCompany.contactInformation?.email || "",
+      });
+      setIsActive(editingCompany.isActive ?? true);
       setCurrency(editingCompany.currency || "THB");
       setFiscalYearEnd(editingCompany.fiscalYearEnd || "");
       setIsVatRegistered(editingCompany.isVatRegistered || false);

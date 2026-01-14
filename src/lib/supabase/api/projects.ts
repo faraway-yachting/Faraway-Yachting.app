@@ -87,6 +87,18 @@ export const projectsApi = {
     return data ?? [];
   },
 
+  async getActiveByCompany(companyId: string): Promise<Project[]> {
+    const supabase = createClient();
+    const { data, error } = await supabase
+      .from('projects')
+      .select('*')
+      .eq('company_id', companyId)
+      .eq('status', 'active')
+      .order('name');
+    if (error) throw error;
+    return data ?? [];
+  },
+
   async getActive(): Promise<Project[]> {
     const supabase = createClient();
     const { data, error } = await supabase
@@ -107,5 +119,30 @@ export const projectsApi = {
       .order('name');
     if (error) throw error;
     return data ?? [];
+  },
+
+  async toggleStatus(id: string): Promise<Project> {
+    const supabase = createClient();
+    // First get the current status
+    const { data: current, error: fetchError } = await supabase
+      .from('projects')
+      .select('status')
+      .eq('id', id)
+      .single();
+    if (fetchError) throw fetchError;
+
+    // Cycle through: active -> inactive -> completed -> active
+    const statusOrder: Array<'active' | 'inactive' | 'completed'> = ['active', 'inactive', 'completed'];
+    const currentIndex = statusOrder.indexOf(current.status as 'active' | 'inactive' | 'completed');
+    const nextStatus = statusOrder[(currentIndex + 1) % statusOrder.length];
+
+    const { data, error } = await supabase
+      .from('projects')
+      .update({ status: nextStatus })
+      .eq('id', id)
+      .select()
+      .single();
+    if (error) throw error;
+    return data;
   }
 };

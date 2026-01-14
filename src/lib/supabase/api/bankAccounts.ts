@@ -95,5 +95,38 @@ export const bankAccountsApi = {
       .order('account_name');
     if (error) throw error;
     return data ?? [];
+  },
+
+  async toggleStatus(id: string): Promise<BankAccount> {
+    const supabase = createClient();
+    // First get the current status
+    const { data: current, error: fetchError } = await supabase
+      .from('bank_accounts')
+      .select('is_active')
+      .eq('id', id)
+      .single();
+    if (fetchError) throw fetchError;
+
+    // Toggle it
+    const { data, error } = await supabase
+      .from('bank_accounts')
+      .update({ is_active: !current.is_active })
+      .eq('id', id)
+      .select()
+      .single();
+    if (error) throw error;
+    return data;
+  },
+
+  async getByCompanyActive(companyId: string): Promise<BankAccount[]> {
+    const supabase = createClient();
+    const { data, error } = await supabase
+      .from('bank_accounts')
+      .select('*')
+      .eq('company_id', companyId)
+      .eq('is_active', true)
+      .order('account_name');
+    if (error) throw error;
+    return data ?? [];
   }
 };

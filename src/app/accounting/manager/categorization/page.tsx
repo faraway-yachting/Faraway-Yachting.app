@@ -1,13 +1,12 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { FileText, Filter, Search, CheckCircle, AlertCircle, RefreshCw, Calendar } from 'lucide-react';
 import { AppShell } from '@/components/accounting/AppShell';
 import AccountCodeSelector from '@/components/accounting/AccountCodeSelector';
 import { getAllInvoices, updateInvoice } from '@/data/income/invoices';
-import { getAllExpenseRecords } from '@/data/expenses/expenses';
+import { expensesApi, type ExpenseWithDetails } from '@/lib/supabase/api';
 import { getAccountByCode } from '@/components/accounting/AccountCodeSelector';
-import type { ExpenseRecord } from '@/data/expenses/types';
 
 // Types for categorization items
 interface CategorizationItem {
@@ -35,8 +34,32 @@ export default function CategorizationPage() {
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
   const [updatedCodes, setUpdatedCodes] = useState<Record<string, string>>({});
   const [updatedCharterDates, setUpdatedCharterDates] = useState<Record<string, { from?: string; to?: string }>>({});
-  const [periodFrom, setPeriodFrom] = useState<string>('');
-  const [periodTo, setPeriodTo] = useState<string>('');
+
+  // Default date range: 1 year from today
+  const today = new Date();
+  const oneYearAgo = new Date(today.getFullYear() - 1, today.getMonth(), today.getDate());
+  const [periodFrom, setPeriodFrom] = useState<string>(oneYearAgo.toISOString().split('T')[0]);
+  const [periodTo, setPeriodTo] = useState<string>(today.toISOString().split('T')[0]);
+
+  // Expenses from Supabase
+  const [expenses, setExpenses] = useState<ExpenseWithDetails[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  // Fetch expenses from Supabase
+  useEffect(() => {
+    const fetchExpenses = async () => {
+      try {
+        setIsLoading(true);
+        const data = await expensesApi.getAllWithLineItemsByDateRange(periodFrom, periodTo);
+        setExpenses(data);
+      } catch (error) {
+        console.error('Failed to fetch expenses:', error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    fetchExpenses();
+  }, [periodFrom, periodTo]);
 
   // Get all invoices and expenses and flatten line items
   const allItems = useMemo((): CategorizationItem[] => {
@@ -66,31 +89,32 @@ export default function CategorizationPage() {
       }
     }
 
-    // Get expenses
-    const expenses = getAllExpenseRecords();
+    // Get expenses from Supabase
     for (const expense of expenses) {
-      for (const lineItem of expense.lineItems) {
-        const account = lineItem.accountCode ? getAccountByCode(lineItem.accountCode) : null;
-        items.push({
-          id: `exp-${expense.id}-${lineItem.id}`,
-          lineItemId: lineItem.id,
-          documentType: 'expense',
-          documentNumber: expense.expenseNumber,
-          documentId: expense.id,
-          date: expense.expenseDate,
-          counterparty: expense.vendorName,
-          description: lineItem.description,
-          amount: lineItem.amount,
-          currency: expense.currency,
-          currentAccountCode: lineItem.accountCode || '',
-          accountName: account?.name,
-        });
+      if (expense.line_items) {
+        for (const lineItem of expense.line_items) {
+          const account = lineItem.account_code ? getAccountByCode(lineItem.account_code) : null;
+          items.push({
+            id: `exp-${expense.id}-${lineItem.id}`,
+            lineItemId: lineItem.id,
+            documentType: 'expense',
+            documentNumber: expense.expense_number,
+            documentId: expense.id,
+            date: expense.expense_date,
+            counterparty: expense.vendor_name || '',
+            description: lineItem.description || '',
+            amount: lineItem.amount || 0,
+            currency: expense.currency,
+            currentAccountCode: lineItem.account_code || '',
+            accountName: account?.name,
+          });
+        }
       }
     }
 
     // Sort by date descending
     return items.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-  }, []);
+  }, [expenses]);
 
   // Filter items based on criteria
   const filteredItems = useMemo(() => {
@@ -185,36 +209,69 @@ export default function CategorizationPage() {
     setSelectedItems(new Set());
   };
 
+  // Track saving state
+  const [isSaving, setIsSaving] = useState(false);
+
   // Save changes
-  const handleSaveChanges = () => {
-    // Save charter date changes to invoices
-    let charterUpdates = 0;
-    for (const [invoiceId, dates] of Object.entries(updatedCharterDates)) {
-      updateInvoice(invoiceId, {
-        charterPeriodFrom: dates.from,
-        charterPeriodTo: dates.to,
-      });
-      charterUpdates++;
-    }
+  const handleSaveChanges = async () => {
+    setIsSaving(true);
+    try {
+      // Save charter date changes to invoices
+      let charterUpdates = 0;
+      for (const [invoiceId, dates] of Object.entries(updatedCharterDates)) {
+        updateInvoice(invoiceId, {
+          charterPeriodFrom: dates.from,
+          charterPeriodTo: dates.to,
+        });
+        charterUpdates++;
+      }
 
-    // In production, account code changes would also be saved via API
-    const codeChanges = Object.keys(updatedCodes).length;
-    console.log('Saving changes - codes:', updatedCodes, 'charter dates:', updatedCharterDates);
+      // Save expense line item account code changes to Supabase
+      const expenseUpdates: { lineItemId: string; accountCode: string | null }[] = [];
+      for (const [itemId, accountCode] of Object.entries(updatedCodes)) {
+        // itemId format: "exp-{expenseId}-{lineItemId}" for expenses
+        if (itemId.startsWith('exp-')) {
+          const parts = itemId.split('-');
+          // Extract lineItemId (last part after the expense id which is a UUID)
+          const lineItemId = parts.slice(2).join('-'); // Handle UUIDs that might have dashes
+          expenseUpdates.push({
+            lineItemId,
+            accountCode: accountCode || null,
+          });
+        }
+        // TODO: Handle invoice line item updates if needed
+      }
 
-    const messages = [];
-    if (codeChanges > 0) {
-      messages.push(`${codeChanges} account code(s) would be updated (mock)`);
-    }
-    if (charterUpdates > 0) {
-      messages.push(`${charterUpdates} charter date(s) updated`);
-    }
+      // Bulk update expense line items
+      if (expenseUpdates.length > 0) {
+        await expensesApi.bulkUpdateLineItemAccountCodes(expenseUpdates);
+      }
 
-    if (messages.length > 0) {
-      alert(messages.join('\n'));
-    }
+      const messages = [];
+      if (expenseUpdates.length > 0) {
+        messages.push(`${expenseUpdates.length} expense account code(s) updated`);
+      }
+      if (charterUpdates > 0) {
+        messages.push(`${charterUpdates} charter date(s) updated`);
+      }
 
-    setUpdatedCodes({});
-    setUpdatedCharterDates({});
+      if (messages.length > 0) {
+        alert(messages.join('\n'));
+      }
+
+      // Clear pending changes
+      setUpdatedCodes({});
+      setUpdatedCharterDates({});
+
+      // Refresh expenses to show updated data
+      const data = await expensesApi.getAllWithLineItemsByDateRange(periodFrom, periodTo);
+      setExpenses(data);
+    } catch (error) {
+      console.error('Failed to save changes:', error);
+      alert('Failed to save changes. Please try again.');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   // Format date for display
@@ -245,10 +302,15 @@ export default function CategorizationPage() {
           {stats.pendingChanges > 0 && (
             <button
               onClick={handleSaveChanges}
-              className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-[#5A7A8F] rounded-lg hover:bg-[#4a6a7f] transition-colors"
+              disabled={isSaving}
+              className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-[#5A7A8F] rounded-lg hover:bg-[#4a6a7f] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              <CheckCircle className="h-4 w-4" />
-              Save Changes ({stats.pendingChanges})
+              {isSaving ? (
+                <RefreshCw className="h-4 w-4 animate-spin" />
+              ) : (
+                <CheckCircle className="h-4 w-4" />
+              )}
+              {isSaving ? 'Saving...' : `Save Changes (${stats.pendingChanges})`}
             </button>
           )}
         </div>

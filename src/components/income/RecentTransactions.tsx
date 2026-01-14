@@ -1,12 +1,39 @@
 'use client';
 
-import { Invoice, Quotation, Receipt } from '@/data/income/types';
 import { FileText, Receipt as ReceiptIcon, FileSignature } from 'lucide-react';
 
+// Simplified types - only the fields we actually use
+interface SimpleQuotation {
+  id: string;
+  quotationNumber: string;
+  clientName: string;
+  totalAmount: number;
+  status: string;
+  dateCreated: string;
+}
+
+interface SimpleInvoice {
+  id: string;
+  invoiceNumber: string;
+  clientName: string;
+  totalAmount: number;
+  status: string;
+  invoiceDate: string;
+}
+
+interface SimpleReceipt {
+  id: string;
+  receiptNumber: string;
+  clientName: string;
+  totalReceived: number;
+  status: string;
+  receiptDate: string;
+}
+
 interface RecentTransactionsProps {
-  quotations: Quotation[];
-  invoices: Invoice[];
-  receipts: Receipt[];
+  quotations: SimpleQuotation[];
+  invoices: SimpleInvoice[];
+  receipts: SimpleReceipt[];
 }
 
 type Transaction = {

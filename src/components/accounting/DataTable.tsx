@@ -1,8 +1,8 @@
 import { ReactNode } from "react";
 
-interface Column<T> {
+export interface Column<T> {
   key: string;
-  header: string;
+  header: ReactNode;
   render?: (row: T) => ReactNode;
   align?: "left" | "center" | "right";
   width?: string;
@@ -12,12 +12,14 @@ interface DataTableProps<T> {
   columns: Column<T>[];
   data: T[];
   emptyMessage?: string;
+  onRowClick?: (row: T) => void;
 }
 
 export function DataTable<T extends Record<string, any>>({
   columns,
   data,
   emptyMessage = "No data available",
+  onRowClick,
 }: DataTableProps<T>) {
   return (
     <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
@@ -57,7 +59,8 @@ export function DataTable<T extends Record<string, any>>({
               data.map((row, rowIndex) => (
                 <tr
                   key={rowIndex}
-                  className="hover:bg-gray-50 transition-colors"
+                  className={`hover:bg-gray-50 transition-colors ${onRowClick ? 'cursor-pointer' : ''}`}
+                  onClick={() => onRowClick?.(row)}
                 >
                   {columns.map((column) => (
                     <td

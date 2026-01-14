@@ -2,7 +2,8 @@
 
 import { useState, useEffect, ReactNode } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+import { authApi } from "@/lib/supabase/api/auth";
 import { NotificationDropdown } from './NotificationDropdown';
 import { useNotificationsOptional } from '@/contexts/NotificationContext';
 import type { NotificationTargetRole } from '@/data/notifications/types';
@@ -89,7 +90,18 @@ export function AppShell({ children, currentRole }: AppShellProps) {
   const [roleDropdownOpen, setRoleDropdownOpen] = useState(false);
   const [notificationDropdownOpen, setNotificationDropdownOpen] = useState(false);
   const pathname = usePathname();
+  const router = useRouter();
   const config = roleConfig[currentRole];
+
+  const handleSignOut = async () => {
+    try {
+      await authApi.signOut();
+      router.push('/');
+      router.refresh();
+    } catch (error) {
+      console.error('Sign out error:', error);
+    }
+  };
 
   // Notification context (optional - may not be wrapped in provider)
   const notificationContext = useNotificationsOptional();
@@ -394,13 +406,16 @@ export function AppShell({ children, currentRole }: AppShellProps) {
                         ))}
                       </div>
                       <div className="border-t border-gray-100 py-2">
-                        <Link
-                          href="/accounting"
-                          className="flex items-center gap-3 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                        <button
+                          onClick={() => {
+                            setRoleDropdownOpen(false);
+                            handleSignOut();
+                          }}
+                          className="flex w-full items-center gap-3 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
                         >
                           <LogOut className="h-4 w-4 text-gray-400" />
                           Sign Out
-                        </Link>
+                        </button>
                       </div>
                     </div>
                   </>

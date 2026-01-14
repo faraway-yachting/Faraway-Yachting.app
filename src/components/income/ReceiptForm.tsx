@@ -2,20 +2,30 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { X, Save, FileText, Printer, XCircle, Share2, ChevronDown, Pencil } from 'lucide-react';
+import { X, Save, FileText, Printer, XCircle, Share2, ChevronDown, Pencil, Loader2 } from 'lucide-react';
 import ClientSelector from './ClientSelector';
 import LineItemEditor from './LineItemEditor';
 import PaymentRecordEditor from './PaymentRecordEditor';
 import ReceiptPrintView from './ReceiptPrintView';
+import WhtReceiptPrintView from './WhtReceiptPrintView';
 import AccountSelector from '@/components/common/AccountSelector';
-import type { Receipt, PaymentRecord, AdjustmentType, LineItem, PricingType } from '@/data/income/types';
-import type { Currency } from '@/data/company/types';
-import { getActiveCompanies } from '@/data/company/companies';
-import { getInvoiceById } from '@/data/income/invoices';
-import { createReceipt, updateReceipt, calculateReceiptTotals, getReceiptsByCompany } from '@/data/income/receipts';
-import { getActiveBankAccountsByCompany } from '@/data/banking/bankAccounts';
-import { getContactById } from '@/data/contact/contacts';
-import { getActiveProjectsByCompany } from '@/data/project/projects';
+import { RelatedJournalEntries } from '@/components/accounting/RelatedJournalEntries';
+import { CharterInfoBox } from './CharterInfoBox';
+import type { Receipt, PaymentRecord, AdjustmentType, LineItem, PricingType, CharterType } from '@/data/income/types';
+import { charterTypeAccountCodes } from '@/data/income/types';
+import type { Currency, Company } from '@/data/company/types';
+import type { Project } from '@/data/project/types';
+import type { BankAccount } from '@/data/banking/types';
+import type { Contact } from '@/data/contact/types';
+import { companiesApi } from '@/lib/supabase/api/companies';
+import { projectsApi } from '@/lib/supabase/api/projects';
+import { bankAccountsApi } from '@/lib/supabase/api/bankAccounts';
+import { contactsApi } from '@/lib/supabase/api/contacts';
+import { receiptsApi } from '@/lib/supabase/api/receipts';
+import { invoicesApi } from '@/lib/supabase/api/invoices';
+import { documentNumbersApi } from '@/lib/supabase/api/documentNumbers';
+import { dbCompanyToFrontend, dbProjectToFrontend, dbBankAccountToFrontend, dbContactToFrontend, dbInvoiceLineItemToFrontend } from '@/lib/supabase/transforms';
+import { calculateReceiptTotals } from '@/data/income/receipts';
 import {
   getTodayISO,
   generateId,
@@ -26,6 +36,8 @@ import {
   calculateTotalWhtAmount
 } from '@/lib/income/utils';
 import { getDefaultTermsAndConditions } from '@/data/settings/pdfSettings';
+import { getExchangeRate } from '@/lib/exchangeRate/service';
+import type { FxRateSource } from '@/data/exchangeRate/types';
 
 interface ReceiptFormProps {
   receipt?: Receipt;
@@ -37,48 +49,44 @@ export default function ReceiptForm({ receipt, invoiceId, onCancel }: ReceiptFor
   const router = useRouter();
   const isEditing = !!receipt;
 
-  // Get available companies
-  const companies = getActiveCompanies();
+  // Async loaded data
+  const [companies, setCompanies] = useState<Company[]>([]);
+  const [companyProjects, setCompanyProjects] = useState<Project[]>([]);
+  const [companyBankAccounts, setCompanyBankAccounts] = useState<BankAccount[]>([]);
+  const [clientContact, setClientContact] = useState<Contact | undefined>(undefined);
+  const [sourceInvoice, setSourceInvoice] = useState<{ companyId: string; clientId: string; clientName: string; currency: Currency; pricingType: PricingType; invoiceNumber: string; lineItems: LineItem[] } | undefined>(undefined);
+  const [isLoading, setIsLoading] = useState(true);
 
-  // Get invoice data if creating from invoice
-  const sourceInvoice = invoiceId ? getInvoiceById(invoiceId) : undefined;
-
-  // Form state - initialized from receipt, invoice, or defaults
-  const [companyId, setCompanyId] = useState(
-    receipt?.companyId || sourceInvoice?.companyId || ''
-  );
-  const [clientId, setClientId] = useState(
-    receipt?.clientId || sourceInvoice?.clientId || ''
-  );
-  const [clientName, setClientName] = useState(
-    receipt?.clientName || sourceInvoice?.clientName || ''
-  );
-  const [receiptDate, setReceiptDate] = useState(
-    receipt?.receiptDate || getTodayISO()
-  );
-  const [currency, setCurrency] = useState<Currency>(
-    receipt?.currency || sourceInvoice?.currency || 'USD'
-  );
+  // Form state - initialized from receipt or defaults (invoice data loaded async)
+  const [companyId, setCompanyId] = useState(receipt?.companyId || '');
+  const [clientId, setClientId] = useState(receipt?.clientId || '');
+  const [clientName, setClientName] = useState(receipt?.clientName || '');
+  // Charter information
+  const [boatId, setBoatId] = useState(receipt?.boatId || '');
+  const [charterType, setCharterType] = useState<CharterType | ''>(receipt?.charterType || '');
+  const [charterDateFrom, setCharterDateFrom] = useState(receipt?.charterDateFrom || '');
+  const [charterDateTo, setCharterDateTo] = useState(receipt?.charterDateTo || '');
+  const [charterTime, setCharterTime] = useState(receipt?.charterTime || '');
+  const [externalBoatName, setExternalBoatName] = useState('');
+  const [receiptDate, setReceiptDate] = useState(receipt?.receiptDate || getTodayISO());
+  const [currency, setCurrency] = useState<Currency>(receipt?.currency || 'USD');
+  const [exchangeRate, setExchangeRate] = useState<number | undefined>(receipt?.fxRate);
+  const [isFetchingRate, setIsFetchingRate] = useState(false);
+  const [fxRateSource, setFxRateSource] = useState<FxRateSource>(receipt?.fxRateSource || 'bot');
+  const [fxRateDate, setFxRateDate] = useState<string | undefined>(receipt?.fxRateDate);
 
   // Receipt number - generate if new, use existing if editing
-  const initialReceiptNumber = receipt?.receiptNumber || '';
-  const [receiptNumber, setReceiptNumber] = useState(initialReceiptNumber);
+  const [receiptNumber, setReceiptNumber] = useState(receipt?.receiptNumber || '');
 
   // Reference - set to invoice number when creating from invoice
-  const [reference, setReference] = useState(
-    receipt?.reference || sourceInvoice?.invoiceNumber || ''
-  );
+  const [reference, setReference] = useState(receipt?.reference || '');
 
   // Pricing type
-  const [pricingType, setPricingType] = useState<PricingType>(
-    receipt?.pricingType || sourceInvoice?.pricingType || 'exclude_vat'
-  );
+  const [pricingType, setPricingType] = useState<PricingType>(receipt?.pricingType || 'exclude_vat');
 
   // Line items - copy from invoice if creating from invoice
   const [lineItems, setLineItems] = useState<LineItem[]>(
-    receipt?.lineItems ||
-    sourceInvoice?.lineItems?.map(item => ({ ...item, id: generateId() })) ||
-    [
+    receipt?.lineItems || [
       {
         id: generateId(),
         description: '',
@@ -95,28 +103,16 @@ export default function ReceiptForm({ receipt, invoiceId, onCancel }: ReceiptFor
   );
 
   // Payment records
-  const [payments, setPayments] = useState<PaymentRecord[]>(
-    receipt?.payments || []
-  );
+  const [payments, setPayments] = useState<PaymentRecord[]>(receipt?.payments || []);
 
   // Fee/Adjustment
-  const [adjustmentType, setAdjustmentType] = useState<AdjustmentType>(
-    receipt?.adjustmentType || 'none'
-  );
-  const [adjustmentAmount, setAdjustmentAmount] = useState(
-    receipt?.adjustmentAmount || 0
-  );
-  const [adjustmentAccountCode, setAdjustmentAccountCode] = useState(
-    receipt?.adjustmentAccountCode || ''
-  );
-  const [adjustmentRemark, setAdjustmentRemark] = useState(
-    receipt?.adjustmentRemark || ''
-  );
+  const [adjustmentType, setAdjustmentType] = useState<AdjustmentType>(receipt?.adjustmentType || 'none');
+  const [adjustmentAmount, setAdjustmentAmount] = useState(receipt?.adjustmentAmount || 0);
+  const [adjustmentAccountCode, setAdjustmentAccountCode] = useState(receipt?.adjustmentAccountCode || '');
+  const [adjustmentRemark, setAdjustmentRemark] = useState(receipt?.adjustmentRemark || '');
 
   // Notes
-  const [notes, setNotes] = useState(
-    receipt?.notes || (isEditing ? '' : getDefaultTermsAndConditions('invoice'))
-  );
+  const [notes, setNotes] = useState(receipt?.notes || (isEditing ? '' : getDefaultTermsAndConditions('invoice')));
   const [internalNotes, setInternalNotes] = useState(receipt?.internalNotes || '');
 
   // UI state
@@ -126,20 +122,130 @@ export default function ReceiptForm({ receipt, invoiceId, onCancel }: ReceiptFor
   const [voidReason, setVoidReason] = useState('');
   const [currentStatus, setCurrentStatus] = useState(receipt?.status || 'draft');
   const [showPrintPreview, setShowPrintPreview] = useState(false);
+  const [showWhtPreview, setShowWhtPreview] = useState(false);
   const [showOptionsMenu, setShowOptionsMenu] = useState(false);
   const [isEditMode, setIsEditMode] = useState(!isEditing);
 
+  // Load initial data (companies and optionally invoice)
+  useEffect(() => {
+    const loadInitialData = async () => {
+      setIsLoading(true);
+      try {
+        // Load companies
+        const companiesData = await companiesApi.getActive();
+        setCompanies(companiesData.map(dbCompanyToFrontend));
+
+        // Load invoice data if creating from invoice
+        if (invoiceId) {
+          const invoiceWithItems = await invoicesApi.getByIdWithLineItems(invoiceId);
+          if (invoiceWithItems) {
+            const lineItemsData = invoiceWithItems.line_items?.map(item => ({
+              ...dbInvoiceLineItemToFrontend(item),
+              id: generateId(),
+            })) || [];
+
+            const invoiceData = {
+              companyId: invoiceWithItems.company_id,
+              clientId: invoiceWithItems.client_id || '',
+              clientName: invoiceWithItems.client_name,
+              currency: (invoiceWithItems.currency || 'USD') as Currency,
+              pricingType: (invoiceWithItems.pricing_type || 'exclude_vat') as PricingType,
+              invoiceNumber: invoiceWithItems.invoice_number,
+              lineItems: lineItemsData,
+            };
+            setSourceInvoice(invoiceData);
+
+            // Pre-fill form from invoice
+            setCompanyId(invoiceData.companyId);
+            setClientId(invoiceData.clientId);
+            setClientName(invoiceData.clientName);
+            setCurrency(invoiceData.currency);
+            setPricingType(invoiceData.pricingType);
+            setReference(invoiceData.invoiceNumber);
+            if (lineItemsData.length > 0) {
+              setLineItems(lineItemsData);
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Failed to load initial data:', error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    loadInitialData();
+  }, [invoiceId]);
+
+  // Load all projects (projects can be assigned from any company in the group)
+  useEffect(() => {
+    const loadProjects = async () => {
+      try {
+        // Get all projects across all companies (active and inactive, not completed)
+        // Note: Projects belong to a Company for legal registration, but transactions
+        // for P&L calculation can come from any company in the Faraway Yachting group
+        const projectsData = await projectsApi.getAll();
+        // Filter to show active and inactive projects (not completed)
+        const filteredProjects = projectsData.filter(p => p.status !== 'completed');
+        setCompanyProjects(filteredProjects.map(dbProjectToFrontend));
+      } catch (error) {
+        console.error('Failed to load projects:', error);
+      }
+    };
+    loadProjects();
+  }, []);
+
+  // Load company-specific data when company changes (bank accounts only)
+  useEffect(() => {
+    const loadCompanyData = async () => {
+      if (!companyId) {
+        setCompanyBankAccounts([]);
+        return;
+      }
+      try {
+        const bankAccountsData = await bankAccountsApi.getByCompanyActive(companyId);
+        setCompanyBankAccounts(bankAccountsData.map(dbBankAccountToFrontend));
+      } catch (error) {
+        console.error('Failed to load company bank accounts:', error);
+      }
+    };
+    loadCompanyData();
+  }, [companyId]);
+
+  // Generate receipt number when company is selected (for new documents only)
+  useEffect(() => {
+    const generateNumber = async () => {
+      if (!companyId || isEditing || receiptNumber) return;
+      try {
+        const nextNumber = await documentNumbersApi.getNextDocumentNumber(companyId, 'receipt');
+        setReceiptNumber(nextNumber);
+      } catch (error) {
+        console.error('Failed to generate receipt number:', error);
+      }
+    };
+    generateNumber();
+  }, [companyId, isEditing]);
+
+  // Load client contact when client changes
+  useEffect(() => {
+    const loadClientContact = async () => {
+      if (!clientId) {
+        setClientContact(undefined);
+        return;
+      }
+      try {
+        const contact = await contactsApi.getById(clientId);
+        if (contact) {
+          setClientContact(dbContactToFrontend(contact));
+        }
+      } catch (error) {
+        console.error('Failed to load client contact:', error);
+      }
+    };
+    loadClientContact();
+  }, [clientId]);
+
   // Get selected company
   const selectedCompany = companies.find((c) => c.id === companyId);
-
-  // Get bank accounts for selected company
-  const companyBankAccounts = companyId ? getActiveBankAccountsByCompany(companyId) : [];
-
-  // Get active projects for selected company
-  const companyProjects = companyId ? getActiveProjectsByCompany(companyId) : [];
-
-  // Get client contact for print view
-  const clientContact = clientId ? getContactById(clientId) : undefined;
 
   // Check if VAT is available for selected company
   const isVatAvailable = selectedCompany?.isVatRegistered ?? true;
@@ -155,14 +261,119 @@ export default function ReceiptForm({ receipt, invoiceId, onCancel }: ReceiptFor
   // Calculate receipt totals (payments + adjustments)
   const receiptTotals = calculateReceiptTotals(payments, adjustmentType, adjustmentAmount, netAmountToPay);
 
+  // Agency project codes (when selected, external boat name is used)
+  const AGENCY_PROJECT_CODES = ['FA'];
+
+  // Format date as DD MMM YYYY (e.g., 01 Jan 2026)
+  const formatDateForDescription = (dateStr: string): string => {
+    if (!dateStr) return '';
+    const date = new Date(dateStr);
+    const day = date.getDate().toString().padStart(2, '0');
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const month = months[date.getMonth()];
+    const year = date.getFullYear();
+    return `${day} ${month} ${year}`;
+  };
+
+  // Handle Add to Booking Calendar - navigate to booking calendar with pre-filled data
+  // Receipt -> Booked status
+  const handleAddToBooking = () => {
+    // Find selected boat
+    const selectedBoat = companyProjects.find(p => p.id === boatId);
+    const isAgencyBooking = selectedBoat && AGENCY_PROJECT_CODES.includes(selectedBoat.code);
+
+    // Map charter type to booking type (only day_charter, overnight_charter, cabin_charter are valid)
+    const bookingTypeMap: Record<string, string> = {
+      day_charter: 'day_charter',
+      overnight_charter: 'overnight_charter',
+      cabin_charter: 'cabin_charter',
+      other_charter: 'day_charter',
+      bareboat_charter: 'overnight_charter',
+      crewed_charter: 'overnight_charter',
+      outsource_commission: 'day_charter',
+    };
+    const bookingType = charterType ? bookingTypeMap[charterType] || 'day_charter' : 'day_charter';
+
+    // Build URL parameters for booking calendar
+    const params = new URLSearchParams();
+    params.set('status', 'booked'); // Receipt -> Booked
+    params.set('type', bookingType);
+    params.set('title', clientName || '');
+    params.set('customerName', clientName || '');
+
+    if (charterDateFrom) params.set('dateFrom', charterDateFrom);
+    if (charterDateTo) params.set('dateTo', charterDateTo);
+    if (charterTime) params.set('time', charterTime);
+
+    // Set boat info
+    if (isAgencyBooking && externalBoatName) {
+      params.set('externalBoatName', externalBoatName);
+    } else if (selectedBoat) {
+      params.set('projectId', selectedBoat.id);
+    }
+
+    // Set financial info
+    if (documentTotals.totalAmount > 0) {
+      params.set('totalPrice', documentTotals.totalAmount.toString());
+    }
+    params.set('currency', currency);
+
+    // Set source document reference
+    if (receiptNumber) {
+      params.set('sourceDoc', `Receipt: ${receiptNumber}`);
+    }
+
+    // Navigate to booking calendar with new booking form
+    router.push(`/bookings/manager/calendar?newBooking=true&${params.toString()}`);
+  };
+
+  // Handle Update Description - update first line item with charter info
+  const handleUpdateDescription = () => {
+    if (lineItems.length === 0) return;
+
+    // Find selected boat name
+    const selectedBoat = companyProjects.find(p => p.id === boatId);
+    const isAgencyBooking = selectedBoat && AGENCY_PROJECT_CODES.includes(selectedBoat.code);
+
+    // For agency bookings: use external boat name (or leave empty if not provided)
+    // For regular bookings: use the selected project name
+    const boatName = isAgencyBooking
+      ? (externalBoatName || '')
+      : (selectedBoat ? `${selectedBoat.code} - ${selectedBoat.name}` : '');
+
+    // Format date range with DD MMM YYYY format
+    const formattedFrom = formatDateForDescription(charterDateFrom);
+    const formattedTo = formatDateForDescription(charterDateTo);
+    const dateRange = charterDateFrom === charterDateTo || !charterDateTo
+      ? formattedFrom
+      : `${formattedFrom} - ${formattedTo}`;
+
+    // Build structured description
+    const description = `Boat: ${boatName}
+Charter Date: ${dateRange}
+Time: ${charterTime || ''}
+Number of guest:
+Destination: `;
+
+    // Update first line item
+    const updatedItems = [...lineItems];
+    updatedItems[0] = {
+      ...updatedItems[0],
+      description,
+      projectId: boatId || updatedItems[0].projectId,
+      accountCode: charterType ? charterTypeAccountCodes[charterType as CharterType] : updatedItems[0].accountCode,
+    };
+    setLineItems(updatedItems);
+  };
+
   // Generate receipt number when company changes (for new receipts)
   useEffect(() => {
-    if (!isEditing && companyId) {
-      const companyReceipts = getReceiptsByCompany(companyId);
-      const newNumber = generateReceiptNumber(companyId, companyReceipts.length);
+    if (!isEditing && companyId && !receiptNumber) {
+      // Generate a simple receipt number - format: REC-YYMM-XXXX
+      const newNumber = `REC-${getTodayISO().replace(/-/g, '').slice(2, 6)}${String(Math.floor(Math.random() * 10000)).padStart(4, '0')}`;
       setReceiptNumber(newNumber);
     }
-  }, [companyId, isEditing]);
+  }, [companyId, isEditing, receiptNumber]);
 
   // Initialize payments with net amount when creating from invoice
   useEffect(() => {
@@ -205,10 +416,48 @@ export default function ReceiptForm({ receipt, invoiceId, onCancel }: ReceiptFor
     return () => document.removeEventListener('click', handleClickOutside);
   }, [showOptionsMenu]);
 
+  // Auto-fetch exchange rate when currency or receipt date changes
+  useEffect(() => {
+    const fetchRate = async () => {
+      // Skip if THB (no conversion needed)
+      if (currency === 'THB') {
+        setExchangeRate(1);
+        return;
+      }
+
+      // Skip if no receipt date set
+      if (!receiptDate) return;
+
+      // Skip if editing and rate already set (user may have manually entered)
+      if (isEditing && receipt?.fxRate && fxRateSource === 'manual') return;
+
+      setIsFetchingRate(true);
+      try {
+        const result = await getExchangeRate(currency, receiptDate);
+        if (result.success && result.rate) {
+          setExchangeRate(result.rate);
+          setFxRateSource(result.source || 'bot');
+          setFxRateDate(result.date || receiptDate);
+        }
+      } catch (error) {
+        console.error('Failed to fetch exchange rate:', error);
+      } finally {
+        setIsFetchingRate(false);
+      }
+    };
+
+    fetchRate();
+  }, [currency, receiptDate]);
+
   // Handle save
   const handleSave = async (status: 'draft' | 'paid') => {
     // Clear previous errors
     setErrors({});
+
+    // Filter out completely empty line items for validation
+    const nonEmptyLineItems = lineItems.filter(
+      item => item.description.trim() !== '' || item.unitPrice > 0
+    );
 
     // For "Approve" (paid status), do full validation
     if (status === 'paid') {
@@ -224,6 +473,12 @@ export default function ReceiptForm({ receipt, invoiceId, onCancel }: ReceiptFor
       );
       if (!hasValidLineItems) {
         newErrors.lineItems = 'At least one line item with description and amount is required';
+      }
+
+      // Check if all line items have a project selected
+      const lineItemsMissingProject = nonEmptyLineItems.some(item => !item.projectId);
+      if (lineItemsMissingProject) {
+        newErrors.lineItems = 'Project is required for each line item';
       }
 
       // Check payments
@@ -252,10 +507,19 @@ export default function ReceiptForm({ receipt, invoiceId, onCancel }: ReceiptFor
       }
     }
 
-    // For draft, only require company
+    // For draft, require company and project for each line item
     if (status === 'draft') {
-      if (!companyId) {
-        setErrors({ companyId: 'Company is required' });
+      const newErrors: Record<string, string> = {};
+      if (!companyId) newErrors.companyId = 'Company is required';
+
+      // Check if any non-empty line items are missing project
+      const lineItemsMissingProject = nonEmptyLineItems.some(item => !item.projectId);
+      if (lineItemsMissingProject) {
+        newErrors.lineItems = 'Project is required for each line item';
+      }
+
+      if (Object.keys(newErrors).length > 0) {
+        setErrors(newErrors);
         return;
       }
     }
@@ -263,46 +527,269 @@ export default function ReceiptForm({ receipt, invoiceId, onCancel }: ReceiptFor
     setIsSaving(true);
 
     try {
-      const receiptData: Partial<Receipt> = {
-        companyId,
-        clientId,
-        clientName,
-        receiptNumber: receiptNumber || undefined,
-        receiptDate,
-        reference: reference || undefined,
-        lineItems,
-        pricingType: effectivePricingType,
+      // Generate receipt number if not provided (using company settings)
+      let finalReceiptNumber = receiptNumber;
+      if (!finalReceiptNumber) {
+        finalReceiptNumber = await documentNumbersApi.getNextDocumentNumber(companyId, 'receipt');
+      }
+
+      // Build receipt data for database
+      const receiptData = {
+        company_id: companyId,
+        receipt_number: finalReceiptNumber,
+        invoice_id: invoiceId || null, // null if not created from invoice
+        client_id: clientId || null,
+        client_name: clientName,
+        receipt_date: receiptDate,
+        // Charter information
+        boat_id: boatId || null,
+        charter_type: charterType || null,
+        charter_date_from: charterDateFrom || null,
+        charter_date_to: charterDateTo || null,
+        charter_time: charterTime || null,
+        pricing_type: effectivePricingType,
         subtotal: documentTotals.subtotal,
-        taxAmount: documentTotals.taxAmount,
-        whtAmount,
-        totalAmount: documentTotals.totalAmount,
-        payments,
-        adjustmentType,
-        adjustmentAmount: adjustmentType !== 'none' ? adjustmentAmount : 0,
-        adjustmentAccountCode: adjustmentType !== 'none' ? adjustmentAccountCode : undefined,
-        adjustmentRemark: adjustmentType !== 'none' ? adjustmentRemark : undefined,
-        netAmountToPay,
-        totalPayments: receiptTotals.totalPayments,
-        totalReceived: receiptTotals.totalReceived,
-        remainingAmount: receiptTotals.remainingAmount,
+        tax_amount: documentTotals.taxAmount,
+        total_amount: documentTotals.totalAmount,
         currency,
-        notes: notes || undefined,
-        internalNotes: internalNotes || undefined,
+        fx_rate: currency !== 'THB' ? exchangeRate : null,
+        fx_rate_source: currency !== 'THB' ? fxRateSource : null,
+        fx_base_currency: currency !== 'THB' ? currency : null,
+        fx_target_currency: currency !== 'THB' ? 'THB' : null,
+        fx_rate_date: currency !== 'THB' ? fxRateDate : null,
+        notes: notes || null,
         status,
-        paidDate: status === 'paid' ? getTodayISO() : undefined,
       };
 
+      // Filter out empty line items and convert to database format
+      const nonEmptyLineItems = lineItems.filter(
+        item => item.description.trim() !== '' || item.unitPrice > 0
+      );
+      const lineItemsForDb = nonEmptyLineItems.map((item, index) => ({
+        receipt_id: '', // Will be set by API
+        project_id: item.projectId,
+        description: item.description,
+        quantity: item.quantity,
+        unit_price: item.unitPrice,
+        tax_rate: item.taxRate,
+        wht_rate: String(item.whtRate ?? '0'), // WHT rate as string: '0', '1', '2', '3', '5', or 'custom'
+        custom_wht_amount: item.whtRate === 'custom' ? (item.customWhtAmount ?? null) : null,
+        amount: calculateLineItemTotal(item.quantity, item.unitPrice, item.taxRate, effectivePricingType),
+        line_order: index + 1,
+      }));
+
+      // Convert payments to database format
+      // Note: The original schema uses 'received_at' (stores 'cash' or bank_account_id)
+      const paymentRecordsForDb = payments.map(p => ({
+        receipt_id: '', // Will be set by API
+        payment_date: p.paymentDate,
+        amount: p.amount,
+        received_at: p.receivedAt || 'cash', // 'cash' or bank_account_id
+        remark: p.remark || null,
+      }));
+
       // Create or update receipt
+      let savedReceiptId: string | undefined;
+
       if (isEditing && receipt) {
-        const updated = updateReceipt(receipt.id, receiptData);
-        console.log('Updated receipt:', updated);
-        if (updated) {
-          setCurrentStatus(status);
-          setIsEditMode(false); // Switch to view mode after save
+        // Update receipt header
+        await receiptsApi.update(receipt.id, receiptData);
+        console.log('Updated receipt');
+
+        // Update line items (delete existing and insert new)
+        await receiptsApi.updateLineItems(receipt.id, lineItemsForDb);
+        console.log('Updated line items:', lineItemsForDb.length);
+
+        // For payment records, we need to handle them differently
+        // First, get existing payment records and delete them
+        const existingPayments = await receiptsApi.getPaymentRecords(receipt.id);
+        for (const ep of existingPayments) {
+          await receiptsApi.deletePaymentRecord(ep.id);
+        }
+        // Then add the new payment records
+        for (const pr of paymentRecordsForDb) {
+          await receiptsApi.addPaymentRecord({
+            ...pr,
+            receipt_id: receipt.id,
+          });
+        }
+        console.log('Updated payment records:', paymentRecordsForDb.length);
+
+        setCurrentStatus(status);
+        setIsEditMode(false); // Switch to view mode after save
+        savedReceiptId = receipt.id;
+
+        // Create journal entry when updating to paid status
+        if (status === 'paid') {
+          try {
+            const { createReceiptJournalEntry } = await import('@/lib/accounting/journalPostingService');
+
+            const journalResult = await createReceiptJournalEntry(
+              {
+                receiptId: receipt.id,
+                companyId,
+                receiptNumber: finalReceiptNumber,
+                receiptDate,
+                clientName,
+                lineItems: nonEmptyLineItems.map(li => ({
+                  description: li.description,
+                  accountCode: null, // Receipts don't have account codes on line items currently
+                  amount: (li.unitPrice * li.quantity),
+                })),
+                totalSubtotal: documentTotals.subtotal,
+                totalVatAmount: documentTotals.taxAmount,
+                totalAmount: documentTotals.totalAmount,
+                payments: payments.map(p => ({
+                  amount: p.amount,
+                  bankAccountId: p.receivedAt === 'cash' ? null : p.receivedAt,
+                  paymentMethod: p.receivedAt === 'cash' ? 'cash' : 'bank_transfer',
+                })),
+                currency,
+              },
+              'system' // createdBy - will be replaced with actual user later
+            );
+
+            if (journalResult.success) {
+              console.log('Receipt journal entry created:', journalResult.referenceNumber);
+            } else {
+              console.warn('Journal entry creation warning:', journalResult.error);
+            }
+          } catch (journalError) {
+            console.error('Failed to create receipt journal entry:', journalError);
+            // Don't fail the receipt save, just log the error
+          }
+
+          // Create WHT tracking records for line items with WHT
+          // Check if records already exist for this receipt first
+          try {
+            const { whtFromCustomerApi } = await import('@/lib/supabase/api/whtFromCustomer');
+
+            // Check if WHT records already exist for this receipt
+            const existingRecords = await whtFromCustomerApi.getByReceiptId(receipt.id);
+
+            const whtLineItems = nonEmptyLineItems.filter(item => {
+              if (item.whtRate === 'custom' && item.customWhtAmount) return true;
+              if (typeof item.whtRate === 'number' && item.whtRate > 0) return true;
+              return false;
+            });
+
+            // Only create if there are WHT items and no existing records
+            if (whtLineItems.length > 0 && existingRecords.length === 0) {
+              await whtFromCustomerApi.createFromReceiptLineItems(
+                receipt.id,
+                companyId,
+                clientId || null,
+                clientName,
+                clientContact?.taxId || null,
+                receiptDate,
+                currency,
+                whtLineItems.map(item => ({
+                  id: item.id,
+                  description: item.description,
+                  unitPrice: item.unitPrice,
+                  quantity: item.quantity,
+                  whtRate: item.whtRate,
+                  customWhtAmount: item.customWhtAmount,
+                }))
+              );
+              console.log('Created WHT tracking records for receipt');
+            }
+          } catch (whtError) {
+            console.warn('Could not create WHT tracking records:', whtError);
+            // Don't fail - table might not exist yet (migration not run)
+          }
         }
       } else {
-        const newReceipt = createReceipt(receiptData);
+        // Create new receipt with line items
+        const newReceipt = await receiptsApi.create(receiptData, lineItemsForDb);
         console.log('Created receipt:', newReceipt);
+        savedReceiptId = newReceipt?.id;
+
+        // Add payment records
+        if (newReceipt) {
+          for (const pr of paymentRecordsForDb) {
+            await receiptsApi.addPaymentRecord({
+              ...pr,
+              receipt_id: newReceipt.id,
+            });
+          }
+          console.log('Added payment records:', paymentRecordsForDb.length);
+        }
+
+        // Create journal entry for new receipt if status is paid
+        if (newReceipt && status === 'paid') {
+          try {
+            const { createReceiptJournalEntry } = await import('@/lib/accounting/journalPostingService');
+
+            const journalResult = await createReceiptJournalEntry(
+              {
+                receiptId: newReceipt.id,
+                companyId,
+                receiptNumber: finalReceiptNumber,
+                receiptDate,
+                clientName,
+                lineItems: nonEmptyLineItems.map(li => ({
+                  description: li.description,
+                  accountCode: null,
+                  amount: (li.unitPrice * li.quantity),
+                })),
+                totalSubtotal: documentTotals.subtotal,
+                totalVatAmount: documentTotals.taxAmount,
+                totalAmount: documentTotals.totalAmount,
+                payments: payments.map(p => ({
+                  amount: p.amount,
+                  bankAccountId: p.receivedAt === 'cash' ? null : p.receivedAt,
+                  paymentMethod: p.receivedAt === 'cash' ? 'cash' : 'bank_transfer',
+                })),
+                currency,
+              },
+              'system'
+            );
+
+            if (journalResult.success) {
+              console.log('Receipt journal entry created:', journalResult.referenceNumber);
+            } else {
+              console.warn('Journal entry creation warning:', journalResult.error);
+            }
+          } catch (journalError) {
+            console.error('Failed to create receipt journal entry:', journalError);
+          }
+
+          // Create WHT tracking records for line items with WHT
+          try {
+            const { whtFromCustomerApi } = await import('@/lib/supabase/api/whtFromCustomer');
+            const whtLineItems = nonEmptyLineItems.filter(item => {
+              if (item.whtRate === 'custom' && item.customWhtAmount) return true;
+              if (typeof item.whtRate === 'number' && item.whtRate > 0) return true;
+              return false;
+            });
+
+            if (whtLineItems.length > 0) {
+              await whtFromCustomerApi.createFromReceiptLineItems(
+                newReceipt.id,
+                companyId,
+                clientId || null,
+                clientName,
+                clientContact?.taxId || null,
+                receiptDate,
+                currency,
+                whtLineItems.map(item => ({
+                  id: item.id,
+                  description: item.description,
+                  unitPrice: item.unitPrice,
+                  quantity: item.quantity,
+                  whtRate: item.whtRate,
+                  customWhtAmount: item.customWhtAmount,
+                }))
+              );
+              console.log('Created WHT tracking records for new receipt');
+            }
+          } catch (whtError) {
+            console.warn('Could not create WHT tracking records:', whtError);
+            // Don't fail - table might not exist yet (migration not run)
+          }
+        }
+
         // Navigate to edit page for the newly created receipt
         if (newReceipt) {
           router.push(`/accounting/manager/income/receipts/${newReceipt.id}`);
@@ -334,25 +821,23 @@ export default function ReceiptForm({ receipt, invoiceId, onCancel }: ReceiptFor
     alert('Share functionality coming soon! This will allow you to share the PDF via email or other channels.');
   };
 
-  // Handle void receipt
+  // Handle void receipt with number recycling (Thai accounting compliance)
   const handleVoid = async () => {
     if (!receipt) return;
 
     setIsSaving(true);
     try {
-      const updated = updateReceipt(receipt.id, {
-        status: 'void',
-        voidedDate: getTodayISO(),
-        voidReason: voidReason || undefined,
-        internalNotes: voidReason ? `${internalNotes}\n\nVoid Reason: ${voidReason}` : internalNotes,
-      });
+      // Use the new voidReceipt function that recycles the receipt number
+      const result = await receiptsApi.voidReceipt(receipt.id, voidReason || 'No reason provided');
 
-      if (updated) {
-        setCurrentStatus('void');
-        setShowVoidModal(false);
-        setVoidReason('');
-        router.push('/accounting/manager/income/receipts');
+      if (result.numberRecycled) {
+        console.log('Receipt number recycled for reuse:', receipt.receiptNumber);
       }
+
+      setCurrentStatus('void');
+      setShowVoidModal(false);
+      setVoidReason('');
+      router.push('/accounting/manager/income/receipts');
     } catch (error) {
       console.error('Error voiding receipt:', error);
       alert('Failed to void receipt. Please try again.');
@@ -366,6 +851,18 @@ export default function ReceiptForm({ receipt, invoiceId, onCancel }: ReceiptFor
 
   // Check if fields should be disabled (view mode for saved documents)
   const isFieldsDisabled = (isEditing && !isEditMode) || isVoided;
+
+  // Show loading state while initial data is being fetched
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center min-h-[400px]">
+        <div className="flex flex-col items-center gap-3">
+          <Loader2 className="h-8 w-8 animate-spin text-[#5A7A8F]" />
+          <p className="text-sm text-gray-500">Loading...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -451,28 +948,31 @@ export default function ReceiptForm({ receipt, invoiceId, onCancel }: ReceiptFor
                 <span>Share</span>
               </button>
 
-              {/* Edit/Save toggle - only when not voided */}
-              {!isVoided && (
-                isEditMode ? (
-                  <button
-                    type="button"
-                    onClick={() => handleSave(currentStatus === 'draft' ? 'draft' : 'paid')}
-                    disabled={isSaving}
-                    className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-[#5A7A8F] rounded-lg hover:bg-[#4a6a7f] transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    <Save className="h-4 w-4" />
-                    <span>{isSaving ? 'Saving...' : 'Save'}</span>
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => setIsEditMode(true)}
-                    className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-[#5A7A8F] rounded-lg hover:bg-[#4a6a7f] transition-colors shadow-sm"
-                  >
-                    <Pencil className="h-4 w-4" />
-                    <span>Edit</span>
-                  </button>
-                )
+              {/* Save button - only when in edit mode and not voided */}
+              {!isVoided && isEditMode && (
+                <button
+                  type="button"
+                  onClick={() => handleSave(currentStatus === 'draft' ? 'draft' : 'paid')}
+                  disabled={isSaving}
+                  className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-[#5A7A8F] rounded-lg hover:bg-[#4a6a7f] transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <Save className="h-4 w-4" />
+                  <span>{isSaving ? 'Saving...' : 'Save'}</span>
+                </button>
+              )}
+
+              {/* Approved badge */}
+              {currentStatus === 'paid' && !isEditMode && (
+                <span className="px-3 py-1.5 text-sm font-medium text-green-600 bg-green-50 border border-green-200 rounded-lg">
+                  Approved
+                </span>
+              )}
+
+              {/* Draft badge */}
+              {currentStatus === 'draft' && !isEditMode && (
+                <span className="px-3 py-1.5 text-sm font-medium text-amber-600 bg-amber-50 border border-amber-200 rounded-lg">
+                  Draft
+                </span>
               )}
 
               {/* Voided badge */}
@@ -500,6 +1000,21 @@ export default function ReceiptForm({ receipt, invoiceId, onCancel }: ReceiptFor
 
                   {showOptionsMenu && (
                     <div className="absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-lg border border-gray-200 z-50 py-1">
+                      {/* Edit option - only when not in edit mode */}
+                      {!isEditMode && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowOptionsMenu(false);
+                            setIsEditMode(true);
+                          }}
+                          className="w-full flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 transition-colors"
+                        >
+                          <Pencil className="h-4 w-4" />
+                          <span>Edit</span>
+                        </button>
+                      )}
+
                       {/* Credit Note option - only for paid receipts */}
                       {currentStatus === 'paid' && (
                         <button
@@ -527,6 +1042,21 @@ export default function ReceiptForm({ receipt, invoiceId, onCancel }: ReceiptFor
                         >
                           <FileText className="h-4 w-4" />
                           <span>Debit Note</span>
+                        </button>
+                      )}
+
+                      {/* WHT Summary option - only when there's WHT */}
+                      {whtAmount > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowOptionsMenu(false);
+                            setShowWhtPreview(true);
+                          }}
+                          className="w-full flex items-center gap-2 px-4 py-2 text-sm text-amber-700 hover:bg-gray-100 transition-colors"
+                        >
+                          <FileText className="h-4 w-4" />
+                          <span>WHT Summary</span>
                         </button>
                       )}
 
@@ -670,6 +1200,54 @@ export default function ReceiptForm({ receipt, invoiceId, onCancel }: ReceiptFor
             </select>
           </div>
 
+          {/* Exchange Rate (for non-THB) */}
+          {currency !== 'THB' && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Exchange Rate to THB
+              </label>
+              <div className="relative">
+                <input
+                  type="number"
+                  value={exchangeRate || ''}
+                  onChange={(e) => {
+                    setExchangeRate(parseFloat(e.target.value) || undefined);
+                    setFxRateSource('manual');
+                  }}
+                  disabled={isFieldsDisabled || isFetchingRate}
+                  step="0.0001"
+                  placeholder="e.g., 35.50"
+                  className="w-full px-4 py-2.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#5A7A8F]/20 focus:border-[#5A7A8F] disabled:bg-gray-100 disabled:cursor-not-allowed"
+                />
+                {isFetchingRate && (
+                  <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                    <Loader2 className="h-4 w-4 animate-spin text-[#5A7A8F]" />
+                  </div>
+                )}
+              </div>
+              <p className="mt-1 text-xs text-gray-500">
+                1 {currency} = {exchangeRate ? exchangeRate.toFixed(4) : '?'} THB
+                {fxRateSource === 'bot' && !isFetchingRate && (
+                  <span className="ml-2 text-green-600">• Bank of Thailand ({fxRateDate || receiptDate})</span>
+                )}
+                {fxRateSource === 'fallback' && !isFetchingRate && (
+                  <span className="ml-2 text-amber-600">• Frankfurt fallback ({fxRateDate || receiptDate})</span>
+                )}
+                {fxRateSource === 'api' && !isFetchingRate && (
+                  <span className="ml-2 text-green-600">• API rate ({fxRateDate || receiptDate})</span>
+                )}
+                {fxRateSource === 'manual' && !isFetchingRate && (
+                  <span className="ml-2 text-gray-600">• Manual rate</span>
+                )}
+              </p>
+              {exchangeRate && documentTotals.totalAmount > 0 && (
+                <p className="mt-1 text-xs font-medium text-[#5A7A8F]">
+                  THB Total: ฿{(documentTotals.totalAmount * exchangeRate).toLocaleString('th-TH', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                </p>
+              )}
+            </div>
+          )}
+
           {/* Pricing Type */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -690,6 +1268,26 @@ export default function ReceiptForm({ receipt, invoiceId, onCancel }: ReceiptFor
             )}
           </div>
         </div>
+
+        {/* Charter Information Box */}
+        <CharterInfoBox
+          boatId={boatId}
+          charterType={charterType}
+          charterDateFrom={charterDateFrom}
+          charterDateTo={charterDateTo}
+          charterTime={charterTime}
+          externalBoatName={externalBoatName}
+          projects={companyProjects}
+          disabled={isFieldsDisabled}
+          onBoatChange={setBoatId}
+          onCharterTypeChange={setCharterType}
+          onDateFromChange={setCharterDateFrom}
+          onDateToChange={setCharterDateTo}
+          onTimeChange={setCharterTime}
+          onExternalBoatNameChange={setExternalBoatName}
+          onUpdateDescription={handleUpdateDescription}
+          onAddToBooking={handleAddToBooking}
+        />
       </div>
 
       {/* Line Items Section */}
@@ -705,6 +1303,7 @@ export default function ReceiptForm({ receipt, invoiceId, onCancel }: ReceiptFor
           currency={currency}
           projects={companyProjects}
           readOnly={isFieldsDisabled}
+          exchangeRate={exchangeRate}
         />
 
         {errors.lineItems && (
@@ -1008,6 +1607,33 @@ export default function ReceiptForm({ receipt, invoiceId, onCancel }: ReceiptFor
         isOpen={showPrintPreview}
         onClose={() => setShowPrintPreview(false)}
       />
+
+      {/* WHT Summary Print View */}
+      <WhtReceiptPrintView
+        receipt={{
+          receiptNumber: receiptNumber || receipt?.receiptNumber,
+          receiptDate,
+          lineItems,
+          pricingType: effectivePricingType,
+          subtotal: documentTotals.subtotal,
+          taxAmount: documentTotals.taxAmount,
+          totalAmount: documentTotals.totalAmount,
+          currency,
+        }}
+        company={selectedCompany}
+        client={clientContact}
+        clientName={clientName}
+        isOpen={showWhtPreview}
+        onClose={() => setShowWhtPreview(false)}
+      />
+
+      {/* Related Journal Entries - Only show for existing receipts */}
+      {isEditing && receipt && (
+        <RelatedJournalEntries
+          documentType="receipt"
+          documentId={receipt.id}
+        />
+      )}
     </div>
   );
 }

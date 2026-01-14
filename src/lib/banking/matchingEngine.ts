@@ -14,6 +14,7 @@ import {
 } from '@/data/banking/bankReconciliationTypes';
 import { Receipt } from '@/data/income/types';
 import { generateId } from '@/lib/income/utils';
+import type { ExpenseWithDetails } from '@/lib/supabase/api/expenses';
 
 // ============================================================================
 // Types
@@ -441,13 +442,23 @@ export function receiptToSystemRecord(receipt: Receipt): SystemRecord {
 
 /**
  * Get unreconciled receipts as system records
+ * @param receipts - All receipts to filter
+ * @param companyId - Optional company filter
+ * @param projectId - Optional project filter
+ * @param matchedRecordIds - Set of receipt IDs that are already matched to bank feed lines
  */
 export function getUnreconciledReceiptsAsSystemRecords(
   receipts: Receipt[],
   companyId?: string,
-  projectId?: string
+  projectId?: string,
+  matchedRecordIds?: Set<string>
 ): SystemRecord[] {
   let filtered = receipts.filter(r => r.status === 'paid');
+
+  // Exclude already matched receipts
+  if (matchedRecordIds && matchedRecordIds.size > 0) {
+    filtered = filtered.filter(r => !matchedRecordIds.has(r.id));
+  }
 
   if (companyId) {
     filtered = filtered.filter(r => r.companyId === companyId);
@@ -458,4 +469,66 @@ export function getUnreconciledReceiptsAsSystemRecords(
   }
 
   return filtered.map(receiptToSystemRecord);
+}
+
+/**
+ * Convert Expense (from Supabase) to SystemRecord for matching
+ */
+export function expenseToSystemRecord(expense: ExpenseWithDetails): SystemRecord {
+  // Get unique project IDs from line items
+  const projectIds = [...new Set(expense.line_items?.map(li => li.project_id).filter(Boolean) ?? [])];
+
+  // Use net_payable (amount actually paid) or fall back to total_amount
+  const amount = expense.net_payable ?? expense.total_amount ?? 0;
+
+  return {
+    id: expense.id,
+    type: 'expense',
+    reference: expense.expense_number,
+    date: expense.expense_date,
+    amount: -Math.abs(amount), // Negative for expenses (outflow)
+    counterparty: expense.vendor_name,
+    description: expense.supplier_invoice_number
+      ? `Invoice ${expense.supplier_invoice_number}`
+      : expense.notes ?? undefined,
+    projectId: projectIds.length === 1 ? projectIds[0] ?? undefined : undefined,
+    companyId: expense.company_id,
+    isReconciled: false, // TODO: Add reconciledBankLineId field to Expense
+  };
+}
+
+/**
+ * Get unreconciled expenses as system records
+ * @param expenses - All expenses to filter
+ * @param companyId - Optional company filter
+ * @param projectId - Optional project filter
+ * @param matchedRecordIds - Set of expense IDs that are already matched to bank feed lines
+ */
+export function getUnreconciledExpensesAsSystemRecords(
+  expenses: ExpenseWithDetails[],
+  companyId?: string,
+  projectId?: string,
+  matchedRecordIds?: Set<string>
+): SystemRecord[] {
+  // Only include approved expenses that have been paid
+  let filtered = expenses.filter(e =>
+    e.status === 'approved' && e.payment_status === 'paid'
+  );
+
+  // Exclude already matched expenses
+  if (matchedRecordIds && matchedRecordIds.size > 0) {
+    filtered = filtered.filter(e => !matchedRecordIds.has(e.id));
+  }
+
+  if (companyId) {
+    filtered = filtered.filter(e => e.company_id === companyId);
+  }
+
+  if (projectId) {
+    filtered = filtered.filter(e =>
+      e.line_items?.some(li => li.project_id === projectId)
+    );
+  }
+
+  return filtered.map(expenseToSystemRecord);
 }

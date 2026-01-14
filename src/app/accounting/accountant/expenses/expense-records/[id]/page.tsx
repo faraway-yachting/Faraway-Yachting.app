@@ -4,7 +4,8 @@ import { useParams, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { AlertCircle } from 'lucide-react';
 import ExpenseForm from '@/components/expenses/ExpenseForm';
-import { getExpenseRecordById } from '@/data/expenses/expenses';
+import { expensesApi } from '@/lib/supabase/api/expenses';
+import { dbExpenseToFrontend, dbExpenseLineItemToFrontend } from '@/lib/supabase/transforms';
 import type { ExpenseRecord } from '@/data/expenses/types';
 
 export default function ExpenseDetailPage() {
@@ -15,17 +16,33 @@ export default function ExpenseDetailPage() {
   const [notFound, setNotFound] = useState(false);
 
   useEffect(() => {
-    if (params.id) {
-      const expenseId = Array.isArray(params.id) ? params.id[0] : params.id;
-      const found = getExpenseRecordById(expenseId);
+    const loadExpense = async () => {
+      if (!params.id) return;
 
-      if (found) {
-        setExpense(found);
-      } else {
+      try {
+        const expenseId = Array.isArray(params.id) ? params.id[0] : params.id;
+        const expenseData = await expensesApi.getByIdWithDetails(expenseId);
+
+        if (expenseData) {
+          // Transform DB expense to frontend format
+          const frontendExpense = dbExpenseToFrontend(expenseData);
+          // Add line items if they exist
+          if (expenseData.line_items && expenseData.line_items.length > 0) {
+            frontendExpense.lineItems = expenseData.line_items.map(dbExpenseLineItemToFrontend);
+          }
+          setExpense(frontendExpense);
+        } else {
+          setNotFound(true);
+        }
+      } catch (error) {
+        console.error('Failed to load expense:', error);
         setNotFound(true);
+      } finally {
+        setLoading(false);
       }
-      setLoading(false);
-    }
+    };
+
+    loadExpense();
   }, [params.id]);
 
   if (loading) {

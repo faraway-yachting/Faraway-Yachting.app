@@ -1,7 +1,7 @@
 "use client";
 
 import { ChevronDown, ChevronRight, FileText } from "lucide-react";
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { PLCategory, PLLineItem, formatAmount, formatTHB } from "@/lib/reports/plCalculation";
 
 interface PLReportTableProps {
@@ -89,10 +89,9 @@ export function PLReportTable({
         </thead>
         <tbody className="divide-y divide-gray-200">
           {categories.map((category) => (
-            <>
+            <Fragment key={category.code}>
               {/* Category Header */}
               <tr
-                key={category.code}
                 className="bg-gray-50 cursor-pointer hover:bg-gray-100"
                 onClick={() => toggleCategory(category.code)}
               >
@@ -165,7 +164,7 @@ export function PLReportTable({
                     </td>
                   </tr>
                 ))}
-            </>
+            </Fragment>
           ))}
 
           {/* Empty State */}

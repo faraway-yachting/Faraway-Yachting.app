@@ -27,7 +27,8 @@ export const modules: Module[] = [
     title: "Bookings",
     description: "Manage charters and reservations",
     icon: Calendar,
-    status: "coming-soon",
+    status: "beta",
+    href: "/bookings",
   },
   {
     title: "Inventory",
