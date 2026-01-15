@@ -9,11 +9,11 @@ import { Currency } from '@/data/company/types';
 // Database row type (matches the SQL schema)
 interface DbYachtProduct {
   id: string;
-  yacht_source: string;
+  yacht_source: 'own' | 'external';
   project_id: string | null;
   external_yacht_id: string | null;
   name: string;
-  charter_type: string;
+  charter_type: 'full_day_charter' | 'half_day_charter' | 'overnight_charter' | 'cabin_charter' | 'bareboat_charter' | 'other_charter';
   duration: string;
   depart_from: string | null;
   destination: string | null;
@@ -53,11 +53,11 @@ function dbYachtProductToFrontend(db: DbYachtProduct): YachtProduct {
 }
 
 interface DbYachtProductInsert {
-  yacht_source: string;
+  yacht_source: 'own' | 'external';
   project_id?: string | null;
   external_yacht_id?: string | null;
   name: string;
-  charter_type: string;
+  charter_type: 'full_day_charter' | 'half_day_charter' | 'overnight_charter' | 'cabin_charter' | 'bareboat_charter' | 'other_charter';
   duration: string;
   depart_from?: string | null;
   destination?: string | null;

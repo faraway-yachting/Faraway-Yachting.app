@@ -2054,6 +2054,76 @@ export type Database = {
           }
         ]
       }
+      yacht_products: {
+        Row: {
+          id: string
+          yacht_source: 'own' | 'external'
+          project_id: string | null
+          external_yacht_id: string | null
+          name: string
+          charter_type: 'full_day_charter' | 'half_day_charter' | 'overnight_charter' | 'cabin_charter' | 'bareboat_charter' | 'other_charter'
+          duration: string
+          depart_from: string | null
+          destination: string | null
+          price: number | null
+          currency: string
+          default_time: string | null
+          display_order: number
+          is_active: boolean
+          notes: string | null
+          created_by: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          yacht_source: 'own' | 'external'
+          project_id?: string | null
+          external_yacht_id?: string | null
+          name: string
+          charter_type: 'full_day_charter' | 'half_day_charter' | 'overnight_charter' | 'cabin_charter' | 'bareboat_charter' | 'other_charter'
+          duration: string
+          depart_from?: string | null
+          destination?: string | null
+          price?: number | null
+          currency?: string
+          default_time?: string | null
+          display_order?: number
+          is_active?: boolean
+          notes?: string | null
+          created_by?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          yacht_source?: 'own' | 'external'
+          project_id?: string | null
+          external_yacht_id?: string | null
+          name?: string
+          charter_type?: 'full_day_charter' | 'half_day_charter' | 'overnight_charter' | 'cabin_charter' | 'bareboat_charter' | 'other_charter'
+          duration?: string
+          depart_from?: string | null
+          destination?: string | null
+          price?: number | null
+          currency?: string
+          default_time?: string | null
+          display_order?: number
+          is_active?: boolean
+          notes?: string | null
+          created_by?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "yacht_products_project_id_fkey"
+            columns: ["project_id"]
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
     }
     Views: {
       [_ in never]: never
