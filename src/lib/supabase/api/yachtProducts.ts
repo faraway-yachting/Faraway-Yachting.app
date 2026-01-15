@@ -62,10 +62,10 @@ interface DbYachtProductInsert {
   depart_from?: string | null;
   destination?: string | null;
   price?: number | null;
-  currency?: string | null;
+  currency?: string;
   default_time?: string | null;
-  display_order?: number | null;
-  is_active?: boolean | null;
+  display_order?: number;
+  is_active?: boolean;
   notes?: string | null;
   created_by?: string | null;
 }
