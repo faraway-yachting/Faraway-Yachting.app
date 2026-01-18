@@ -5,9 +5,10 @@ interface ButtonProps {
   children: ReactNode;
   variant?: "primary" | "secondary" | "outline";
   size?: "sm" | "md" | "lg";
-  onClick?: () => void;
+  onClick?: () => void | Promise<void>;
   href?: string;
   className?: string;
+  disabled?: boolean;
 }
 
 export function Button({
@@ -17,6 +18,7 @@ export function Button({
   onClick,
   href,
   className = "",
+  disabled = false,
 }: ButtonProps) {
   const baseStyles =
     "inline-flex items-center justify-center font-medium rounded-lg transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2";
@@ -36,7 +38,9 @@ export function Button({
     lg: "px-8 py-4 text-lg",
   };
 
-  const combinedStyles = `${baseStyles} ${variantStyles[variant]} ${sizeStyles[size]} ${className}`;
+  const disabledStyles = disabled ? "opacity-50 cursor-not-allowed" : "";
+
+  const combinedStyles = `${baseStyles} ${variantStyles[variant]} ${sizeStyles[size]} ${disabledStyles} ${className}`;
 
   if (href) {
     return (
@@ -47,7 +51,7 @@ export function Button({
   }
 
   return (
-    <button onClick={onClick} className={combinedStyles}>
+    <button type="button" onClick={onClick} disabled={disabled} className={combinedStyles}>
       {children}
     </button>
   );

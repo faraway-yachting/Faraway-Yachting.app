@@ -1,16 +1,18 @@
 'use client';
 
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { AppShell } from '@/components/accounting/AppShell';
 import { KPICard } from '@/components/accounting/KPICard';
 import { DataTable } from '@/components/accounting/DataTable';
 import TopUpModal from '@/components/petty-cash/TopUpModal';
 import ReimbursementApprovalModal from '@/components/petty-cash/ReimbursementApprovalModal';
+import WalletSummaryCard from '@/components/petty-cash/WalletSummaryCard';
+import ExpenseForm from '@/components/petty-cash/ExpenseForm';
+import ExpenseFilters, { type FilterValues as ExpenseFilterValues } from '@/components/petty-cash/ExpenseFilters';
 import {
   Wallet,
   Users,
-  DollarSign,
   AlertTriangle,
   TrendingDown,
   CheckCircle,
@@ -23,22 +25,40 @@ import {
   RefreshCw,
   Filter,
   X,
-  Check,
   Square,
   Minus,
+  Plus,
+  Receipt,
+  FileText,
+  Loader2,
 } from 'lucide-react';
 
-// Data imports
+// Auth import
+import { useAuth } from '@/components/auth';
+
+// Supabase API imports
+import { pettyCashApi } from '@/lib/supabase/api/pettyCash';
+import { companiesApi } from '@/lib/supabase/api/companies';
+import { projectsApi } from '@/lib/supabase/api/projects';
+import type { Database } from '@/lib/supabase/database.types';
+
+// Mock data imports (still needed for some features not yet migrated)
 import {
   getAllWallets,
   getLowBalanceWallets,
   getTotalWalletBalance,
-  getWalletById,
   addToWallet,
   getAllTransactions,
+  deductFromWallet,
 } from '@/data/petty-cash/wallets';
-import { getActiveCompanies } from '@/data/company/companies';
-import { getAllExpenses, getExpenseById, updateReceiptStatus } from '@/data/petty-cash/expenses';
+import {
+  getAllExpenses,
+  getExpenseById,
+  updateReceiptStatus,
+  getExpensesByWallet,
+  getMonthlyExpensesForWallet,
+} from '@/data/petty-cash/expenses';
+import type { SimplifiedExpenseInput } from '@/data/petty-cash/expenses';
 import {
   getAllReimbursements,
   getPendingReimbursements,
@@ -46,8 +66,12 @@ import {
   approveReimbursement,
   processReimbursementPayment,
   rejectReimbursement,
+  getReimbursementsByWallet,
+  getPendingAmountForWallet,
+  createReimbursement,
 } from '@/data/petty-cash/reimbursements';
-import { createTopUp, completeTopUp } from '@/data/petty-cash/topups';
+import { createTopUp, completeTopUp, getTopUpsByWallet } from '@/data/petty-cash/topups';
+import { notifyAccountantNewReimbursement } from '@/data/notifications/notifications';
 import type { PettyCashWallet, PettyCashReimbursement, PettyCashExpense, PettyCashTransaction, TransactionType, ReceiptStatus } from '@/data/petty-cash/types';
 import {
   formatCurrency,
@@ -56,15 +80,124 @@ import {
   getStatusColor,
   getCurrentMonthStart,
   getCurrentMonthEnd,
+  buildTransactionHistory,
 } from '@/lib/petty-cash/utils';
+
+// Types for Supabase data
+type SupabaseWallet = Database['public']['Tables']['petty_cash_wallets']['Row'];
+type SupabaseWalletWithBalance = SupabaseWallet & { calculated_balance: number };
+type SupabaseExpense = Database['public']['Tables']['petty_cash_expenses']['Row'];
+type DbCompany = Database['public']['Tables']['companies']['Row'];
+type DbProject = Database['public']['Tables']['projects']['Row'];
+
+// Transform Supabase wallet to frontend format
+type TransformedWallet = {
+  id: string;
+  walletName: string;
+  userId: string | null;
+  userName: string;
+  companyId: string;
+  balance: number;
+  currency: string;
+  status: string;
+  balanceLimit: number | null;
+  lowBalanceThreshold: number | null;
+};
+
+function transformWallet(dbWallet: SupabaseWallet): TransformedWallet {
+  return {
+    id: dbWallet.id,
+    walletName: dbWallet.wallet_name,
+    userId: dbWallet.user_id,
+    userName: dbWallet.user_name,
+    companyId: dbWallet.company_id,
+    balance: dbWallet.balance,
+    currency: dbWallet.currency,
+    status: dbWallet.status,
+    balanceLimit: dbWallet.balance_limit,
+    lowBalanceThreshold: dbWallet.low_balance_threshold,
+  };
+}
+
+// Transform wallet with calculated balance (for "All Wallets" view)
+function transformWalletWithCalculatedBalance(dbWallet: SupabaseWalletWithBalance): TransformedWallet {
+  return {
+    id: dbWallet.id,
+    walletName: dbWallet.wallet_name,
+    userId: dbWallet.user_id,
+    userName: dbWallet.user_name,
+    companyId: dbWallet.company_id,
+    balance: dbWallet.calculated_balance, // Use calculated balance instead of initial balance
+    currency: dbWallet.currency,
+    status: dbWallet.status,
+    balanceLimit: dbWallet.balance_limit,
+    lowBalanceThreshold: dbWallet.low_balance_threshold,
+  };
+}
+
+// Transform Supabase expense to frontend-compatible format for display
+function transformExpenseForDisplay(
+  dbExpense: SupabaseExpense,
+  companies: { id: string; name: string }[],
+  projects: { id: string; name: string }[],
+  walletHolderName: string
+) {
+  const company = companies.find(c => c.id === dbExpense.company_id);
+  const project = projects.find(p => p.id === dbExpense.project_id);
+  return {
+    id: dbExpense.id,
+    expenseNumber: dbExpense.expense_number,
+    walletId: dbExpense.wallet_id,
+    walletHolderName,
+    companyId: dbExpense.company_id,
+    companyName: company?.name || '',
+    expenseDate: dbExpense.expense_date,
+    description: dbExpense.description || '',
+    amount: dbExpense.amount || 0,
+    projectId: dbExpense.project_id,
+    projectName: project?.name || '',
+    status: dbExpense.status,
+    netAmount: dbExpense.amount || 0, // For simplified expenses, amount = netAmount
+    createdAt: dbExpense.created_at,
+  };
+}
+
+// Initial filter state for My Wallet view
+const initialMyWalletFilters: ExpenseFilterValues = {
+  dateFrom: '',
+  dateTo: '',
+  status: '',
+  projectId: '',
+  companyId: '',
+};
 
 export default function PettyCashManagementPage() {
   const router = useRouter();
+  const { user, isLoading: authLoading } = useAuth();
   const [refreshKey, setRefreshKey] = useState(0);
   const [selectedWallet, setSelectedWallet] = useState<PettyCashWallet | null>(null);
   const [showTopUpModal, setShowTopUpModal] = useState(false);
   const [selectedReimbursement, setSelectedReimbursement] = useState<PettyCashReimbursement | null>(null);
   const [selectedExpense, setSelectedExpense] = useState<PettyCashExpense | null>(null);
+
+  // View mode toggle: 'all-wallets' (default) or 'my-wallet'
+  const [viewMode, setViewMode] = useState<'all-wallets' | 'my-wallet'>('all-wallets');
+
+  // My wallet state (fetched from Supabase for current user)
+  const [myWallet, setMyWallet] = useState<SupabaseWallet | null>(null);
+  const [myWalletLoading, setMyWalletLoading] = useState(true);
+
+  // Supabase-loaded data for My Wallet view
+  const [myWalletExpensesDb, setMyWalletExpensesDb] = useState<SupabaseExpense[]>([]);
+  const [companies, setCompanies] = useState<{ id: string; name: string }[]>([]);
+  const [projects, setProjects] = useState<{ id: string; name: string; code: string }[]>([]);
+  const [isLoadingData, setIsLoadingData] = useState(true);
+
+  // My Wallet view state
+  const [showExpenseForm, setShowExpenseForm] = useState(false);
+  const [myWalletTab, setMyWalletTab] = useState<'expenses' | 'reimbursements' | 'history'>('expenses');
+  const [myWalletExpenseFilters, setMyWalletExpenseFilters] = useState<ExpenseFilterValues>(initialMyWalletFilters);
+  const [myWalletReimbursementFilters, setMyWalletReimbursementFilters] = useState<ExpenseFilterValues>(initialMyWalletFilters);
 
   // Transaction filter state
   const [txnDateFrom, setTxnDateFrom] = useState('');
@@ -78,14 +211,162 @@ export default function PettyCashManagementPage() {
   const [showReceiptConfirmDialog, setShowReceiptConfirmDialog] = useState(false);
   const [pendingReceiptUncheck, setPendingReceiptUncheck] = useState<PettyCashTransaction | null>(null);
 
-  // Fetch data
-  const wallets = useMemo(() => getAllWallets(), [refreshKey]);
-  const companies = useMemo(() => getActiveCompanies(), []);
-  const expenses = useMemo(() => getAllExpenses(), [refreshKey]);
+  // Fetch companies and projects from Supabase
+  useEffect(() => {
+    async function loadDropdownData() {
+      try {
+        const [companiesData, projectsData] = await Promise.all([
+          companiesApi.getActive(),
+          projectsApi.getActive(),
+        ]);
+        setCompanies(companiesData.map((c: DbCompany) => ({ id: c.id, name: c.name })));
+        setProjects(projectsData.map((p: DbProject) => ({ id: p.id, name: p.name, code: p.code })));
+      } catch (error) {
+        console.error('Error loading dropdown data:', error);
+      } finally {
+        setIsLoadingData(false);
+      }
+    }
+    loadDropdownData();
+  }, []);
+
+  // Fetch user's own wallet from Supabase (with calculated balance)
+  useEffect(() => {
+    async function fetchMyWallet() {
+      if (!user?.id) {
+        setMyWalletLoading(false);
+        return;
+      }
+
+      try {
+        const wallets = await pettyCashApi.getWalletsByUser(user.id);
+        const activeWallet = wallets.find(w => w.status === 'active') || wallets[0] || null;
+
+        // Fetch wallet with calculated balance if found
+        if (activeWallet) {
+          const walletWithBalance = await pettyCashApi.getWalletWithCalculatedBalance(activeWallet.id);
+          if (walletWithBalance) {
+            // Replace balance with calculated_balance for proper display
+            setMyWallet({
+              ...walletWithBalance,
+              balance: walletWithBalance.calculated_balance,
+            });
+          } else {
+            setMyWallet(activeWallet);
+          }
+
+          // Also fetch expenses for this wallet from Supabase
+          const expensesData = await pettyCashApi.getExpensesByWallet(activeWallet.id);
+          setMyWalletExpensesDb(expensesData);
+        } else {
+          setMyWallet(null);
+        }
+      } catch (error) {
+        console.error('Error fetching my wallet:', error);
+        setMyWallet(null);
+      } finally {
+        setMyWalletLoading(false);
+      }
+    }
+
+    if (!authLoading) {
+      fetchMyWallet();
+    }
+  }, [user?.id, authLoading, refreshKey]);
+
+  // Transform my wallet to frontend format
+  const transformedMyWallet = useMemo(
+    () => myWallet ? transformWallet(myWallet) : null,
+    [myWallet]
+  );
+
+  // Check if user has their own wallet
+  const hasOwnWallet = !!myWallet;
+
+  // Supabase data for "All Wallets" view
+  const [allWalletsDb, setAllWalletsDb] = useState<SupabaseWalletWithBalance[]>([]);
+  const [allExpensesDb, setAllExpensesDb] = useState<SupabaseExpense[]>([]);
+  const [isLoadingAllWallets, setIsLoadingAllWallets] = useState(true);
+
+  // Fetch all wallets and expenses from Supabase
+  useEffect(() => {
+    async function fetchAllWalletsData() {
+      try {
+        const [walletsData, expensesData] = await Promise.all([
+          pettyCashApi.getAllWalletsWithCalculatedBalances(), // Use calculated balance method
+          pettyCashApi.getAllExpenses(),
+        ]);
+        setAllWalletsDb(walletsData);
+        setAllExpensesDb(expensesData);
+      } catch (error) {
+        console.error('Error fetching all wallets data:', error);
+      } finally {
+        setIsLoadingAllWallets(false);
+      }
+    }
+    fetchAllWalletsData();
+  }, [refreshKey]);
+
+  // Transform wallets for display (using calculated balance)
+  const wallets = useMemo(() => {
+    return allWalletsDb.map(transformWalletWithCalculatedBalance);
+  }, [allWalletsDb]);
+
+  // Transform expenses for display in All Wallets view
+  const allExpenses = useMemo(() => {
+    return allExpensesDb.map(exp => {
+      const company = companies.find(c => c.id === exp.company_id);
+      const project = projects.find(p => p.id === exp.project_id);
+      const wallet = allWalletsDb.find(w => w.id === exp.wallet_id);
+      return {
+        id: exp.id,
+        expenseNumber: exp.expense_number,
+        walletId: exp.wallet_id,
+        walletHolderName: wallet?.user_name || '',
+        companyId: exp.company_id,
+        companyName: company?.name || '',
+        expenseDate: exp.expense_date,
+        description: exp.description || '',
+        amount: exp.amount || 0,
+        projectId: exp.project_id,
+        projectName: project?.name || '',
+        status: exp.status,
+        netAmount: exp.amount || 0,
+        createdAt: exp.created_at,
+      };
+    });
+  }, [allExpensesDb, companies, projects, allWalletsDb]);
+
+  // Still using mock data for reimbursements (to be migrated later)
   const reimbursements = useMemo(() => getAllReimbursements(), [refreshKey]);
   const pendingReimbursements = useMemo(() => getPendingReimbursements(), [refreshKey]);
-  const lowBalanceWallets = useMemo(() => getLowBalanceWallets(), [refreshKey]);
-  const allTransactions = useMemo(() => getAllTransactions(), [refreshKey]);
+
+  // Calculate low balance wallets from Supabase data
+  const lowBalanceWallets = useMemo(() => {
+    return wallets.filter(w =>
+      w.lowBalanceThreshold && w.balance <= w.lowBalanceThreshold && w.status === 'active'
+    );
+  }, [wallets]);
+
+  // Build transactions from Supabase expenses (topups and reimbursements still from mock)
+  const allTransactions = useMemo((): PettyCashTransaction[] => {
+    const expenseTransactions: PettyCashTransaction[] = allExpenses.map(exp => ({
+      id: exp.id,
+      type: 'expense' as const,
+      date: exp.expenseDate,
+      referenceNumber: exp.expenseNumber,
+      walletId: exp.walletId,
+      walletHolderName: exp.walletHolderName,
+      companyName: exp.companyName,
+      description: exp.description,
+      amount: -(exp.amount || 0),
+      status: exp.status,
+      projectName: exp.projectName,
+      receiptStatus: 'pending' as const, // Default for now
+    }));
+    // TODO: Add topups and reimbursements when migrated to Supabase
+    return expenseTransactions.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  }, [allExpenses]);
 
   // Filter transactions
   const filteredTransactions = useMemo(() => {
@@ -116,23 +397,26 @@ export default function PettyCashManagementPage() {
 
   const hasActiveTxnFilters = txnDateFrom || txnDateTo || txnWalletId || txnCompanyId || txnType || txnReceiptStatus;
 
-  // Calculate stats
-  const totalBalance = useMemo(() => getTotalWalletBalance(), [refreshKey]);
+  // Calculate stats from Supabase data
+  const totalBalance = useMemo(() => {
+    return wallets.reduce((sum, w) => sum + (w.balance || 0), 0);
+  }, [wallets]);
+
   const pendingStats = useMemo(() => getTotalPendingReimbursements(), [refreshKey]);
 
-  // Monthly expenses calculation
+  // Monthly expenses calculation from Supabase data
   const monthlyExpenses = useMemo(() => {
     const monthStart = getCurrentMonthStart();
     const monthEnd = getCurrentMonthEnd();
-    return expenses
+    return allExpenses
       .filter((e) => e.expenseDate >= monthStart && e.expenseDate <= monthEnd)
       .reduce((sum, e) => sum + e.netAmount, 0);
-  }, [expenses]);
+  }, [allExpenses]);
 
-  // Group expenses by company
+  // Group expenses by company from Supabase data
   const expensesByCompany = useMemo(() => {
     const grouped = new Map<string, { companyName: string; total: number; count: number }>();
-    expenses.forEach((exp) => {
+    allExpenses.forEach((exp) => {
       const existing = grouped.get(exp.companyId) || {
         companyName: exp.companyName,
         total: 0,
@@ -148,7 +432,188 @@ export default function PettyCashManagementPage() {
       companyId,
       ...data,
     }));
-  }, [expenses]);
+  }, [allExpenses]);
+
+  // ========== My Wallet View Data ==========
+  // Use Supabase-loaded projects
+  const allProjects = useMemo(() => projects, [projects]);
+
+  // Transform my wallet expenses from Supabase data
+  const myWalletExpenses = useMemo(() => {
+    if (!myWallet) return [];
+    const walletHolderName = myWallet.user_name || '';
+    return myWalletExpensesDb.map(exp => transformExpenseForDisplay(exp, companies, projects, walletHolderName));
+  }, [myWallet, myWalletExpensesDb, companies, projects]);
+
+  const myWalletReimbursements = useMemo(
+    () => (myWallet ? getReimbursementsByWallet(myWallet.id) : []),
+    [myWallet, refreshKey]
+  );
+
+  const myWalletTopUps = useMemo(
+    () => (myWallet ? getTopUpsByWallet(myWallet.id) : []),
+    [myWallet, refreshKey]
+  );
+
+  // Apply expense filters for My Wallet view
+  const filteredMyWalletExpenses = useMemo(() => {
+    return myWalletExpenses.filter((expense) => {
+      if (myWalletExpenseFilters.dateFrom && expense.expenseDate < myWalletExpenseFilters.dateFrom) {
+        return false;
+      }
+      if (myWalletExpenseFilters.dateTo && expense.expenseDate > myWalletExpenseFilters.dateTo) {
+        return false;
+      }
+      if (myWalletExpenseFilters.status && expense.status !== myWalletExpenseFilters.status) {
+        return false;
+      }
+      if (myWalletExpenseFilters.companyId && expense.companyId !== myWalletExpenseFilters.companyId) {
+        return false;
+      }
+      if (myWalletExpenseFilters.projectId && expense.projectId !== myWalletExpenseFilters.projectId) {
+        return false;
+      }
+      return true;
+    });
+  }, [myWalletExpenses, myWalletExpenseFilters]);
+
+  // Apply reimbursement filters for My Wallet view
+  const filteredMyWalletReimbursements = useMemo(() => {
+    return myWalletReimbursements.filter((reimbursement) => {
+      if (myWalletReimbursementFilters.dateFrom && reimbursement.createdAt.split('T')[0] < myWalletReimbursementFilters.dateFrom) {
+        return false;
+      }
+      if (myWalletReimbursementFilters.dateTo && reimbursement.createdAt.split('T')[0] > myWalletReimbursementFilters.dateTo) {
+        return false;
+      }
+      if (myWalletReimbursementFilters.status && reimbursement.status !== myWalletReimbursementFilters.status) {
+        return false;
+      }
+      if (myWalletReimbursementFilters.companyId && reimbursement.companyId !== myWalletReimbursementFilters.companyId) {
+        return false;
+      }
+      return true;
+    });
+  }, [myWalletReimbursements, myWalletReimbursementFilters]);
+
+  // Calculate stats for My Wallet
+  const myWalletPendingReimbursement = useMemo(
+    () => (myWallet ? getPendingAmountForWallet(myWallet.id) : 0),
+    [myWallet, refreshKey]
+  );
+
+  const myWalletMonthlyExpenses = useMemo(() => {
+    if (!myWallet) return 0;
+    const now = new Date();
+    return getMonthlyExpensesForWallet(myWallet.id, now.getFullYear(), now.getMonth() + 1);
+  }, [myWallet, refreshKey]);
+
+  // Build transaction history for My Wallet
+  // Note: Transaction history still uses mock data for expenses/topups/reimbursements
+  // until those are fully migrated to Supabase
+  const myWalletExpensesMock = useMemo(
+    () => (myWallet ? getExpensesByWallet(myWallet.id) : []),
+    [myWallet, refreshKey]
+  );
+  const myWalletTransactionHistory = useMemo(
+    () => buildTransactionHistory(myWalletExpensesMock, myWalletTopUps, myWalletReimbursements),
+    [myWalletExpensesMock, myWalletTopUps, myWalletReimbursements]
+  );
+
+  // Handle expense creation in My Wallet view - Save to Supabase
+  const handleCreateMyExpense = useCallback(
+    async (expenseData: SimplifiedExpenseInput) => {
+      if (!transformedMyWallet || !myWallet) {
+        alert('Wallet not available. Please refresh and try again.');
+        return;
+      }
+
+      // Validate required fields with user-friendly error messages
+      const companyId = expenseData.companyId || myWallet.company_id;
+      if (!companyId) {
+        alert('No company is associated with your wallet. Please contact your manager.');
+        console.error('Failed to create expense: No company_id available. Wallet:', myWallet);
+        return;
+      }
+      if (!expenseData.projectId) {
+        alert('Please select a project for this expense.');
+        console.error('Failed to create expense: No project_id specified');
+        return;
+      }
+      if (!expenseData.walletId) {
+        alert('Wallet ID is missing. Please refresh and try again.');
+        console.error('Failed to create expense: No wallet_id specified');
+        return;
+      }
+      if (!expenseData.expenseDate) {
+        alert('Please select an expense date.');
+        console.error('Failed to create expense: No expense_date specified');
+        return;
+      }
+
+      try {
+        // Build the payload with validated data
+        // Note: created_by should be the user's UUID, not their name
+        const expensePayload = {
+          wallet_id: expenseData.walletId,
+          company_id: companyId,
+          expense_date: expenseData.expenseDate,
+          description: expenseData.description || null,
+          project_id: expenseData.projectId,
+          amount: expenseData.amount,
+          status: 'draft' as const,
+          created_by: myWallet.user_id || null,  // Use user_id from wallet, not the name
+          attachments: expenseData.attachments ? JSON.stringify(expenseData.attachments) : '[]',
+        };
+        // Create the expense in Supabase
+        const expense = await pettyCashApi.createExpenseWithNumber(expensePayload);
+
+        // Update local state with the new expense
+        setMyWalletExpensesDb(prev => [expense, ...prev]);
+
+        // Create reimbursement in Supabase
+        const reimbursementPayload = {
+          expense_id: expense.id,
+          wallet_id: expense.wallet_id,
+          company_id: expense.company_id,
+          amount: expense.amount || 0,
+          adjustment_amount: null,
+          adjustment_reason: null,
+          final_amount: expense.amount || 0,
+          status: 'pending' as const,
+          bank_account_id: null,
+          payment_date: null,
+          payment_reference: null,
+          approved_by: null,
+          rejected_by: null,
+          rejection_reason: null,
+          bank_feed_line_id: null,
+          created_by: myWallet.user_id || null,
+        };
+        const reimbursement = await pettyCashApi.createReimbursementWithNumber(reimbursementPayload);
+
+        // Send notification to accountant (using mock notification system for now)
+        notifyAccountantNewReimbursement(
+          reimbursement.id,
+          reimbursement.reimbursement_number,
+          transformedMyWallet.userName,
+          expense.amount || 0
+        );
+
+        // Close form and refresh
+        setShowExpenseForm(false);
+        setRefreshKey((prev) => prev + 1);
+      } catch (error: unknown) {
+        const supabaseError = error as { message?: string };
+        const errorMessage = supabaseError.message || (error instanceof Error ? error.message : 'Unknown error');
+        console.error('Failed to create expense:', error);
+        alert(`Failed to create expense: ${errorMessage}`);
+      }
+    },
+    [transformedMyWallet, myWallet, companies]
+  );
+
+  // ========== End My Wallet View Data ==========
 
   // Handle top-up
   const handleTopUp = useCallback(
@@ -290,17 +755,17 @@ export default function PettyCashManagementPage() {
   // Wallet table columns
   const walletColumns = [
     { key: 'userName', header: 'Holder Name' },
-    { key: 'userRole', header: 'Role' },
+    { key: 'walletName', header: 'Wallet' },
     {
       key: 'balance',
       header: 'Balance',
       align: 'right' as const,
-      render: (row: PettyCashWallet) => {
+      render: (row: TransformedWallet) => {
         const isLow =
           row.lowBalanceThreshold && row.balance <= row.lowBalanceThreshold;
         return (
           <span className={isLow ? 'text-orange-600 font-medium' : ''}>
-            {formatCurrency(row.balance, row.currency)}
+            {formatCurrency(row.balance, row.currency as 'THB' | 'EUR' | 'USD' | 'SGD' | 'GBP' | 'AED')}
           </span>
         );
       },
@@ -309,7 +774,7 @@ export default function PettyCashManagementPage() {
       key: 'status',
       header: 'Status',
       align: 'center' as const,
-      render: (row: PettyCashWallet) => (
+      render: (row: TransformedWallet) => (
         <span className={`inline-flex rounded-full px-2 py-1 text-xs font-semibold ${getStatusBadgeClass(row.status)}`}>
           {getStatusLabel(row.status)}
         </span>
@@ -319,10 +784,27 @@ export default function PettyCashManagementPage() {
       key: 'actions',
       header: '',
       align: 'right' as const,
-      render: (row: PettyCashWallet) => (
+      render: (row: TransformedWallet) => (
         <button
           onClick={() => {
-            setSelectedWallet(row);
+            // Convert to PettyCashWallet format for the modal
+            setSelectedWallet({
+              id: row.id,
+              walletName: row.walletName,
+              userId: row.userId || '',
+              userName: row.userName,
+              userRole: '',
+              userEmail: '',
+              companyId: row.companyId,
+              companyName: '',
+              balance: row.balance,
+              currency: row.currency as 'THB' | 'EUR' | 'USD' | 'SGD' | 'GBP' | 'AED',
+              status: (row.status === 'inactive' ? 'closed' : row.status) as 'active' | 'closed',
+              balanceLimit: row.balanceLimit || 0,
+              lowBalanceThreshold: row.lowBalanceThreshold || 0,
+              createdAt: '',
+              updatedAt: '',
+            });
             setShowTopUpModal(true);
           }}
           className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-green-700 bg-green-50 rounded hover:bg-green-100"
@@ -493,20 +975,432 @@ export default function PettyCashManagementPage() {
     },
   ];
 
+  // ========== My Wallet View Table Columns ==========
+  // Type for transformed expense display
+  type ExpenseDisplay = ReturnType<typeof transformExpenseForDisplay>;
+
+  // Table columns for expenses in My Wallet view
+  const myExpenseColumns = [
+    {
+      key: 'expenseNumber',
+      header: 'Number',
+      render: (row: ExpenseDisplay) => (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            router.push(`/accounting/petty-cash/expenses/${row.id}`);
+          }}
+          className="text-[#5A7A8F] hover:underline font-medium"
+        >
+          {row.expenseNumber}
+        </button>
+      ),
+    },
+    {
+      key: 'expenseDate',
+      header: 'Date',
+      render: (row: ExpenseDisplay) => formatDate(row.expenseDate),
+    },
+    { key: 'companyName', header: 'Company' },
+    { key: 'projectName', header: 'Project' },
+    { key: 'description', header: 'Description' },
+    {
+      key: 'netAmount',
+      header: 'Amount',
+      align: 'right' as const,
+      render: (row: ExpenseDisplay) => formatCurrency(row.netAmount),
+    },
+    {
+      key: 'status',
+      header: 'Status',
+      align: 'center' as const,
+      render: (row: ExpenseDisplay) => (
+        <span
+          className={`inline-flex rounded-full px-2 py-1 text-xs font-semibold ${
+            row.status === 'submitted'
+              ? 'bg-green-100 text-green-800'
+              : 'bg-yellow-100 text-yellow-800'
+          }`}
+        >
+          {row.status === 'submitted' ? 'Submitted' : 'Draft'}
+        </span>
+      ),
+    },
+  ];
+
+  // Table columns for reimbursements in My Wallet view
+  const myReimbursementColumns = [
+    { key: 'reimbursementNumber', header: 'Number' },
+    { key: 'expenseNumber', header: 'Expense' },
+    { key: 'companyName', header: 'Company' },
+    {
+      key: 'finalAmount',
+      header: 'Amount',
+      align: 'right' as const,
+      render: (row: PettyCashReimbursement) => formatCurrency(row.finalAmount),
+    },
+    {
+      key: 'status',
+      header: 'Status',
+      align: 'center' as const,
+      render: (row: PettyCashReimbursement) => (
+        <span
+          className={`inline-flex rounded-full px-2 py-1 text-xs font-semibold ${getStatusBadgeClass(
+            row.status
+          )}`}
+        >
+          {getStatusLabel(row.status)}
+        </span>
+      ),
+    },
+    {
+      key: 'createdAt',
+      header: 'Requested',
+      render: (row: PettyCashReimbursement) => formatDate(row.createdAt),
+    },
+  ];
+
+  // Table columns for transaction history in My Wallet view
+  const myHistoryColumns = [
+    {
+      key: 'date',
+      header: 'Date',
+      render: (row: { date: string }) => formatDate(row.date),
+    },
+    { key: 'referenceNumber', header: 'Reference' },
+    { key: 'description', header: 'Description' },
+    {
+      key: 'type',
+      header: 'Type',
+      align: 'center' as const,
+      render: (row: { type: string }) => {
+        const typeStyles: Record<string, string> = {
+          expense: 'bg-red-100 text-red-800',
+          topup: 'bg-green-100 text-green-800',
+          reimbursement_paid: 'bg-blue-100 text-blue-800',
+        };
+        const typeLabels: Record<string, string> = {
+          expense: 'Expense',
+          topup: 'Top-up',
+          reimbursement_paid: 'Reimbursed',
+        };
+        return (
+          <span
+            className={`inline-flex rounded-full px-2 py-1 text-xs font-semibold ${
+              typeStyles[row.type] || 'bg-gray-100 text-gray-800'
+            }`}
+          >
+            {typeLabels[row.type] || row.type}
+          </span>
+        );
+      },
+    },
+    {
+      key: 'amount',
+      header: 'Amount',
+      align: 'right' as const,
+      render: (row: { amount: number }) => (
+        <span
+          className={`font-medium ${
+            row.amount >= 0 ? 'text-green-600' : 'text-red-600'
+          }`}
+        >
+          {row.amount >= 0 ? '+' : ''}
+          {formatCurrency(row.amount)}
+        </span>
+      ),
+    },
+  ];
+
+  // Filter options for My Wallet view
+  const expenseStatusOptions = [
+    { value: 'draft', label: 'Draft' },
+    { value: 'submitted', label: 'Submitted' },
+  ];
+
+  const myReimbursementStatusOptions = [
+    { value: 'pending', label: 'Pending' },
+    { value: 'approved', label: 'Approved' },
+    { value: 'paid', label: 'Paid' },
+    { value: 'rejected', label: 'Rejected' },
+  ];
+  // ========== End My Wallet View Table Columns ==========
+
+  // Loading state
+  if (authLoading || myWalletLoading || isLoadingData || isLoadingAllWallets) {
+    return (
+      <AppShell currentRole="manager">
+        <div className="flex items-center justify-center h-96">
+          <div className="text-center">
+            <Loader2 className="h-8 w-8 animate-spin text-[#5A7A8F] mx-auto mb-4" />
+            <p className="text-gray-500">Loading...</p>
+          </div>
+        </div>
+      </AppShell>
+    );
+  }
+
   return (
     <AppShell currentRole="manager">
-      {/* Header */}
+      {/* Header with View Toggle */}
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">
-          Petty Cash Management
-        </h1>
-        <p className="mt-1 text-sm text-gray-500">
-          Monitor all petty cash wallets, approve reimbursements, and manage
-          top-ups
-        </p>
+        <div className="flex items-start justify-between">
+          <div>
+            <h1 className="text-2xl font-bold text-gray-900">
+              Petty Cash Management
+            </h1>
+            <p className="mt-1 text-sm text-gray-500">
+              {viewMode === 'all-wallets'
+                ? 'Monitor all petty cash wallets, approve reimbursements, and manage top-ups'
+                : 'Manage your personal petty cash wallet'
+              }
+            </p>
+          </div>
+
+          {/* View Mode Toggle - Only show if user has own wallet */}
+          {hasOwnWallet && (
+            <div className="flex items-center gap-1 p-1 bg-gray-100 rounded-lg">
+              <button
+                onClick={() => setViewMode('all-wallets')}
+                className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+                  viewMode === 'all-wallets'
+                    ? 'bg-white text-gray-900 shadow-sm'
+                    : 'text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                <span className="flex items-center gap-2">
+                  <Users className="h-4 w-4" />
+                  All Wallets
+                </span>
+              </button>
+              <button
+                onClick={() => setViewMode('my-wallet')}
+                className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+                  viewMode === 'my-wallet'
+                    ? 'bg-white text-gray-900 shadow-sm'
+                    : 'text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                <span className="flex items-center gap-2">
+                  <Wallet className="h-4 w-4" />
+                  My Wallet
+                </span>
+              </button>
+            </div>
+          )}
+        </div>
       </div>
 
-      {/* KPI Cards */}
+      {/* ========== MY WALLET VIEW ========== */}
+      {viewMode === 'my-wallet' && transformedMyWallet && (
+        <>
+          {/* Info Banner */}
+          <div className="mb-6 rounded-lg border border-blue-200 bg-blue-50 p-4">
+            <div className="flex items-start gap-3">
+              <Wallet className="h-5 w-5 text-blue-600 flex-shrink-0 mt-0.5" />
+              <div>
+                <p className="text-sm font-medium text-blue-900">
+                  Personal Petty Cash Wallet
+                </p>
+                <p className="text-sm text-blue-700 mt-1">
+                  This is your personal wallet. Submit expenses and track reimbursement status here.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Wallet Summary Card */}
+          <div className="mb-6">
+            <WalletSummaryCard
+              wallet={transformedMyWallet}
+              pendingReimbursement={myWalletPendingReimbursement}
+              monthlyExpenses={myWalletMonthlyExpenses}
+            />
+          </div>
+
+          {/* KPI Cards Row */}
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4 mb-6">
+            <KPICard
+              title="Total Expenses"
+              value={myWalletExpenses.length}
+              icon={Receipt}
+              subtitle="All time"
+            />
+            <KPICard
+              title="Draft Expenses"
+              value={myWalletExpenses.filter((e) => e.status === 'draft').length}
+              icon={FileText}
+              variant={
+                myWalletExpenses.filter((e) => e.status === 'draft').length > 0
+                  ? 'warning'
+                  : 'default'
+              }
+              subtitle="Not yet submitted"
+            />
+            <KPICard
+              title="This Month"
+              value={formatCurrency(myWalletMonthlyExpenses)}
+              icon={TrendingDown}
+              subtitle="Expenses"
+            />
+            <KPICard
+              title="Pending Reimb."
+              value={myWalletReimbursements.filter((r) => r.status === 'pending').length}
+              icon={Clock}
+              variant={
+                myWalletReimbursements.filter((r) => r.status === 'pending').length > 0
+                  ? 'warning'
+                  : 'default'
+              }
+              subtitle="Awaiting approval"
+            />
+          </div>
+
+          {/* Quick Actions */}
+          <div className="mb-6">
+            <button
+              onClick={() => setShowExpenseForm(true)}
+              disabled={myWallet?.status === 'closed'}
+              className="inline-flex items-center gap-2 rounded-lg bg-[#5A7A8F] px-4 py-2 text-sm font-medium text-white hover:bg-[#4a6a7f] transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <Plus className="h-4 w-4" />
+              New Expense
+            </button>
+            {myWallet?.status === 'closed' && (
+              <span className="ml-3 text-sm text-red-600">
+                Your wallet is closed. Contact your manager.
+              </span>
+            )}
+          </div>
+
+          {/* Tabs */}
+          <div className="border-b border-gray-200 mb-6">
+            <nav className="-mb-px flex gap-6">
+              {[
+                { id: 'expenses', label: 'Expenses', icon: Receipt },
+                { id: 'reimbursements', label: 'Reimbursements', icon: Clock },
+                { id: 'history', label: 'Transaction History', icon: FileText },
+              ].map((tab) => (
+                <button
+                  key={tab.id}
+                  onClick={() => setMyWalletTab(tab.id as typeof myWalletTab)}
+                  className={`flex items-center gap-2 py-3 px-1 border-b-2 text-sm font-medium transition-colors ${
+                    myWalletTab === tab.id
+                      ? 'border-[#5A7A8F] text-[#5A7A8F]'
+                      : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                  }`}
+                >
+                  <tab.icon className="h-4 w-4" />
+                  {tab.label}
+                </button>
+              ))}
+            </nav>
+          </div>
+
+          {/* Tab Content */}
+          {myWalletTab === 'expenses' && (
+            <div>
+              <h3 className="text-lg font-semibold text-gray-900 mb-4">
+                My Expenses
+              </h3>
+              <ExpenseFilters
+                filters={myWalletExpenseFilters}
+                onFilterChange={(updates) => setMyWalletExpenseFilters((prev) => ({ ...prev, ...updates }))}
+                onClear={() => setMyWalletExpenseFilters(initialMyWalletFilters)}
+                statusOptions={expenseStatusOptions}
+                statusLabel="Status"
+                projects={allProjects}
+                companies={companies}
+              />
+              <DataTable
+                columns={myExpenseColumns}
+                data={filteredMyWalletExpenses}
+                emptyMessage="No expenses recorded yet"
+              />
+            </div>
+          )}
+
+          {myWalletTab === 'reimbursements' && (
+            <div>
+              <h3 className="text-lg font-semibold text-gray-900 mb-4">
+                Reimbursement Requests
+              </h3>
+              <ExpenseFilters
+                filters={myWalletReimbursementFilters}
+                onFilterChange={(updates) => setMyWalletReimbursementFilters((prev) => ({ ...prev, ...updates }))}
+                onClear={() => setMyWalletReimbursementFilters(initialMyWalletFilters)}
+                statusOptions={myReimbursementStatusOptions}
+                statusLabel="Status"
+                projects={projects}
+                companies={companies}
+              />
+              <DataTable
+                columns={myReimbursementColumns}
+                data={filteredMyWalletReimbursements}
+                emptyMessage="No reimbursement requests"
+              />
+
+              {/* Reimbursement Status Summary */}
+              {myWalletReimbursements.length > 0 && (
+                <div className="mt-6 p-4 bg-gray-50 rounded-lg">
+                  <h4 className="text-sm font-medium text-gray-700 mb-3">
+                    Status Summary
+                  </h4>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    {['pending', 'approved', 'paid', 'rejected'].map((status) => {
+                      const count = myWalletReimbursements.filter(
+                        (r) => r.status === status
+                      ).length;
+                      const amount = myWalletReimbursements
+                        .filter((r) => r.status === status)
+                        .reduce((sum, r) => sum + r.finalAmount, 0);
+                      return (
+                        <div key={status} className="text-center">
+                          <p className="text-2xl font-bold text-gray-900">{count}</p>
+                          <p className="text-xs text-gray-500 capitalize">
+                            {status}
+                          </p>
+                          <p className="text-sm text-gray-600">
+                            {formatCurrency(amount)}
+                          </p>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {myWalletTab === 'history' && (
+            <div>
+              <h3 className="text-lg font-semibold text-gray-900 mb-4">
+                Transaction History
+              </h3>
+              <DataTable
+                columns={myHistoryColumns}
+                data={myWalletTransactionHistory}
+                emptyMessage="No transactions yet"
+              />
+            </div>
+          )}
+
+          {/* Expense Form Modal */}
+          {showExpenseForm && transformedMyWallet && (
+            <ExpenseForm
+              walletId={transformedMyWallet.id}
+              walletHolderName={transformedMyWallet.userName}
+              onSave={handleCreateMyExpense}
+              onCancel={() => setShowExpenseForm(false)}
+            />
+          )}
+        </>
+      )}
+
+      {/* ========== ALL WALLETS VIEW ========== */}
+      {viewMode === 'all-wallets' && (
+        <>
+          {/* KPI Cards */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4 mb-6">
         <KPICard
           title="Total Outstanding"
@@ -816,6 +1710,8 @@ export default function PettyCashManagementPage() {
           emptyMessage="No transactions found"
         />
       </div>
+        </>
+      )}
 
       {/* Top-up Modal */}
       {showTopUpModal && selectedWallet && (

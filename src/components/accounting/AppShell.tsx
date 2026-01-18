@@ -3,7 +3,8 @@
 import { useState, useEffect, ReactNode } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { authApi } from "@/lib/supabase/api/auth";
+import { useAuth } from "@/components/auth";
+import { usePermissions, ACCOUNTING_PERMISSIONS, ADMIN_PERMISSIONS } from "@/hooks/usePermissions";
 import { NotificationDropdown } from './NotificationDropdown';
 import { useNotificationsOptional } from '@/contexts/NotificationContext';
 import type { NotificationTargetRole } from '@/data/notifications/types';
@@ -29,73 +30,141 @@ import {
   Calendar,
   Users,
   Tags,
+  Shield,
 } from "lucide-react";
 
 interface AppShellProps {
   children: ReactNode;
-  currentRole: "manager" | "accountant" | "sales" | "investor" | "petty-cash";
 }
 
-// Define all available menu items
-const allMenuItems = [
-  { name: "Dashboard", href: "/accounting/{role}", icon: LayoutDashboard },
-  { name: "Income", href: "/accounting/{role}/income/overview", icon: DollarSign },
-  { name: "Expenses", href: "/accounting/{role}/expenses", icon: TrendingDown },
-  { name: "GL Categorization", href: "/accounting/{role}/categorization", icon: Tags },
-  { name: "Journal Entries", href: "/accounting/{role}/journal-entries", icon: BookOpen },
-  { name: "Bank Reconciliation", href: "/accounting/{role}/bank-reconciliation", icon: Building2 },
-  { name: "Finances", href: "/accounting/{role}/finances/overview", icon: Percent },
-  { name: "Petty Cash", href: "/accounting/{role}/petty-cash-management", icon: Wallet },
-  { name: "Chart of Accounts", href: "/accounting/{role}/chart-of-accounts", icon: BookOpen },
-  { name: "Contacts", href: "/accounting/{role}/contacts", icon: Users },
-  { name: "Companies", href: "/accounting/{role}/companies", icon: Building },
-  { name: "Reports", href: "/accounting/{role}/reports", icon: BarChart3 },
-  { name: "Settings", href: "/accounting/{role}/settings", icon: Settings },
+// Define menu items with their required permissions and visibility keys
+// Note: Petty Cash href is dynamic and determined at render time based on permissions
+const menuItems = [
+  {
+    name: "Dashboard",
+    href: "/accounting/manager",
+    icon: LayoutDashboard,
+    permission: ACCOUNTING_PERMISSIONS.DASHBOARD_VIEW,
+    menuKey: "dashboard",
+  },
+  {
+    name: "Income",
+    href: "/accounting/manager/income/overview",
+    icon: DollarSign,
+    permission: ACCOUNTING_PERMISSIONS.INCOME_VIEW,
+    menuKey: "income",
+  },
+  {
+    name: "Expenses",
+    href: "/accounting/manager/expenses/overview",
+    icon: TrendingDown,
+    permission: ACCOUNTING_PERMISSIONS.EXPENSES_VIEW,
+    menuKey: "expenses",
+  },
+  {
+    name: "GL Categorization",
+    href: "/accounting/manager/categorization",
+    icon: Tags,
+    permission: ACCOUNTING_PERMISSIONS.CATEGORIZATION_VIEW,
+    menuKey: "gl-categorization",
+  },
+  {
+    name: "Journal Entries",
+    href: "/accounting/manager/journal-entries",
+    icon: BookOpen,
+    permission: ACCOUNTING_PERMISSIONS.JOURNAL_VIEW,
+    menuKey: "journal-entries",
+  },
+  {
+    name: "Bank Reconciliation",
+    href: "/accounting/manager/bank-reconciliation",
+    icon: Building2,
+    permission: ACCOUNTING_PERMISSIONS.RECONCILIATION_VIEW,
+    menuKey: "bank-reconciliation",
+  },
+  {
+    name: "Finances",
+    href: "/accounting/manager/finances/overview",
+    icon: Percent,
+    permission: ACCOUNTING_PERMISSIONS.FINANCES_VIEW,
+    menuKey: "finances",
+  },
+  {
+    name: "Petty Cash",
+    href: "/accounting/petty-cash", // Default, will be overridden dynamically
+    icon: Wallet,
+    anyPermission: [ACCOUNTING_PERMISSIONS.PETTYCASH_VIEW_OWN, ACCOUNTING_PERMISSIONS.PETTYCASH_VIEW_ALL],
+    menuKey: "petty-cash",
+    dynamicHref: true, // Flag to indicate dynamic href determination
+  },
+  {
+    name: "Chart of Accounts",
+    href: "/accounting/manager/chart-of-accounts",
+    icon: BookOpen,
+    permission: ACCOUNTING_PERMISSIONS.CHARTOFACCOUNTS_VIEW,
+    menuKey: "chart-of-accounts",
+  },
+  {
+    name: "Contacts",
+    href: "/accounting/manager/contacts",
+    icon: Users,
+    permission: ACCOUNTING_PERMISSIONS.CONTACTS_VIEW,
+    menuKey: "contacts",
+  },
+  {
+    name: "Companies",
+    href: "/accounting/manager/companies",
+    icon: Building,
+    permission: ACCOUNTING_PERMISSIONS.SETTINGS_VIEW,
+    menuKey: "companies",
+  },
+  {
+    name: "Reports",
+    href: "/accounting/manager/reports",
+    icon: BarChart3,
+    anyPermission: [ACCOUNTING_PERMISSIONS.REPORTS_VIEW_BASIC, ACCOUNTING_PERMISSIONS.REPORTS_VIEW_MANAGEMENT, ACCOUNTING_PERMISSIONS.REPORTS_VIEW_INVESTOR],
+    menuKey: "reports",
+  },
+  {
+    name: "Settings",
+    href: "/accounting/manager/settings",
+    icon: Settings,
+    permission: ACCOUNTING_PERMISSIONS.SETTINGS_MANAGE,
+    menuKey: "settings",
+  },
 ];
 
-// Role-based menu visibility
-const roleConfig = {
-  manager: {
-    name: "Manager",
-    allowedMenus: ["Dashboard", "Income", "Expenses", "GL Categorization", "Journal Entries", "Bank Reconciliation", "Finances", "Petty Cash", "Chart of Accounts", "Contacts", "Reports", "Settings"],
-  },
-  accountant: {
-    name: "Accountant",
-    allowedMenus: ["Dashboard", "Income", "Expenses", "GL Categorization", "Journal Entries", "Bank Reconciliation", "Finances", "Petty Cash", "Chart of Accounts", "Contacts", "Companies"],
-  },
-  sales: {
-    name: "Sales",
-    allowedMenus: ["Dashboard", "Income", "Contacts"],
-  },
-  investor: {
-    name: "Investor",
-    allowedMenus: ["Dashboard", "Reports"],
-  },
-  "petty-cash": {
-    name: "Petty Cash Holder",
-    allowedMenus: ["Petty Cash"],
-  },
-};
+// Get role display name based on user's accounting module role
+function getRoleDisplayName(role: string | null, isSuperAdmin: boolean): string {
+  if (isSuperAdmin) return "Super Admin";
+  switch (role) {
+    case 'manager': return 'Manager';
+    case 'accountant': return 'Accountant';
+    case 'sales': return 'Sales';
+    case 'investor': return 'Investor';
+    case 'petty-cash': return 'Petty Cash Holder';
+    default: return 'User';
+  }
+}
 
-const allRoles = [
-  { id: "manager", name: "Manager" },
-  { id: "accountant", name: "Accountant" },
-  { id: "sales", name: "Sales" },
-  { id: "investor", name: "Investor" },
-  { id: "petty-cash", name: "Petty Cash Holder" },
-];
-
-export function AppShell({ children, currentRole }: AppShellProps) {
+export function AppShell({ children }: AppShellProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [roleDropdownOpen, setRoleDropdownOpen] = useState(false);
+  const [userDropdownOpen, setUserDropdownOpen] = useState(false);
   const [notificationDropdownOpen, setNotificationDropdownOpen] = useState(false);
   const pathname = usePathname();
   const router = useRouter();
-  const config = roleConfig[currentRole];
+
+  // Get auth and permissions
+  const { user, profile, signOut, isSuperAdmin, getModuleRole, isMenuVisible } = useAuth();
+  const { hasPermission, hasAnyPermission, can } = usePermissions();
+
+  // Get user's role in accounting module
+  const accountingRole = getModuleRole('accounting');
+  const roleDisplayName = getRoleDisplayName(accountingRole, isSuperAdmin);
 
   const handleSignOut = async () => {
     try {
-      await authApi.signOut();
+      await signOut();
       router.push('/');
       router.refresh();
     } catch (error) {
@@ -108,7 +177,7 @@ export function AppShell({ children, currentRole }: AppShellProps) {
 
   // Map role to notification target role
   const notificationRole: NotificationTargetRole =
-    currentRole === 'petty-cash' ? 'petty_cash_holder' : currentRole as NotificationTargetRole;
+    accountingRole === 'petty-cash' ? 'petty_cash_holder' : (accountingRole as NotificationTargetRole) || 'manager';
 
   // Update notification context when role changes
   useEffect(() => {
@@ -117,27 +186,50 @@ export function AppShell({ children, currentRole }: AppShellProps) {
     }
   }, [notificationRole, notificationContext]);
 
-  // Filter menu items based on role permissions
-  // For accountant role, redirect to manager pages for sections that only exist under manager
-  const managerOnlyPaths = ["income", "petty-cash-management", "chart-of-accounts", "companies"];
+  // Determine dynamic href for Petty Cash based on permissions
+  const getPettyCashHref = () => {
+    // If user has view_all permission (manager), show management page with toggle
+    if (isSuperAdmin || hasPermission(ACCOUNTING_PERMISSIONS.PETTYCASH_VIEW_ALL)) {
+      return '/accounting/manager/petty-cash-management';
+    }
+    // Otherwise, show personal wallet page only
+    return '/accounting/petty-cash';
+  };
 
-  const navigation = allMenuItems
-    .filter((item) => config.allowedMenus.includes(item.name))
-    .map((item) => {
-      let href = item.href.replace("{role}", currentRole);
-
-      // For accountant role, redirect to manager pages for these sections
-      if (currentRole === "accountant") {
-        for (const path of managerOnlyPaths) {
-          if (item.href.includes(path)) {
-            href = item.href.replace("{role}", "manager");
-            break;
-          }
-        }
+  // Filter menu items based on user's permissions and menu visibility settings
+  const navigation = menuItems
+    .filter((item) => {
+      // First check menu visibility settings from role config
+      // Super admin always sees everything, isMenuVisible handles this
+      if (!isMenuVisible('accounting', item.menuKey)) {
+        return false;
       }
 
-      return { ...item, href };
+      // Super admin sees everything (already passed visibility check)
+      if (isSuperAdmin) return true;
+
+      // Check single permission
+      if (item.permission) {
+        return hasPermission(item.permission);
+      }
+
+      // Check any of multiple permissions
+      if (item.anyPermission) {
+        return hasAnyPermission(item.anyPermission);
+      }
+
+      return false;
+    })
+    .map((item) => {
+      // Handle dynamic href for Petty Cash
+      if (item.menuKey === 'petty-cash') {
+        return { ...item, href: getPettyCashHref() };
+      }
+      return item;
     });
+
+  // Check if user can access admin
+  const canAccessAdmin = can.manageUsers();
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -152,7 +244,7 @@ export function AppShell({ children, currentRole }: AppShellProps) {
               </div>
               <div className="flex flex-col">
                 <span className="text-white font-bold text-base">Faraway Yachting</span>
-                <span className="text-blue-200 text-xs">{config.name}</span>
+                <span className="text-blue-200 text-xs">{roleDisplayName}</span>
               </div>
             </Link>
           </div>
@@ -186,19 +278,21 @@ export function AppShell({ children, currentRole }: AppShellProps) {
 
             {/* Bottom Links */}
             <div className="mt-auto space-y-2 px-4 pb-6 border-t border-white/10 pt-6">
+              {canAccessAdmin && (
+                <Link
+                  href="/admin/users"
+                  className="group flex items-center px-4 py-3 text-sm font-medium text-gray-300 hover:bg-white/10 hover:text-white rounded-xl transition-all duration-200"
+                >
+                  <Shield className="mr-3 h-5 w-5 flex-shrink-0 text-gray-400 group-hover:text-white" />
+                  Admin
+                </Link>
+              )}
               <Link
                 href="/"
                 className="group flex items-center px-4 py-3 text-sm font-medium text-gray-300 hover:bg-white/10 hover:text-white rounded-xl transition-all duration-200"
               >
                 <Home className="mr-3 h-5 w-5 flex-shrink-0 text-gray-400 group-hover:text-white" />
                 Home
-              </Link>
-              <Link
-                href="/accounting"
-                className="group flex items-center px-4 py-3 text-sm font-medium text-gray-300 hover:bg-white/10 hover:text-white rounded-xl transition-all duration-200"
-              >
-                <LogOut className="mr-3 h-5 w-5 flex-shrink-0 text-gray-400 group-hover:text-white" />
-                Switch Role
               </Link>
             </div>
           </div>
@@ -231,7 +325,7 @@ export function AppShell({ children, currentRole }: AppShellProps) {
                     </div>
                     <div className="flex flex-col">
                       <span className="text-white font-bold text-base">Faraway Yachting</span>
-                      <span className="text-blue-200 text-xs">{config.name}</span>
+                      <span className="text-blue-200 text-xs">{roleDisplayName}</span>
                     </div>
                   </Link>
                 </div>
@@ -262,6 +356,16 @@ export function AppShell({ children, currentRole }: AppShellProps) {
                       </ul>
                     </li>
                     <li className="mt-auto space-y-2 border-t border-white/10 pt-6">
+                      {canAccessAdmin && (
+                        <Link
+                          href="/admin/users"
+                          onClick={() => setSidebarOpen(false)}
+                          className="group flex items-center gap-x-3 rounded-xl px-4 py-3 text-sm font-medium text-gray-300 hover:bg-white/10 hover:text-white transition-all duration-200"
+                        >
+                          <Shield className="h-5 w-5 shrink-0" />
+                          Admin
+                        </Link>
+                      )}
                       <Link
                         href="/"
                         onClick={() => setSidebarOpen(false)}
@@ -269,14 +373,6 @@ export function AppShell({ children, currentRole }: AppShellProps) {
                       >
                         <Home className="h-5 w-5 shrink-0" />
                         Home
-                      </Link>
-                      <Link
-                        href="/accounting"
-                        onClick={() => setSidebarOpen(false)}
-                        className="group flex items-center gap-x-3 rounded-xl px-4 py-3 text-sm font-medium text-gray-300 hover:bg-white/10 hover:text-white transition-all duration-200"
-                      >
-                        <LogOut className="h-5 w-5 shrink-0" />
-                        Switch Role
                       </Link>
                     </li>
                   </ul>
@@ -360,55 +456,68 @@ export function AppShell({ children, currentRole }: AppShellProps) {
                 <button
                   type="button"
                   className="flex items-center gap-x-3 rounded-lg px-3 py-2 hover:bg-gray-100 transition-colors"
-                  onClick={() => setRoleDropdownOpen(!roleDropdownOpen)}
+                  onClick={() => setUserDropdownOpen(!userDropdownOpen)}
                 >
                   <div className="flex items-center gap-x-3">
                     <div className="h-8 w-8 rounded-full bg-gradient-to-br from-[#5A7A8F] to-[#4a6a7f] flex items-center justify-center shadow-sm">
                       <User className="h-4 w-4 text-white" />
                     </div>
                     <div className="hidden lg:block text-left">
-                      <p className="text-sm font-semibold text-gray-900">Admin User</p>
-                      <p className="text-xs text-gray-500">{config.name}</p>
+                      <p className="text-sm font-semibold text-gray-900">
+                        {profile?.full_name || user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'User'}
+                      </p>
+                      <p className="text-xs text-gray-500">{roleDisplayName}</p>
                     </div>
                   </div>
                   <ChevronDown className="hidden lg:block h-4 w-4 text-gray-400" />
                 </button>
 
-                {roleDropdownOpen && (
+                {userDropdownOpen && (
                   <>
                     <div
                       className="fixed inset-0 z-10"
-                      onClick={() => setRoleDropdownOpen(false)}
+                      onClick={() => setUserDropdownOpen(false)}
                     />
                     <div className="absolute right-0 z-20 mt-2 w-64 origin-top-right rounded-xl bg-white shadow-xl ring-1 ring-black ring-opacity-5 border border-gray-100">
                       <div className="p-3 border-b border-gray-100">
-                        <p className="text-sm font-semibold text-gray-900">Admin User</p>
-                        <p className="text-xs text-gray-500">admin@farawayyachting.com</p>
+                        <p className="text-sm font-semibold text-gray-900">
+                          {profile?.full_name || user?.user_metadata?.full_name || 'User'}
+                        </p>
+                        <p className="text-xs text-gray-500">{user?.email}</p>
+                        <div className="mt-2 flex items-center gap-2">
+                          <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
+                            isSuperAdmin
+                              ? 'bg-purple-100 text-purple-700'
+                              : 'bg-blue-100 text-blue-700'
+                          }`}>
+                            {roleDisplayName}
+                          </span>
+                        </div>
                       </div>
                       <div className="py-2">
-                        <div className="px-3 py-2 text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                          Switch Role
-                        </div>
-                        {allRoles.map((role) => (
+                        <Link
+                          href="/accounting/profile"
+                          className="flex items-center gap-3 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                          onClick={() => setUserDropdownOpen(false)}
+                        >
+                          <User className="h-4 w-4 text-gray-400" />
+                          My Profile
+                        </Link>
+                        {canAccessAdmin && (
                           <Link
-                            key={role.id}
-                            href={`/accounting/${role.id}`}
-                            className={`flex items-center gap-3 px-3 py-2 text-sm transition-colors ${
-                              role.id === currentRole
-                                ? "bg-blue-50 text-[#5A7A8F] font-medium"
-                                : "text-gray-700 hover:bg-gray-50"
-                            }`}
-                            onClick={() => setRoleDropdownOpen(false)}
+                            href="/admin/users"
+                            className="flex items-center gap-3 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                            onClick={() => setUserDropdownOpen(false)}
                           >
-                            <div className={`h-2 w-2 rounded-full ${role.id === currentRole ? 'bg-[#5A7A8F]' : 'bg-gray-300'}`}></div>
-                            {role.name}
+                            <Shield className="h-4 w-4 text-gray-400" />
+                            Admin Panel
                           </Link>
-                        ))}
+                        )}
                       </div>
                       <div className="border-t border-gray-100 py-2">
                         <button
                           onClick={() => {
-                            setRoleDropdownOpen(false);
+                            setUserDropdownOpen(false);
                             handleSignOut();
                           }}
                           className="flex w-full items-center gap-3 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"

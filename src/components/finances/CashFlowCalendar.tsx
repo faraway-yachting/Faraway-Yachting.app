@@ -2,25 +2,40 @@
 
 import { useMemo, useState } from 'react';
 import { DailyCashFlow, CashFlowTransaction } from '@/data/finances/types';
+import type { Currency } from '@/data/company/types';
 
 interface CashFlowCalendarProps {
   year: number;
   month: number;
   dailyData: DailyCashFlow[];
-  currency?: string;
 }
 
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
-function formatAmount(amount: number, currency: string = '฿'): string {
+// Currency symbols
+const CURRENCY_SYMBOLS: Record<string, string> = {
+  THB: '฿',
+  USD: '$',
+  EUR: '€',
+  GBP: '£',
+  SGD: 'S$',
+  AED: 'د.إ',
+};
+
+function getCurrencySymbol(currency: Currency | string): string {
+  return CURRENCY_SYMBOLS[currency] || currency;
+}
+
+function formatAmount(amount: number, currency: Currency | string = 'THB'): string {
   const absAmount = Math.abs(amount);
+  const symbol = getCurrencySymbol(currency);
   if (absAmount >= 1000000) {
-    return `${currency}${(absAmount / 1000000).toFixed(1)}M`;
+    return `${symbol}${(absAmount / 1000000).toFixed(1)}M`;
   }
   if (absAmount >= 1000) {
-    return `${currency}${(absAmount / 1000).toFixed(0)}K`;
+    return `${symbol}${(absAmount / 1000).toFixed(0)}K`;
   }
-  return `${currency}${absAmount.toFixed(0)}`;
+  return `${symbol}${absAmount.toFixed(0)}`;
 }
 
 interface DayModalProps {
@@ -37,8 +52,21 @@ function DayModal({ date, transactions, onClose }: DayModalProps) {
     year: 'numeric',
   });
 
-  const totalIn = transactions.filter(t => t.type === 'in').reduce((sum, t) => sum + t.amount, 0);
-  const totalOut = transactions.filter(t => t.type === 'out').reduce((sum, t) => sum + t.amount, 0);
+  // Group totals by currency
+  const totalsByCurrency = useMemo(() => {
+    const map = new Map<string, { totalIn: number; totalOut: number }>();
+    transactions.forEach((t) => {
+      const currency = t.currency || 'THB';
+      const existing = map.get(currency) || { totalIn: 0, totalOut: 0 };
+      if (t.type === 'in') {
+        existing.totalIn += t.amount;
+      } else {
+        existing.totalOut += t.amount;
+      }
+      map.set(currency, existing);
+    });
+    return map;
+  }, [transactions]);
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={onClose}>
@@ -48,12 +76,21 @@ function DayModal({ date, transactions, onClose }: DayModalProps) {
       >
         <div className="px-6 py-4 border-b border-gray-200">
           <h3 className="text-lg font-semibold text-gray-900">{formattedDate}</h3>
-          <div className="flex gap-4 mt-2 text-sm">
-            <span className="text-green-600">In: ฿{totalIn.toLocaleString()}</span>
-            <span className="text-red-600">Out: ฿{totalOut.toLocaleString()}</span>
-            <span className={totalIn - totalOut >= 0 ? 'text-green-600' : 'text-red-600'}>
-              Net: {totalIn - totalOut >= 0 ? '+' : ''}฿{(totalIn - totalOut).toLocaleString()}
-            </span>
+          <div className="flex flex-wrap gap-4 mt-2 text-sm">
+            {Array.from(totalsByCurrency.entries()).map(([currency, totals]) => {
+              const symbol = getCurrencySymbol(currency);
+              const net = totals.totalIn - totals.totalOut;
+              return (
+                <div key={currency} className="flex gap-2">
+                  <span className="text-gray-500 font-medium">{currency}:</span>
+                  <span className="text-green-600">+{symbol}{totals.totalIn.toLocaleString()}</span>
+                  <span className="text-red-600">-{symbol}{totals.totalOut.toLocaleString()}</span>
+                  <span className={net >= 0 ? 'text-green-600' : 'text-red-600'}>
+                    ({net >= 0 ? '+' : ''}{symbol}{net.toLocaleString()})
+                  </span>
+                </div>
+              );
+            })}
           </div>
         </div>
         <div className="px-6 py-4 max-h-96 overflow-y-auto">
@@ -70,28 +107,31 @@ function DayModal({ date, transactions, onClose }: DayModalProps) {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {transactions.map((t) => (
-                  <tr key={t.id} className="text-sm">
-                    <td className="py-2">
-                      <span
-                        className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${
-                          t.type === 'in'
-                            ? 'bg-green-100 text-green-700'
-                            : 'bg-red-100 text-red-700'
-                        }`}
-                      >
-                        {t.type === 'in' ? 'IN' : 'OUT'}
-                      </span>
-                    </td>
-                    <td className="py-2 text-gray-900">{t.description}</td>
-                    <td className="py-2 text-gray-500">{t.sourceDocument || '-'}</td>
-                    <td className={`py-2 text-right font-medium ${
-                      t.type === 'in' ? 'text-green-600' : 'text-red-600'
-                    }`}>
-                      {t.type === 'in' ? '+' : '-'}฿{t.amount.toLocaleString()}
-                    </td>
-                  </tr>
-                ))}
+                {transactions.map((t) => {
+                  const symbol = getCurrencySymbol(t.currency || 'THB');
+                  return (
+                    <tr key={t.id} className="text-sm">
+                      <td className="py-2">
+                        <span
+                          className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${
+                            t.type === 'in'
+                              ? 'bg-green-100 text-green-700'
+                              : 'bg-red-100 text-red-700'
+                          }`}
+                        >
+                          {t.type === 'in' ? 'IN' : 'OUT'}
+                        </span>
+                      </td>
+                      <td className="py-2 text-gray-900">{t.description}</td>
+                      <td className="py-2 text-gray-500">{t.sourceDocument || '-'}</td>
+                      <td className={`py-2 text-right font-medium ${
+                        t.type === 'in' ? 'text-green-600' : 'text-red-600'
+                      }`}>
+                        {t.type === 'in' ? '+' : '-'}{symbol}{t.amount.toLocaleString()}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           )}
@@ -109,7 +149,7 @@ function DayModal({ date, transactions, onClose }: DayModalProps) {
   );
 }
 
-export function CashFlowCalendar({ year, month, dailyData, currency = '฿' }: CashFlowCalendarProps) {
+export function CashFlowCalendar({ year, month, dailyData }: CashFlowCalendarProps) {
   const [selectedDay, setSelectedDay] = useState<DailyCashFlow | null>(null);
 
   // Create a map for quick lookup
@@ -145,16 +185,28 @@ export function CashFlowCalendar({ year, month, dailyData, currency = '฿' }: C
     return days;
   }, [year, month]);
 
-  // Calculate summary
-  const summary = useMemo(() => {
-    let totalIn = 0;
-    let totalOut = 0;
-    dailyData.forEach(d => {
-      totalIn += d.cashIn;
-      totalOut += d.cashOut;
+  // Get transactions grouped by currency for a day
+  const getDayDisplayData = (dayData: DailyCashFlow | undefined) => {
+    if (!dayData || dayData.transactions.length === 0) return null;
+
+    // Group by currency
+    const byCurrency = new Map<string, { totalIn: number; totalOut: number }>();
+    dayData.transactions.forEach((t) => {
+      const currency = t.currency || 'THB';
+      const existing = byCurrency.get(currency) || { totalIn: 0, totalOut: 0 };
+      if (t.type === 'in') {
+        existing.totalIn += t.amount;
+      } else {
+        existing.totalOut += t.amount;
+      }
+      byCurrency.set(currency, existing);
     });
-    return { totalIn, totalOut, netMovement: totalIn - totalOut };
-  }, [dailyData]);
+
+    return Array.from(byCurrency.entries()).map(([currency, totals]) => ({
+      currency,
+      netMovement: totals.totalIn - totals.totalOut,
+    }));
+  };
 
   return (
     <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
@@ -183,8 +235,8 @@ export function CashFlowCalendar({ year, month, dailyData, currency = '฿' }: C
           }
 
           const dayData = dataMap.get(day.date);
-          const netMovement = dayData?.netMovement || 0;
           const hasTransactions = dayData && dayData.transactions.length > 0;
+          const currencyData = getDayDisplayData(dayData);
 
           return (
             <div
@@ -200,9 +252,10 @@ export function CashFlowCalendar({ year, month, dailyData, currency = '฿' }: C
                 {day.dayOfMonth}
               </div>
 
-              {/* Net movement */}
-              {hasTransactions && (
+              {/* Net movement per currency */}
+              {currencyData && currencyData.map(({ currency, netMovement }) => (
                 <div
+                  key={currency}
                   className={`text-sm font-semibold ${
                     netMovement > 0
                       ? 'text-green-600'
@@ -214,7 +267,7 @@ export function CashFlowCalendar({ year, month, dailyData, currency = '฿' }: C
                   {netMovement > 0 ? '+' : ''}
                   {formatAmount(netMovement, currency)}
                 </div>
-              )}
+              ))}
 
               {/* Transaction count */}
               {hasTransactions && (
@@ -225,37 +278,6 @@ export function CashFlowCalendar({ year, month, dailyData, currency = '฿' }: C
             </div>
           );
         })}
-      </div>
-
-      {/* Summary Row */}
-      <div className="px-6 py-4 bg-gray-50 border-t border-gray-200">
-        <div className="flex items-center justify-between flex-wrap gap-4">
-          <div className="flex items-center gap-8">
-            <div>
-              <span className="text-sm text-gray-500">Total In:</span>
-              <span className="ml-2 text-lg font-semibold text-green-600">
-                +{currency}{summary.totalIn.toLocaleString()}
-              </span>
-            </div>
-            <div>
-              <span className="text-sm text-gray-500">Total Out:</span>
-              <span className="ml-2 text-lg font-semibold text-red-600">
-                -{currency}{summary.totalOut.toLocaleString()}
-              </span>
-            </div>
-            <div>
-              <span className="text-sm text-gray-500">Net Movement:</span>
-              <span
-                className={`ml-2 text-lg font-semibold ${
-                  summary.netMovement >= 0 ? 'text-green-600' : 'text-red-600'
-                }`}
-              >
-                {summary.netMovement >= 0 ? '+' : ''}
-                {currency}{summary.netMovement.toLocaleString()}
-              </span>
-            </div>
-          </div>
-        </div>
       </div>
 
       {/* Day Detail Modal */}

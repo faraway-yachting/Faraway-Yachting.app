@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import {
   Plus,
   X,
@@ -13,6 +13,7 @@ import {
   User,
   History,
   Paperclip,
+  Search,
 } from 'lucide-react';
 import {
   BankFeedLine,
@@ -20,25 +21,66 @@ import {
   SuggestedMatch,
   TransactionType,
 } from '@/data/banking/bankReconciliationTypes';
+import type { SystemRecord } from '@/lib/banking/matchingEngine';
 
 interface MatchWorkbenchProps {
   selectedLine?: BankFeedLine;
   suggestedMatches: SuggestedMatch[];
+  systemRecords: SystemRecord[];
   onCreateMatch: (match: Partial<BankMatch>) => void;
   onRemoveMatch: (matchId: string) => void;
   onAcceptSuggestion: (suggestion: SuggestedMatch) => void;
   onCreateNew: (transactionType: TransactionType) => void;
+  onManualMatch: (systemRecord: SystemRecord) => void;
 }
 
 export function MatchWorkbench({
   selectedLine,
   suggestedMatches,
+  systemRecords,
   onCreateMatch,
   onRemoveMatch,
   onAcceptSuggestion,
   onCreateNew,
+  onManualMatch,
 }: MatchWorkbenchProps) {
   const [activeTab, setActiveTab] = useState<'match' | 'details'>('match');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchType, setSearchType] = useState<'all' | 'receipt' | 'expense'>('all');
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+
+  // Filter system records based on type filter only (for dropdown list)
+  const filteredByType = useMemo(() => {
+    return systemRecords.filter((record) => {
+      if (searchType !== 'all' && record.type !== searchType) return false;
+      return true;
+    });
+  }, [searchType, systemRecords]);
+
+  // Filter system records based on search query and type
+  const searchResults = useMemo(() => {
+    if (!searchQuery.trim()) return [];
+
+    const query = searchQuery.toLowerCase();
+    return systemRecords
+      .filter((record) => {
+        // Filter by type
+        if (searchType !== 'all' && record.type !== searchType) return false;
+
+        // Search in reference, counterparty, description
+        const matchesQuery =
+          record.reference.toLowerCase().includes(query) ||
+          (record.counterparty?.toLowerCase().includes(query) ?? false) ||
+          (record.description?.toLowerCase().includes(query) ?? false) ||
+          Math.abs(record.amount).toString().includes(query);
+
+        return matchesQuery;
+      })
+      .slice(0, 10); // Limit to 10 results
+  }, [searchQuery, searchType, systemRecords]);
+
+  // Determine which records to display: search results if searching, otherwise filtered dropdown list
+  const displayRecords = searchQuery.trim() ? searchResults : filteredByType.slice(0, 15);
 
   if (!selectedLine) {
     return (
@@ -253,6 +295,173 @@ export function MatchWorkbench({
               </div>
             </div>
           )}
+
+          {/* Manual Search */}
+          <div className="p-4 border-b border-gray-200">
+            <h4 className="text-xs font-semibold text-gray-700 uppercase tracking-wider mb-3 flex items-center gap-2">
+              <Search className="h-4 w-4 text-gray-500" />
+              Search Existing Records
+            </h4>
+            {hasExistingMatch && (
+              <div className="mb-3 p-2 bg-amber-50 border border-amber-200 rounded text-xs text-amber-700">
+                Remove existing match to search and match another record.
+              </div>
+            )}
+            <div className="space-y-2">
+              {/* Search Input */}
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  onFocus={() => setIsDropdownOpen(true)}
+                  placeholder="Search or select from list below..."
+                  disabled={hasExistingMatch}
+                  className={`w-full pl-9 pr-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#5A7A8F]/20 focus:border-[#5A7A8F] ${
+                    hasExistingMatch ? 'bg-gray-100 cursor-not-allowed' : ''
+                  }`}
+                />
+              </div>
+              {/* Type Filter */}
+              <div className="flex gap-2">
+                <button
+                  onClick={() => { setSearchType('all'); setIsDropdownOpen(true); }}
+                  disabled={hasExistingMatch}
+                  className={`px-3 py-1 text-xs font-medium rounded transition-colors ${
+                    searchType === 'all'
+                      ? 'bg-[#5A7A8F] text-white'
+                      : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                  } ${hasExistingMatch ? 'opacity-50 cursor-not-allowed' : ''}`}
+                >
+                  All ({systemRecords.length})
+                </button>
+                <button
+                  onClick={() => { setSearchType('receipt'); setIsDropdownOpen(true); }}
+                  disabled={hasExistingMatch}
+                  className={`px-3 py-1 text-xs font-medium rounded transition-colors ${
+                    searchType === 'receipt'
+                      ? 'bg-green-600 text-white'
+                      : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                  } ${hasExistingMatch ? 'opacity-50 cursor-not-allowed' : ''}`}
+                >
+                  Receipts ({systemRecords.filter(r => r.type === 'receipt').length})
+                </button>
+                <button
+                  onClick={() => { setSearchType('expense'); setIsDropdownOpen(true); }}
+                  disabled={hasExistingMatch}
+                  className={`px-3 py-1 text-xs font-medium rounded transition-colors ${
+                    searchType === 'expense'
+                      ? 'bg-red-600 text-white'
+                      : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                  } ${hasExistingMatch ? 'opacity-50 cursor-not-allowed' : ''}`}
+                >
+                  Expenses ({systemRecords.filter(r => r.type === 'expense').length})
+                </button>
+              </div>
+            </div>
+
+            {/* Dropdown/Search Results List */}
+            {(isDropdownOpen || searchQuery.trim()) && !hasExistingMatch && (
+              <div className="mt-3">
+                {/* Header showing search/browse status */}
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-xs text-gray-500">
+                    {searchQuery.trim()
+                      ? `Search results for "${searchQuery}"`
+                      : `Browse unmatched ${searchType === 'all' ? 'records' : searchType === 'receipt' ? 'receipts' : 'expenses'}`}
+                  </p>
+                  {isDropdownOpen && !searchQuery.trim() && (
+                    <button
+                      onClick={() => setIsDropdownOpen(false)}
+                      className="text-xs text-gray-400 hover:text-gray-600"
+                    >
+                      Hide list
+                    </button>
+                  )}
+                </div>
+
+                {displayRecords.length === 0 ? (
+                  <div className="text-center py-4 text-sm text-gray-500 bg-gray-50 rounded-lg border border-gray-200">
+                    {searchQuery.trim()
+                      ? 'No matching records found'
+                      : 'No unmatched records available'}
+                  </div>
+                ) : (
+                  <div className="space-y-2 max-h-72 overflow-y-auto">
+                    {displayRecords.map((record) => (
+                      <div
+                        key={record.id}
+                        className="p-3 bg-gray-50 border border-gray-200 rounded-lg hover:bg-gray-100 transition-colors cursor-pointer"
+                        onClick={() => onManualMatch(record)}
+                      >
+                        <div className="flex items-start justify-between">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-1">
+                              <span
+                                className={`text-xs font-medium uppercase px-1.5 py-0.5 rounded flex-shrink-0 ${
+                                  record.type === 'receipt'
+                                    ? 'bg-green-100 text-green-800'
+                                    : 'bg-red-100 text-red-800'
+                                }`}
+                              >
+                                {record.type}
+                              </span>
+                              <span className="text-xs text-gray-600 truncate">{record.reference}</span>
+                            </div>
+                            {record.counterparty && (
+                              <div className="text-sm font-medium text-gray-900 mb-1 truncate">
+                                {record.counterparty}
+                              </div>
+                            )}
+                            <div className="text-sm text-gray-700">
+                              {formatAmount(Math.abs(record.amount), selectedLine?.currency || 'THB')} •{' '}
+                              {formatDate(record.date)}
+                            </div>
+                            {record.description && (
+                              <div className="text-xs text-gray-600 mt-1 truncate">
+                                {record.description}
+                              </div>
+                            )}
+                            {record.projectName && (
+                              <div className="text-xs text-blue-600 mt-1">
+                                Project: {record.projectName}
+                              </div>
+                            )}
+                          </div>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onManualMatch(record);
+                            }}
+                            className="ml-2 flex-shrink-0 flex items-center gap-1 px-2 py-1 text-xs font-medium text-white bg-[#5A7A8F] hover:bg-[#2c3e50] rounded transition-colors"
+                          >
+                            <Check className="h-3 w-3" />
+                            Match
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <p className="text-xs text-gray-500 mt-2 text-center">
+                  {searchQuery.trim()
+                    ? `Showing ${searchResults.length} of ${filteredByType.length} ${searchType === 'all' ? 'records' : searchType + 's'}`
+                    : `Showing ${Math.min(15, filteredByType.length)} of ${filteredByType.length} ${searchType === 'all' ? 'records' : searchType + 's'}`}
+                </p>
+              </div>
+            )}
+
+            {/* Show list button when dropdown is closed */}
+            {!isDropdownOpen && !searchQuery.trim() && !hasExistingMatch && filteredByType.length > 0 && (
+              <button
+                onClick={() => setIsDropdownOpen(true)}
+                className="mt-3 w-full py-2 text-sm text-[#5A7A8F] bg-blue-50 hover:bg-blue-100 rounded-lg border border-blue-200 transition-colors"
+              >
+                Show {filteredByType.length} available {searchType === 'all' ? 'records' : searchType + 's'} to match
+              </button>
+            )}
+          </div>
 
           {/* Create New */}
           <div className="p-4">

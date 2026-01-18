@@ -10,11 +10,14 @@ import { ModuleCard } from "@/components/ModuleCard";
 import { NotifyMeModal } from "@/components/NotifyMeModal";
 import { appConfig } from "@/config/app.config";
 import { modules } from "@/data/modules";
+import { useAuthStatus } from "@/hooks/useAuthStatus";
+import { User, LogOut, Shield } from "lucide-react";
 
 export default function Home() {
   const [modalOpen, setModalOpen] = useState(false);
   const [selectedModule, setSelectedModule] = useState("");
   const router = useRouter();
+  const { user, isSuperAdmin, isLoading, signOut } = useAuthStatus();
 
   // Detect invite token in URL hash and redirect to password setup
   useEffect(() => {
@@ -36,6 +39,12 @@ export default function Home() {
     setModalOpen(true);
   };
 
+  const handleSignOut = async () => {
+    await signOut();
+    // Force a full page refresh to clear any cached state
+    window.location.href = '/';
+  };
+
   return (
     <div className="min-h-screen bg-[#A8C5D6] flex flex-col">
       {/* Hero Section */}
@@ -54,20 +63,50 @@ export default function Home() {
             </div>
           </div>
 
-          <h1 className="text-3xl md:text-4xl font-bold text-white mb-2">
-            {appConfig.tagline}
-          </h1>
-          <p className="text-base md:text-lg text-white/90 max-w-4xl mx-auto mb-6">
-            {appConfig.description}
-          </p>
-          <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
-            <Button variant="primary" size="md">
-              Request Demo
-            </Button>
-            <Button variant="outline" size="md" href="/login">
-              Sign In
-            </Button>
-          </div>
+          {user ? (
+            <h1 className="text-3xl md:text-4xl font-bold text-white mb-6">
+              Welcome, {user.user_metadata?.full_name || user.email?.split('@')[0] || 'User'}
+            </h1>
+          ) : (
+            <>
+              <h1 className="text-3xl md:text-4xl font-bold text-white mb-2">
+                {appConfig.tagline}
+              </h1>
+              <p className="text-base md:text-lg text-white/90 max-w-4xl mx-auto mb-6">
+                {appConfig.description}
+              </p>
+            </>
+          )}
+          {isLoading ? (
+            <div className="flex justify-center">
+              <div className="h-12 w-48 bg-white/20 rounded-lg animate-pulse" />
+            </div>
+          ) : user ? (
+            <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
+              <div className="flex items-center gap-3 bg-white/20 backdrop-blur-sm rounded-lg px-4 py-2.5">
+                <div className="h-8 w-8 rounded-full bg-white/30 flex items-center justify-center">
+                  <User className="h-4 w-4 text-white" />
+                </div>
+                <span className="text-white text-sm font-medium">{user.email}</span>
+              </div>
+              {isSuperAdmin && (
+                <Button variant="primary" size="md" href="/admin/users">
+                  <Shield className="h-4 w-4 mr-2" />
+                  Admin
+                </Button>
+              )}
+              <Button variant="outline" size="md" onClick={handleSignOut}>
+                <LogOut className="h-4 w-4 mr-2" />
+                Sign Out
+              </Button>
+            </div>
+          ) : (
+            <div className="flex justify-center">
+              <Button variant="primary" size="md" href="/login">
+                Sign In
+              </Button>
+            </div>
+          )}
         </div>
       </section>
 

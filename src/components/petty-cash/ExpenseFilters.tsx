@@ -1,8 +1,18 @@
 'use client';
 
 import { X } from 'lucide-react';
-import type { Project } from '@/data/project/types';
-import type { Company } from '@/data/company/types';
+
+// Simple filter option types that only need what's displayed
+interface ProjectOption {
+  id: string;
+  name: string;
+  code: string;
+}
+
+interface CompanyOption {
+  id: string;
+  name: string;
+}
 
 export interface FilterValues {
   dateFrom: string;
@@ -17,8 +27,8 @@ interface ExpenseFiltersProps {
   onFilterChange: (filters: Partial<FilterValues>) => void;
   onClear: () => void;
   statusOptions: { value: string; label: string }[];
-  projects: Project[];
-  companies: Company[];
+  projects: ProjectOption[];
+  companies: CompanyOption[];
   statusLabel?: string;
 }
 

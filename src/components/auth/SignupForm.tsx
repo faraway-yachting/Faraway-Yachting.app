@@ -9,7 +9,7 @@ interface SignupFormProps {
   redirectTo?: string;
 }
 
-export function SignupForm({ redirectTo = '/accounting/manager' }: SignupFormProps) {
+export function SignupForm({ redirectTo = '/' }: SignupFormProps) {
   const router = useRouter();
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');

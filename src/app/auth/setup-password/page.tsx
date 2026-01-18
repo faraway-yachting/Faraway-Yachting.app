@@ -94,9 +94,9 @@ export default function SetupPasswordPage() {
 
       setSuccess(true);
 
-      // Redirect to accounting dashboard after 2 seconds
+      // Redirect to home page after 2 seconds
       setTimeout(() => {
-        router.push('/accounting/manager');
+        router.push('/');
       }, 2000);
 
     } catch (err) {

@@ -12,6 +12,7 @@ import { Currency } from '@/data/company/types';
 import { projectsApi } from '@/lib/supabase/api/projects';
 import { dbProjectToFrontend } from '@/lib/supabase/transforms';
 import { useBookingSettings } from '@/contexts/BookingSettingsContext';
+import { useAuth } from '@/components/auth';
 
 // Mock bookings for demo (replace with API call)
 const mockBookings: Booking[] = [
@@ -88,8 +89,17 @@ export default function BookingCalendarPage() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const role = params.role as string;
-  const isAgencyView = role === 'agent';
-  const canCreate = role !== 'viewer';
+
+  // Get user's actual role from auth context (database-enforced)
+  const { getModuleRole, isSuperAdmin, hasPermission } = useAuth();
+  const userBookingsRole = getModuleRole('bookings');
+
+  // Determine if user is an agent based on their ACTUAL role, not URL
+  // Super admin sees everything, agent only sees status
+  const isAgencyView = !isSuperAdmin && userBookingsRole === 'agent';
+
+  // Can create if user has manager role or super admin, or agent (agents can create enquiries)
+  const canCreate = isSuperAdmin || userBookingsRole === 'manager' || userBookingsRole === 'agent';
 
   // Get boat color settings and banner
   const { getBoatColor, bannerImageUrl } = useBookingSettings();
