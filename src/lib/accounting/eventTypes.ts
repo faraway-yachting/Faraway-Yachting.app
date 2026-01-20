@@ -73,10 +73,16 @@ export interface ReceiptReceivedEventData {
   receiptNumber: string;
   clientName: string;
   receiptDate: string;
+  // Charter dates for revenue recognition
+  charterDateFrom?: string;
+  charterDateTo?: string;
+  charterType?: string;
   lineItems: {
+    id?: string;
     description: string;
     accountCode?: string | null;
     amount: number;
+    projectId?: string;
   }[];
   payments: {
     amount: number;
@@ -88,6 +94,12 @@ export interface ReceiptReceivedEventData {
   totalVatAmount: number;
   totalAmount: number;
   currency: string;
+  // Company and project for revenue recognition records
+  companyId?: string;
+  projectId?: string;
+  // FX rate info
+  fxRate?: number;
+  thbTotalAmount?: number;
 }
 
 export interface ManagementFeeEventData {

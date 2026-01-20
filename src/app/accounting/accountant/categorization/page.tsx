@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useMemo } from 'react';
-import { FileText, Filter, Search, CheckCircle, AlertCircle, RefreshCw, Calendar } from 'lucide-react';
+import { FileText, Filter, Search, CheckCircle, AlertCircle, RefreshCw, Calendar, ExternalLink } from 'lucide-react';
+import { DocumentDetailModal } from '@/components/categorization/DocumentDetailModal';
 import { AppShell } from '@/components/accounting/AppShell';
 import AccountCodeSelector from '@/components/accounting/AccountCodeSelector';
 import { getAllInvoices, updateInvoice } from '@/data/income/invoices';
@@ -37,6 +38,13 @@ export default function CategorizationPage() {
   const [updatedCharterDates, setUpdatedCharterDates] = useState<Record<string, { from?: string; to?: string }>>({});
   const [periodFrom, setPeriodFrom] = useState<string>('');
   const [periodTo, setPeriodTo] = useState<string>('');
+
+  // Document detail modal state
+  const [selectedDocument, setSelectedDocument] = useState<{
+    type: 'receipt' | 'expense';
+    id: string;
+    number: string;
+  } | null>(null);
 
   // Get all invoices and expenses and flatten line items
   const allItems = useMemo((): CategorizationItem[] => {
@@ -232,7 +240,7 @@ export default function CategorizationPage() {
   };
 
   return (
-    <AppShell currentRole="accountant">
+    <AppShell>
       <div className="space-y-6">
         {/* Header */}
         <div className="flex items-center justify-between">
@@ -483,8 +491,18 @@ export default function CategorizationPage() {
                             {item.documentType === 'invoice' ? 'Income' : 'Expense'}
                           </span>
                         </td>
-                        <td className="px-4 py-3 text-sm font-medium text-gray-900">
-                          {item.documentNumber}
+                        <td className="px-4 py-3">
+                          <button
+                            onClick={() => setSelectedDocument({
+                              type: item.documentType === 'invoice' ? 'receipt' : 'expense',
+                              id: item.documentId,
+                              number: item.documentNumber,
+                            })}
+                            className="text-sm font-medium text-[#5A7A8F] hover:text-[#4a6a7f] hover:underline flex items-center gap-1"
+                          >
+                            {item.documentNumber}
+                            <ExternalLink className="h-3 w-3" />
+                          </button>
                         </td>
                         <td className="px-4 py-3 text-sm text-gray-600">
                           {formatDate(item.date)}
@@ -551,6 +569,16 @@ export default function CategorizationPage() {
           )}
         </div>
       </div>
+
+      {/* Document Detail Modal */}
+      {selectedDocument && (
+        <DocumentDetailModal
+          documentType={selectedDocument.type}
+          documentId={selectedDocument.id}
+          documentNumber={selectedDocument.number}
+          onClose={() => setSelectedDocument(null)}
+        />
+      )}
     </AppShell>
   );
 }

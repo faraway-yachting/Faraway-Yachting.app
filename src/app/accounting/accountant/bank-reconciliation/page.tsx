@@ -318,6 +318,29 @@ export default function BankReconciliationPage() {
     triggerRefresh();
   };
 
+  // Handle manual match from search results
+  const handleManualMatch = (systemRecord: SystemRecord) => {
+    if (!selectedLine) return;
+
+    const matchedAmount = Math.abs(systemRecord.amount);
+    const amountDiff = Math.abs(selectedLine.amount) - matchedAmount;
+
+    createBankMatch(selectedLine.id, {
+      systemRecordType: systemRecord.type,
+      systemRecordId: systemRecord.id,
+      projectId: systemRecord.projectId,
+      matchedAmount: matchedAmount,
+      amountDifference: amountDiff,
+      matchedBy: 'current-user',
+      matchedAt: new Date().toISOString(),
+      matchScore: 100, // Manual match = full confidence
+      matchMethod: 'manual',
+      adjustmentRequired: Math.abs(amountDiff) > 0.01,
+      adjustmentReason: Math.abs(amountDiff) > 0.01 ? 'Amount difference detected' : undefined,
+    });
+    triggerRefresh();
+  };
+
   // Run auto-matching on all unmatched lines
   const handleRunAutoMatch = useCallback(() => {
     const unmatchedLines = filteredBankLines.filter(
@@ -370,7 +393,7 @@ export default function BankReconciliationPage() {
   };
 
   return (
-    <AppShell currentRole="accountant">
+    <AppShell>
       <div className="space-y-6">
         {/* Sticky Header: Reconciliation Scope Bar */}
         <div className="sticky top-0 z-10 bg-white pb-4">
@@ -502,10 +525,12 @@ export default function BankReconciliationPage() {
               <MatchWorkbench
                 selectedLine={selectedLine}
                 suggestedMatches={suggestedMatches}
+                systemRecords={systemRecords}
                 onCreateMatch={handleCreateMatch}
                 onRemoveMatch={handleRemoveMatch}
                 onAcceptSuggestion={handleAcceptSuggestion}
                 onCreateNew={handleCreateNew}
+                onManualMatch={handleManualMatch}
               />
             </div>
           </div>

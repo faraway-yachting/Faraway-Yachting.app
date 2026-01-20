@@ -37,30 +37,51 @@ export async function middleware(request: NextRequest) {
     data: { user }
   } = await supabase.auth.getUser();
 
+  const pathname = request.nextUrl.pathname;
+
   // Protected routes that require authentication
-  const protectedRoutes = ['/accounting'];
+  const protectedRoutes = ['/accounting', '/admin'];
   const isProtectedRoute = protectedRoutes.some((route) =>
-    request.nextUrl.pathname.startsWith(route)
+    pathname.startsWith(route)
   );
+
+  // Admin routes that require super admin status
+  const isAdminRoute = pathname.startsWith('/admin');
 
   // Auth routes that should redirect if already logged in
   const authRoutes = ['/login', '/signup'];
   const isAuthRoute = authRoutes.some((route) =>
-    request.nextUrl.pathname.startsWith(route)
+    pathname.startsWith(route)
   );
 
   // If accessing a protected route without being logged in, redirect to login
   if (isProtectedRoute && !user) {
     const url = request.nextUrl.clone();
     url.pathname = '/login';
-    url.searchParams.set('redirectTo', request.nextUrl.pathname);
+    url.searchParams.set('redirectTo', pathname);
     return NextResponse.redirect(url);
   }
 
-  // If accessing auth routes while logged in, redirect to dashboard
+  // If accessing admin routes, check super admin status
+  if (isAdminRoute && user) {
+    // Fetch user profile to check super admin status
+    const { data: profile } = await supabase
+      .from('user_profiles')
+      .select('is_super_admin')
+      .eq('id', user.id)
+      .single();
+
+    if (!profile?.is_super_admin) {
+      const url = request.nextUrl.clone();
+      url.pathname = '/unauthorized';
+      return NextResponse.redirect(url);
+    }
+  }
+
+  // If accessing auth routes while logged in, redirect to home page
   if (isAuthRoute && user) {
     const url = request.nextUrl.clone();
-    url.pathname = '/accounting/manager';
+    url.pathname = '/';
     return NextResponse.redirect(url);
   }
 

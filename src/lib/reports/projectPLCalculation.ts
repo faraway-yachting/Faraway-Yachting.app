@@ -216,6 +216,23 @@ const CURRENCY_TO_THB: Record<string, number> = {
   GBP: 44,
 };
 
+/**
+ * Check if a charter service has been completed based on charter end date
+ * Revenue should only be recognized when the service has been delivered
+ */
+function isCharterCompleted(charterDateTo?: string | null): boolean {
+  if (!charterDateTo) {
+    return false; // No charter date = not recognized (needs review)
+  }
+
+  const charterEnd = new Date(charterDateTo);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  charterEnd.setHours(0, 0, 0, 0);
+
+  return charterEnd <= today;
+}
+
 async function fetchProjectIncome(
   projectId: string,
   startDate: string,
@@ -227,6 +244,16 @@ async function fetchProjectIncome(
     const receipts = await receiptsApi.getWithLineItemsByDateRange(startDate, endDate);
 
     for (const receipt of receipts) {
+      // Get charter dates from receipt
+      const charterDateTo = (receipt as ReceiptWithDetails & { charter_date_to?: string | null }).charter_date_to;
+
+      // REVENUE RECOGNITION: Only include revenue if charter service has been completed
+      // This implements proper accrual accounting where revenue is recognized when service is delivered
+      if (!isCharterCompleted(charterDateTo)) {
+        // Charter not yet completed - skip this receipt (revenue is deferred)
+        continue;
+      }
+
       // Process each line item
       for (const item of receipt.line_items) {
         // Filter by projectId

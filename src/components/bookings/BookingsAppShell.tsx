@@ -3,7 +3,7 @@
 import { useState, ReactNode } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { authApi } from "@/lib/supabase/api/auth";
+import { useAuth } from "@/components/auth";
 import {
   Calendar,
   List,
@@ -14,9 +14,10 @@ import {
   ChevronDown,
   Home,
   User,
+  Shield,
 } from "lucide-react";
 
-export type BookingsRole = "admin" | "manager" | "agent" | "viewer";
+export type BookingsRole = "admin" | "manager" | "agent" | "viewer" | "crew" | "investor";
 
 interface BookingsAppShellProps {
   children: ReactNode;
@@ -48,25 +49,50 @@ const roleConfig: Record<BookingsRole, { name: string; allowedMenus: string[] }>
     name: "Viewer",
     allowedMenus: ["Calendar", "Bookings List"],
   },
+  investor: {
+    name: "Investor",
+    allowedMenus: ["Calendar"],
+  },
+  crew: {
+    name: "Crew",
+    allowedMenus: ["Calendar", "Bookings List"],
+  },
 };
 
-const allRoles: { id: BookingsRole; name: string }[] = [
-  { id: "admin", name: "Admin" },
-  { id: "manager", name: "Manager" },
-  { id: "agent", name: "Agent" },
-  { id: "viewer", name: "Viewer" },
-];
+
+// Get role display name based on user's bookings module role
+function getRoleDisplayName(role: string | null, isSuperAdmin: boolean): string {
+  if (isSuperAdmin) return "Super Admin";
+  switch (role) {
+    case 'manager': return 'Manager';
+    case 'agent': return 'Agent';
+    case 'crew': return 'Crew';
+    case 'investor': return 'Investor';
+    case 'viewer': return 'Viewer';
+    default: return 'User';
+  }
+}
 
 export function BookingsAppShell({ children, currentRole }: BookingsAppShellProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [roleDropdownOpen, setRoleDropdownOpen] = useState(false);
+  const [userDropdownOpen, setUserDropdownOpen] = useState(false);
   const pathname = usePathname();
   const router = useRouter();
-  const config = roleConfig[currentRole];
+
+  // Get auth context for real user data
+  const { user, profile, signOut, isSuperAdmin, getModuleRole, isMenuVisible } = useAuth();
+
+  // Get user's actual role in bookings module
+  const bookingsRole = getModuleRole('bookings');
+  const roleDisplayName = getRoleDisplayName(bookingsRole, isSuperAdmin);
+
+  // Use the user's actual role config, not the URL-based one
+  const effectiveRole = isSuperAdmin ? 'manager' : (bookingsRole as BookingsRole) || 'viewer';
+  const config = roleConfig[effectiveRole] || roleConfig['viewer'];
 
   const handleSignOut = async () => {
     try {
-      await authApi.signOut();
+      await signOut();
       router.push('/');
       router.refresh();
     } catch (error) {
@@ -135,13 +161,6 @@ export function BookingsAppShell({ children, currentRole }: BookingsAppShellProp
               >
                 <Home className="mr-3 h-5 w-5 flex-shrink-0 text-gray-400 group-hover:text-white" />
                 Home
-              </Link>
-              <Link
-                href="/bookings"
-                className="group flex items-center px-4 py-3 text-sm font-medium text-gray-300 hover:bg-white/10 hover:text-white rounded-xl transition-all duration-200"
-              >
-                <LogOut className="mr-3 h-5 w-5 flex-shrink-0 text-gray-400 group-hover:text-white" />
-                Switch Role
               </Link>
             </div>
           </div>
@@ -213,14 +232,6 @@ export function BookingsAppShell({ children, currentRole }: BookingsAppShellProp
                         <Home className="h-5 w-5 shrink-0" />
                         Home
                       </Link>
-                      <Link
-                        href="/bookings"
-                        onClick={() => setSidebarOpen(false)}
-                        className="group flex items-center gap-x-3 rounded-xl px-4 py-3 text-sm font-medium text-gray-300 hover:bg-white/10 hover:text-white transition-all duration-200"
-                      >
-                        <LogOut className="h-5 w-5 shrink-0" />
-                        Switch Role
-                      </Link>
                     </li>
                   </ul>
                 </nav>
@@ -269,62 +280,51 @@ export function BookingsAppShell({ children, currentRole }: BookingsAppShellProp
                 <button
                   type="button"
                   className="flex items-center gap-x-3 rounded-lg px-3 py-2 hover:bg-gray-100 transition-colors"
-                  onClick={() => setRoleDropdownOpen(!roleDropdownOpen)}
+                  onClick={() => setUserDropdownOpen(!userDropdownOpen)}
                 >
                   <div className="flex items-center gap-x-3">
                     <div className="h-8 w-8 rounded-full bg-gradient-to-br from-[#3b82f6] to-[#1d4ed8] flex items-center justify-center shadow-sm">
                       <User className="h-4 w-4 text-white" />
                     </div>
                     <div className="hidden lg:block text-left">
-                      <p className="text-sm font-semibold text-gray-900">Admin User</p>
-                      <p className="text-xs text-gray-500">{config.name}</p>
+                      <p className="text-sm font-semibold text-gray-900">{profile?.full_name || user?.user_metadata?.full_name || 'User'}</p>
+                      <p className="text-xs text-gray-500">{roleDisplayName}</p>
                     </div>
                   </div>
                   <ChevronDown className="hidden lg:block h-4 w-4 text-gray-400" />
                 </button>
 
-                {roleDropdownOpen && (
+                {userDropdownOpen && (
                   <>
                     <div
                       className="fixed inset-0 z-10"
-                      onClick={() => setRoleDropdownOpen(false)}
+                      onClick={() => setUserDropdownOpen(false)}
                     />
                     <div className="absolute right-0 z-20 mt-2 w-64 origin-top-right rounded-xl bg-white shadow-xl ring-1 ring-black ring-opacity-5 border border-gray-100">
                       <div className="p-3 border-b border-gray-100">
-                        <p className="text-sm font-semibold text-gray-900">Admin User</p>
-                        <p className="text-xs text-gray-500">admin@farawayyachting.com</p>
-                      </div>
-                      <div className="py-2">
-                        <div className="px-3 py-2 text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                          Switch Role
+                        <div className="flex items-center gap-2">
+                          <p className="text-sm font-semibold text-gray-900">{profile?.full_name || user?.user_metadata?.full_name || 'User'}</p>
+                          {isSuperAdmin && (
+                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-700">
+                              <Shield className="h-3 w-3" />
+                              Admin
+                            </span>
+                          )}
                         </div>
-                        {allRoles.map((role) => (
-                          <Link
-                            key={role.id}
-                            href={`/bookings/${role.id}/calendar`}
-                            className={`flex items-center gap-3 px-3 py-2 text-sm transition-colors ${
-                              role.id === currentRole
-                                ? "bg-blue-50 text-blue-600 font-medium"
-                                : "text-gray-700 hover:bg-gray-50"
-                            }`}
-                            onClick={() => setRoleDropdownOpen(false)}
-                          >
-                            <div className={`h-2 w-2 rounded-full ${role.id === currentRole ? 'bg-blue-600' : 'bg-gray-300'}`}></div>
-                            {role.name}
-                          </Link>
-                        ))}
+                        <p className="text-xs text-gray-500">{user?.email}</p>
+                        <p className="text-xs text-blue-600 mt-1">{roleDisplayName}</p>
                       </div>
                       <div className="border-t border-gray-100 py-2">
                         <Link
                           href="/accounting/manager"
                           className="flex w-full items-center gap-3 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
-                          onClick={() => setRoleDropdownOpen(false)}
+                          onClick={() => setUserDropdownOpen(false)}
                         >
-                          <span className="text-xs">Go to Accounting</span>
+                          <span>Go to Accounting</span>
                         </Link>
                         <button
                           onClick={() => {
-                            setRoleDropdownOpen(false);
+                            setUserDropdownOpen(false);
                             handleSignOut();
                           }}
                           className="flex w-full items-center gap-3 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"

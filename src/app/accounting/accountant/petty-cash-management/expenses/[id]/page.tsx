@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { AppShell } from '@/components/accounting/AppShell';
 import {
@@ -17,36 +17,160 @@ import {
   AlertCircle,
 } from 'lucide-react';
 
-// Data imports
-import { getExpenseById, updateExpense } from '@/data/petty-cash/expenses';
-import { getActiveCompanies } from '@/data/company/companies';
-import { getAccountsByType } from '@/data/accounting/chartOfAccounts';
+// Supabase API imports
+import { pettyCashApi } from '@/lib/supabase/api/pettyCash';
+import { companiesApi } from '@/lib/supabase/api/companies';
+import { projectsApi } from '@/lib/supabase/api/projects';
+import { chartOfAccountsApi } from '@/lib/supabase/api/chartOfAccounts';
 import type { VatType } from '@/data/petty-cash/types';
+import type { Database } from '@/lib/supabase/database.types';
 import {
   formatCurrency,
   formatDate,
   VAT_TYPE_OPTIONS,
 } from '@/lib/petty-cash/utils';
 
+// Types from Supabase
+type DbExpense = Database['public']['Tables']['petty_cash_expenses']['Row'];
+type DbCompany = Database['public']['Tables']['companies']['Row'];
+type DbProject = Database['public']['Tables']['projects']['Row'];
+
+// Frontend-friendly expense type
+interface FrontendExpense {
+  id: string;
+  expenseNumber: string;
+  walletId: string;
+  walletHolderName: string;
+  companyId: string;
+  companyName: string;
+  projectId: string;
+  projectName: string;
+  expenseDate: string;
+  description: string;
+  amount: number;
+  status: string;
+  receiptStatus: string;
+  expenseAccountCode?: string;
+  accountingVatType?: VatType;
+  accountingVatRate?: number;
+  attachments: Array<{ id: string; name: string; url: string; size: number; type: string }>;
+}
+
+// Account type
+interface Account {
+  code: string;
+  name: string;
+  type: string;
+}
+
 export default function PettyCashExpenseDetailsPage() {
   const params = useParams();
   const router = useRouter();
   const expenseId = params.id as string;
 
-  // Fetch expense data
-  const expense = useMemo(() => getExpenseById(expenseId), [expenseId]);
+  // Loading states
+  const [isLoadingExpense, setIsLoadingExpense] = useState(true);
+  const [isLoadingData, setIsLoadingData] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  // Expense state
+  const [expense, setExpense] = useState<FrontendExpense | null>(null);
 
   // Form state for editable fields
-  const [companyId, setCompanyId] = useState(expense?.companyId || '');
-  const [expenseAccountCode, setExpenseAccountCode] = useState(expense?.expenseAccountCode || '');
-  const [vatType, setVatType] = useState<VatType>(expense?.accountingVatType || 'no_vat');
-  const [vatRate, setVatRate] = useState(expense?.accountingVatRate || 7);
+  const [companyId, setCompanyId] = useState('');
+  const [expenseAccountCode, setExpenseAccountCode] = useState('');
+  const [vatType, setVatType] = useState<VatType>('no_vat');
+  const [vatRate, setVatRate] = useState(7);
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [saveError, setSaveError] = useState('');
 
-  // Load dropdown data
-  const companies = useMemo(() => getActiveCompanies(), []);
-  const expenseAccounts = useMemo(() => getAccountsByType('Expense'), []);
+  // Dropdown data
+  const [companies, setCompanies] = useState<{ id: string; name: string }[]>([]);
+  const [projects, setProjects] = useState<{ id: string; name: string }[]>([]);
+  const [expenseAccounts, setExpenseAccounts] = useState<Account[]>([]);
+
+  // Load expense from Supabase
+  useEffect(() => {
+    async function loadExpense() {
+      setIsLoadingExpense(true);
+      setLoadError(null);
+      try {
+        const dbExpense = await pettyCashApi.getExpenseById(expenseId);
+        if (!dbExpense) {
+          setLoadError('Expense not found');
+          setExpense(null);
+        } else {
+          // We need to get wallet info to show holder name
+          const wallet = await pettyCashApi.getWalletById(dbExpense.wallet_id);
+
+          const frontendExpense: FrontendExpense = {
+            id: dbExpense.id,
+            expenseNumber: dbExpense.expense_number,
+            walletId: dbExpense.wallet_id,
+            walletHolderName: wallet?.user_name || 'Unknown',
+            companyId: dbExpense.company_id,
+            companyName: '', // Will be filled from companies list
+            projectId: dbExpense.project_id,
+            projectName: '', // Will be filled from projects list
+            expenseDate: dbExpense.expense_date,
+            description: dbExpense.description || '',
+            amount: dbExpense.amount || 0,
+            status: dbExpense.status,
+            receiptStatus: 'pending', // Not in current schema
+            attachments: [], // Not in current schema
+          };
+          setExpense(frontendExpense);
+
+          // Initialize form fields
+          setCompanyId(frontendExpense.companyId);
+        }
+      } catch (error) {
+        console.error('Failed to load expense:', error);
+        setLoadError('Failed to load expense');
+      } finally {
+        setIsLoadingExpense(false);
+      }
+    }
+
+    loadExpense();
+  }, [expenseId]);
+
+  // Load dropdown data from Supabase
+  useEffect(() => {
+    async function loadDropdownData() {
+      try {
+        const [companiesData, projectsData, accountsData] = await Promise.all([
+          companiesApi.getActive(),
+          projectsApi.getActive(),
+          chartOfAccountsApi.getByType('expense'),
+        ]);
+
+        setCompanies(companiesData.map((c: DbCompany) => ({ id: c.id, name: c.name })));
+        setProjects(projectsData.map((p: DbProject) => ({ id: p.id, name: p.name })));
+        setExpenseAccounts(accountsData.map((a) => ({
+          code: a.code,
+          name: a.name,
+          type: a.account_type,
+        })));
+      } catch (error) {
+        console.error('Failed to load dropdown data:', error);
+      } finally {
+        setIsLoadingData(false);
+      }
+    }
+
+    loadDropdownData();
+  }, []);
+
+  // Get company and project names for display
+  const companyName = useMemo(() => {
+    return companies.find(c => c.id === expense?.companyId)?.name || '';
+  }, [companies, expense?.companyId]);
+
+  const projectName = useMemo(() => {
+    return projects.find(p => p.id === expense?.projectId)?.name || '';
+  }, [projects, expense?.projectId]);
 
   // Calculate VAT breakdown
   const vatBreakdown = useMemo(() => {
@@ -85,37 +209,51 @@ export default function PettyCashExpenseDetailsPage() {
 
     setIsSaving(true);
     setSaveSuccess(false);
+    setSaveError('');
 
     try {
-      const selectedCompany = companies.find((c) => c.id === companyId);
-      const selectedAccount = expenseAccounts.find((a) => a.code === expenseAccountCode);
-
-      updateExpense(expense.id, {
-        companyId,
-        companyName: selectedCompany?.name || '',
-        expenseAccountCode,
-        expenseAccountName: selectedAccount?.name || '',
-        accountingVatType: vatType,
-        accountingVatRate: vatRate,
-        accountingCompletedBy: 'current-user',
-        accountingCompletedAt: new Date().toISOString(),
+      // Update expense in Supabase
+      await pettyCashApi.updateExpense(expense.id, {
+        company_id: companyId,
       });
+
+      // Update local state
+      setExpense((prev) => prev ? {
+        ...prev,
+        companyId,
+        companyName: companies.find(c => c.id === companyId)?.name || '',
+      } : null);
 
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 3000);
+    } catch (error) {
+      console.error('Failed to save expense:', error);
+      setSaveError('Failed to save changes. Please try again.');
     } finally {
       setIsSaving(false);
     }
-  }, [expense, companyId, expenseAccountCode, vatType, vatRate, companies, expenseAccounts]);
+  }, [expense, companyId, companies]);
+
+  // Loading state
+  if (isLoadingExpense || isLoadingData) {
+    return (
+      <AppShell>
+        <div className="flex flex-col items-center justify-center py-12">
+          <Loader2 className="h-8 w-8 animate-spin text-[#5A7A8F] mb-4" />
+          <p className="text-gray-500">Loading expense details...</p>
+        </div>
+      </AppShell>
+    );
+  }
 
   // Handle not found
-  if (!expense) {
+  if (!expense || loadError) {
     return (
-      <AppShell currentRole="accountant">
+      <AppShell>
         <div className="flex flex-col items-center justify-center py-12">
           <AlertCircle className="h-12 w-12 text-red-500 mb-4" />
           <h2 className="text-xl font-semibold text-gray-900 mb-2">Expense Not Found</h2>
-          <p className="text-gray-500 mb-4">The expense you're looking for doesn't exist.</p>
+          <p className="text-gray-500 mb-4">{loadError || "The expense you're looking for doesn't exist."}</p>
           <button
             onClick={() => router.back()}
             className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-[#5A7A8F] rounded-lg hover:bg-[#4a6a7f]"
@@ -129,7 +267,7 @@ export default function PettyCashExpenseDetailsPage() {
   }
 
   return (
-    <AppShell currentRole="accountant">
+    <AppShell>
       {/* Header */}
       <div className="mb-6">
         <button
@@ -150,12 +288,12 @@ export default function PettyCashExpenseDetailsPage() {
           </div>
           <span
             className={`inline-flex rounded-full px-3 py-1 text-sm font-semibold ${
-              expense.receiptStatus === 'original_received'
+              expense.status === 'submitted'
                 ? 'bg-green-100 text-green-800'
                 : 'bg-yellow-100 text-yellow-800'
             }`}
           >
-            {expense.receiptStatus === 'original_received' ? 'Receipt Received' : 'Receipt Pending'}
+            {expense.status === 'submitted' ? 'Submitted' : 'Draft'}
           </span>
         </div>
       </div>
@@ -196,7 +334,7 @@ export default function PettyCashExpenseDetailsPage() {
                 </div>
                 <div>
                   <p className="text-xs text-gray-500">Project</p>
-                  <p className="text-sm font-medium text-gray-900">{expense.projectName || '-'}</p>
+                  <p className="text-sm font-medium text-gray-900">{projectName || '-'}</p>
                 </div>
               </div>
 
@@ -363,6 +501,13 @@ export default function PettyCashExpenseDetailsPage() {
               {saveSuccess && (
                 <div className="p-3 bg-green-50 border border-green-200 rounded-lg text-sm text-green-700">
                   Changes saved successfully!
+                </div>
+              )}
+
+              {/* Save Error Message */}
+              {saveError && (
+                <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
+                  {saveError}
                 </div>
               )}
 

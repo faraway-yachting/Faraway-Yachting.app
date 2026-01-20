@@ -11,6 +11,7 @@ import WhtReceiptPrintView from './WhtReceiptPrintView';
 import AccountSelector from '@/components/common/AccountSelector';
 import { RelatedJournalEntries } from '@/components/accounting/RelatedJournalEntries';
 import { CharterInfoBox } from './CharterInfoBox';
+import { RevenueRecognitionStatus } from './RevenueRecognitionStatus';
 import type { Receipt, PaymentRecord, AdjustmentType, LineItem, PricingType, CharterType } from '@/data/income/types';
 import { charterTypeAccountCodes } from '@/data/income/types';
 import type { Currency, Company } from '@/data/company/types';
@@ -527,10 +528,14 @@ Destination: `;
     setIsSaving(true);
 
     try {
-      // Generate receipt number if not provided (using company settings)
+      // Always generate a fresh receipt number at save time to avoid duplicates
+      // (The pre-filled number might be stale if another receipt was created in the meantime)
       let finalReceiptNumber = receiptNumber;
-      if (!finalReceiptNumber) {
+      if (!isEditing) {
+        // For new receipts, always get a fresh number to avoid collisions
         finalReceiptNumber = await documentNumbersApi.getNextDocumentNumber(companyId, 'receipt');
+        // Update the form state so it shows the actual number used
+        setReceiptNumber(finalReceiptNumber);
       }
 
       // Build receipt data for database
@@ -701,19 +706,52 @@ Destination: `;
         }
       } else {
         // Create new receipt with line items
-        const newReceipt = await receiptsApi.create(receiptData, lineItemsForDb);
+        // Use retry logic in case of duplicate key (race condition with another user)
+        let newReceipt;
+        let retries = 0;
+        const maxRetries = 3;
+
+        while (retries < maxRetries) {
+          try {
+            newReceipt = await receiptsApi.create(receiptData, lineItemsForDb);
+            break; // Success, exit loop
+          } catch (createError: unknown) {
+            const errorObj = createError as { code?: string; message?: string };
+            // Check if it's a duplicate key error (code 23505)
+            if (errorObj?.code === '23505' && errorObj?.message?.includes('receipt_number')) {
+              retries++;
+              if (retries < maxRetries) {
+                // Generate a new receipt number and retry
+                console.warn(`Receipt number collision, regenerating... (attempt ${retries + 1})`);
+                finalReceiptNumber = await documentNumbersApi.getNextDocumentNumber(companyId, 'receipt');
+                receiptData.receipt_number = finalReceiptNumber;
+                setReceiptNumber(finalReceiptNumber);
+              } else {
+                throw createError; // Max retries reached
+              }
+            } else {
+              throw createError; // Not a duplicate key error
+            }
+          }
+        }
+
         console.log('Created receipt:', newReceipt);
         savedReceiptId = newReceipt?.id;
 
         // Add payment records
         if (newReceipt) {
-          for (const pr of paymentRecordsForDb) {
-            await receiptsApi.addPaymentRecord({
-              ...pr,
-              receipt_id: newReceipt.id,
-            });
+          try {
+            for (const pr of paymentRecordsForDb) {
+              await receiptsApi.addPaymentRecord({
+                ...pr,
+                receipt_id: newReceipt.id,
+              });
+            }
+            console.log('Added payment records:', paymentRecordsForDb.length);
+          } catch (paymentError) {
+            console.error('Failed to add payment records:', paymentError);
+            // Continue - receipt was created, payment records can be added manually
           }
-          console.log('Added payment records:', paymentRecordsForDb.length);
         }
 
         // Create journal entry for new receipt if status is paid
@@ -795,9 +833,17 @@ Destination: `;
           router.push(`/accounting/manager/income/receipts/${newReceipt.id}`);
         }
       }
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Error saving receipt:', error);
-      alert('Failed to save receipt. Please try again.');
+      // Extract error message from various error types including Supabase PostgrestError
+      let errorMessage = 'Unknown error';
+      if (error instanceof Error) {
+        errorMessage = error.message;
+      } else if (error && typeof error === 'object') {
+        const err = error as { message?: string; details?: string; hint?: string; code?: string };
+        errorMessage = err.message || err.details || err.hint || err.code || 'Database error';
+      }
+      alert(`Failed to save receipt: ${errorMessage}`);
     } finally {
       setIsSaving(false);
     }
@@ -1287,6 +1333,12 @@ Destination: `;
           onExternalBoatNameChange={setExternalBoatName}
           onUpdateDescription={handleUpdateDescription}
           onAddToBooking={handleAddToBooking}
+        />
+
+        {/* Revenue Recognition Status */}
+        <RevenueRecognitionStatus
+          charterDateTo={charterDateTo}
+          receiptStatus={currentStatus}
         />
       </div>
 

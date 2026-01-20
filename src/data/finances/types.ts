@@ -20,6 +20,7 @@ export interface CashFlowTransaction {
   date: string; // ISO date
   type: 'in' | 'out';
   amount: number;
+  currency: Currency;
   description: string;
   category: string;
   sourceDocument?: string; // Invoice, Receipt, etc.

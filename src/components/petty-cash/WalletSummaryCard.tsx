@@ -1,11 +1,23 @@
 'use client';
 
 import { Wallet, TrendingDown, Clock, AlertTriangle } from 'lucide-react';
-import type { PettyCashWallet } from '@/data/petty-cash/types';
 import { formatCurrency } from '@/lib/petty-cash/utils';
+import type { Currency } from '@/data/company/types';
+
+// Simplified wallet type for display purposes
+interface WalletDisplay {
+  id: string;
+  walletName: string;
+  userName: string;
+  balance: number;
+  currency: Currency;
+  status: string;
+  balanceLimit?: number | null;
+  lowBalanceThreshold?: number | null;
+}
 
 interface WalletSummaryCardProps {
-  wallet: PettyCashWallet;
+  wallet: WalletDisplay | null;
   pendingReimbursement: number;
   monthlyExpenses: number;
   className?: string;
@@ -17,6 +29,10 @@ export default function WalletSummaryCard({
   monthlyExpenses,
   className = '',
 }: WalletSummaryCardProps) {
+  if (!wallet) {
+    return null;
+  }
+
   const isLowBalance =
     wallet.lowBalanceThreshold && wallet.balance <= wallet.lowBalanceThreshold;
 

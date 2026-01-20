@@ -123,7 +123,7 @@ export default function ContactsPage() {
   const allCount = contacts.filter(c => showInactive || c.isActive).length;
 
   return (
-    <AppShell currentRole="manager">
+    <AppShell>
       <div className="space-y-6">
         {/* Header */}
         <div className="flex items-center justify-between">

@@ -23,3 +23,13 @@ export { journalEntriesApi, chartOfAccountsApi, type JournalEntryWithLines } fro
 
 // Auth APIs
 export { authApi, type SignUpData, type SignInData } from './auth';
+
+// Admin APIs
+export {
+  roleConfigApi,
+  type RoleDefinition,
+  type RoleMenuVisibility,
+  type RoleDataScope,
+  type RoleConfig,
+  type PermissionGroup,
+} from './roleConfig';

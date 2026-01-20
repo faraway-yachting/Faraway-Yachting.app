@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useMemo, useEffect, useCallback } from 'react';
-import { FileDown, RefreshCw, Pencil, Plus, Trash2, Check, CheckSquare, Square, X } from 'lucide-react';
+import { FileDown, RefreshCw, Pencil, Plus, Trash2, Check, CheckSquare, Square, X, HelpCircle } from 'lucide-react';
 import { AppShell } from '@/components/accounting/AppShell';
 import { DataTable } from '@/components/accounting/DataTable';
 import { KPICard } from '@/components/accounting/KPICard';
@@ -474,6 +474,242 @@ function JournalEntryModal({
   );
 }
 
+// Help modal for explaining auto-generated journal entries
+function AutoJournalHelpModal({ onClose }: { onClose: () => void }) {
+  return (
+    <div className="fixed inset-0 z-50 overflow-y-auto">
+      <div
+        className="fixed inset-0 bg-black bg-opacity-50 transition-opacity"
+        onClick={onClose}
+      />
+      <div className="flex min-h-full items-center justify-center p-4">
+        <div className="relative w-full max-w-3xl bg-white rounded-lg shadow-xl max-h-[90vh] overflow-hidden">
+          {/* Header */}
+          <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 bg-gradient-to-r from-[#5A7A8F] to-[#4a6a7f]">
+            <div>
+              <h2 className="text-xl font-semibold text-white">
+                How Auto-Generated Journal Entries Work
+              </h2>
+              <p className="text-sm text-white/80 mt-1">
+                Understanding the automatic accounting system
+              </p>
+            </div>
+            <button
+              onClick={onClose}
+              className="text-white/80 hover:text-white transition-colors text-2xl"
+            >
+              &times;
+            </button>
+          </div>
+
+          {/* Content */}
+          <div className="px-6 py-6 space-y-6 overflow-y-auto max-h-[calc(90vh-140px)]">
+            {/* Overview */}
+            <div>
+              <h3 className="text-lg font-semibold text-gray-900 mb-2">Overview</h3>
+              <p className="text-gray-600">
+                The system automatically creates journal entries when specific business events occur.
+                These entries are created in <span className="font-medium text-yellow-700">Draft</span> status
+                for accountant review before posting to the general ledger.
+              </p>
+            </div>
+
+            {/* Triggers */}
+            <div>
+              <h3 className="text-lg font-semibold text-gray-900 mb-3">What Triggers Auto-Generation?</h3>
+              <div className="space-y-4">
+                {/* Expense Approved */}
+                <div className="bg-blue-50 rounded-lg p-4 border border-blue-100">
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="px-2 py-1 bg-blue-100 text-blue-800 text-xs font-medium rounded">
+                      EXPENSE APPROVED
+                    </span>
+                  </div>
+                  <p className="text-sm text-gray-700 mb-3">
+                    When an expense is approved, the system records the liability and expense.
+                  </p>
+                  <div className="bg-white rounded border border-blue-200 p-3">
+                    <p className="text-xs font-medium text-gray-500 mb-2">Journal Entry Created:</p>
+                    <table className="w-full text-sm">
+                      <tbody>
+                        <tr>
+                          <td className="py-1 text-gray-700">Dr. Expense Account (from line items)</td>
+                          <td className="py-1 text-right text-gray-900 font-medium">XXX</td>
+                          <td className="py-1 w-20"></td>
+                        </tr>
+                        <tr>
+                          <td className="py-1 text-gray-700">Dr. VAT Receivable (1170) <span className="text-gray-400 text-xs">if applicable</span></td>
+                          <td className="py-1 text-right text-gray-900 font-medium">XXX</td>
+                          <td className="py-1 w-20"></td>
+                        </tr>
+                        <tr>
+                          <td className="py-1 text-gray-700 pl-8">Cr. Accounts Payable (2050)</td>
+                          <td className="py-1 w-20"></td>
+                          <td className="py-1 text-right text-gray-900 font-medium">XXX</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                {/* Expense Paid */}
+                <div className="bg-green-50 rounded-lg p-4 border border-green-100">
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="px-2 py-1 bg-green-100 text-green-800 text-xs font-medium rounded">
+                      EXPENSE PAID
+                    </span>
+                  </div>
+                  <p className="text-sm text-gray-700 mb-3">
+                    When an expense payment is made, the system clears the liability.
+                  </p>
+                  <div className="bg-white rounded border border-green-200 p-3">
+                    <p className="text-xs font-medium text-gray-500 mb-2">Journal Entry Created:</p>
+                    <table className="w-full text-sm">
+                      <tbody>
+                        <tr>
+                          <td className="py-1 text-gray-700">Dr. Accounts Payable (2050)</td>
+                          <td className="py-1 text-right text-gray-900 font-medium">XXX</td>
+                          <td className="py-1 w-20"></td>
+                        </tr>
+                        <tr>
+                          <td className="py-1 text-gray-700 pl-8">Cr. Bank/Cash Account (from payment)</td>
+                          <td className="py-1 w-20"></td>
+                          <td className="py-1 text-right text-gray-900 font-medium">XXX</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                {/* Receipt Received */}
+                <div className="bg-purple-50 rounded-lg p-4 border border-purple-100">
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="px-2 py-1 bg-purple-100 text-purple-800 text-xs font-medium rounded">
+                      RECEIPT / PAYMENT RECEIVED
+                    </span>
+                  </div>
+                  <p className="text-sm text-gray-700 mb-3">
+                    When a receipt with payment is created, the system records revenue with smart recognition.
+                  </p>
+                  <div className="bg-white rounded border border-purple-200 p-3">
+                    <p className="text-xs font-medium text-gray-500 mb-2">Journal Entry Created:</p>
+                    <table className="w-full text-sm">
+                      <tbody>
+                        <tr>
+                          <td className="py-1 text-gray-700">Dr. Bank/Cash Account (per payment)</td>
+                          <td className="py-1 text-right text-gray-900 font-medium">XXX</td>
+                          <td className="py-1 w-20"></td>
+                        </tr>
+                        <tr>
+                          <td className="py-1 text-gray-700 pl-8">Cr. Revenue (from line items)</td>
+                          <td className="py-1 w-20"></td>
+                          <td className="py-1 text-right text-gray-900 font-medium">XXX</td>
+                        </tr>
+                        <tr>
+                          <td className="py-1 text-gray-700 pl-8">Cr. VAT Payable (2200) <span className="text-gray-400 text-xs">if applicable</span></td>
+                          <td className="py-1 w-20"></td>
+                          <td className="py-1 text-right text-gray-900 font-medium">XXX</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                    <div className="mt-3 pt-3 border-t border-purple-100">
+                      <p className="text-xs text-purple-700">
+                        <strong>Smart Revenue Recognition:</strong> If the charter service is not yet completed,
+                        revenue is credited to "Deferred Revenue" (2300) instead of direct revenue accounts.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Default Account Codes */}
+            <div>
+              <h3 className="text-lg font-semibold text-gray-900 mb-3">Default Account Codes</h3>
+              <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
+                <div className="grid grid-cols-2 gap-4 text-sm">
+                  <div>
+                    <p className="text-gray-500">Accounts Payable</p>
+                    <p className="font-medium text-gray-900">2050</p>
+                  </div>
+                  <div>
+                    <p className="text-gray-500">VAT Receivable (Input)</p>
+                    <p className="font-medium text-gray-900">1170</p>
+                  </div>
+                  <div>
+                    <p className="text-gray-500">VAT Payable (Output)</p>
+                    <p className="font-medium text-gray-900">2200</p>
+                  </div>
+                  <div>
+                    <p className="text-gray-500">Deferred Revenue</p>
+                    <p className="font-medium text-gray-900">2300</p>
+                  </div>
+                  <div>
+                    <p className="text-gray-500">Default Expense</p>
+                    <p className="font-medium text-gray-900">6790</p>
+                  </div>
+                  <div>
+                    <p className="text-gray-500">Default Revenue</p>
+                    <p className="font-medium text-gray-900">4490</p>
+                  </div>
+                </div>
+                <p className="text-xs text-gray-500 mt-3">
+                  Account codes are resolved in order: Source document → Company settings → System defaults
+                </p>
+              </div>
+            </div>
+
+            {/* Features */}
+            <div>
+              <h3 className="text-lg font-semibold text-gray-900 mb-3">Key Features</h3>
+              <ul className="space-y-2">
+                <li className="flex items-start gap-2">
+                  <Check className="h-5 w-5 text-green-500 mt-0.5 shrink-0" />
+                  <span className="text-gray-700">
+                    <strong>Draft for Review:</strong> All auto-generated entries are created as drafts,
+                    allowing accountants to review and modify before posting.
+                  </span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <Check className="h-5 w-5 text-green-500 mt-0.5 shrink-0" />
+                  <span className="text-gray-700">
+                    <strong>Duplicate Prevention:</strong> The system checks for existing entries
+                    to prevent duplicate journal entries for the same transaction.
+                  </span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <Check className="h-5 w-5 text-green-500 mt-0.5 shrink-0" />
+                  <span className="text-gray-700">
+                    <strong>Balance Validation:</strong> Entries are validated to ensure
+                    total debits equal total credits before creation.
+                  </span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <Check className="h-5 w-5 text-green-500 mt-0.5 shrink-0" />
+                  <span className="text-gray-700">
+                    <strong>Audit Trail:</strong> Each entry links back to its source document
+                    (expense, receipt, etc.) for complete traceability.
+                  </span>
+                </li>
+              </ul>
+            </div>
+          </div>
+
+          {/* Footer */}
+          <div className="px-6 py-4 border-t border-gray-200 flex justify-end">
+            <button
+              onClick={onClose}
+              className="px-4 py-2 text-sm font-medium text-white bg-[#5A7A8F] rounded-lg hover:bg-[#4a6a7f] transition-colors"
+            >
+              Got it
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function JournalEntriesPage() {
   const [entries, setEntries] = useState<JournalEntryWithLines[]>([]);
   const [companies, setCompanies] = useState<Company[]>([]);
@@ -485,6 +721,9 @@ export default function JournalEntriesPage() {
   const [isSelectionMode, setIsSelectionMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isBulkPosting, setIsBulkPosting] = useState(false);
+
+  // Help modal state
+  const [showHelpModal, setShowHelpModal] = useState(false);
 
   // Filter states
   const [filterStatus, setFilterStatus] = useState<'all' | JournalEntryStatus>('all');
@@ -838,12 +1077,21 @@ export default function JournalEntriesPage() {
   }, [isSelectionMode, selectedIds, allDraftsSelected, companies, handleToggleSelect, handleToggleSelectAll]);
 
   return (
-    <AppShell currentRole="accountant">
+    <AppShell>
       <div className="space-y-6">
         {/* Header */}
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-3xl font-bold text-gray-900">Journal Entries</h1>
+            <div className="flex items-center gap-2">
+              <h1 className="text-3xl font-bold text-gray-900">Journal Entries</h1>
+              <button
+                onClick={() => setShowHelpModal(true)}
+                className="p-1.5 text-gray-400 hover:text-[#5A7A8F] hover:bg-gray-100 rounded-full transition-colors"
+                title="How auto-generated journal entries work"
+              >
+                <HelpCircle className="h-5 w-5" />
+              </button>
+            </div>
             <p className="mt-2 text-sm text-gray-600">
               View auto-generated journal entries from expense approvals and payments
             </p>
@@ -1026,6 +1274,11 @@ export default function JournalEntriesPage() {
             onPost={handlePostEntry}
             onDelete={handleDeleteEntry}
           />
+        )}
+
+        {/* Help Modal */}
+        {showHelpModal && (
+          <AutoJournalHelpModal onClose={() => setShowHelpModal(false)} />
         )}
       </div>
     </AppShell>

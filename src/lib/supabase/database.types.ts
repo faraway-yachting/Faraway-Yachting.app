@@ -629,6 +629,7 @@ export type Database = {
           notes: string | null
           original_receipt_number: string | null
           is_using_recycled_number: boolean
+          revenue_recognition_status: string | null
           created_by: string | null
           created_at: string
           updated_at: string
@@ -664,6 +665,7 @@ export type Database = {
           notes?: string | null
           original_receipt_number?: string | null
           is_using_recycled_number?: boolean
+          revenue_recognition_status?: string | null
           created_by?: string | null
           created_at?: string
           updated_at?: string
@@ -699,6 +701,7 @@ export type Database = {
           notes?: string | null
           original_receipt_number?: string | null
           is_using_recycled_number?: boolean
+          revenue_recognition_status?: string | null
           created_by?: string | null
           created_at?: string
           updated_at?: string
@@ -737,6 +740,9 @@ export type Database = {
           custom_wht_amount: number | null
           amount: number
           line_order: number | null
+          revenue_recognized: boolean
+          recognition_date: string | null
+          revenue_recognition_id: string | null
         }
         Insert: {
           id?: string
@@ -750,6 +756,9 @@ export type Database = {
           custom_wht_amount?: number | null
           amount: number
           line_order?: number | null
+          revenue_recognized?: boolean
+          recognition_date?: string | null
+          revenue_recognition_id?: string | null
         }
         Update: {
           id?: string
@@ -763,6 +772,9 @@ export type Database = {
           custom_wht_amount?: number | null
           amount?: number
           line_order?: number | null
+          revenue_recognized?: boolean
+          recognition_date?: string | null
+          revenue_recognition_id?: string | null
         }
         Relationships: [
           {

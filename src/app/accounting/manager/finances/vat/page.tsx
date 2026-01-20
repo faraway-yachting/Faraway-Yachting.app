@@ -1,20 +1,11 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { FinancesScopeBar } from '@/components/finances/FinancesScopeBar';
 import { VatSummaryCards } from '@/components/finances/VatSummaryCards';
 import { VatTransactionTable } from '@/components/finances/VatTransactionTable';
-import {
-  getAllVatTransactions,
-  getVatTransactionsByCompany,
-  getVatPeriodSummaries,
-} from '@/data/finances/mockVatTransactions';
-
-// Mock companies
-const companies = [
-  { id: 'company-001', name: 'Faraway Yachting' },
-  { id: 'company-002', name: 'Blue Horizon Maritime' },
-];
+import { vatTransactionsApi } from '@/lib/supabase/api/vatTransactions';
+import type { VatTransaction } from '@/data/finances/types';
 
 type VatSubTab = 'input' | 'output';
 
@@ -23,6 +14,11 @@ export default function VatPage() {
   const [year, setYear] = useState(() => new Date().getFullYear());
   const [month, setMonth] = useState<number | null>(() => new Date().getMonth() + 1);
   const [activeSubTab, setActiveSubTab] = useState<VatSubTab>('output');
+
+  // Real data from Supabase
+  const [companies, setCompanies] = useState<{ id: string; name: string }[]>([]);
+  const [allTransactions, setAllTransactions] = useState<VatTransaction[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
 
   const handlePeriodChange = (newYear: number, newMonth: number | null) => {
     setYear(newYear);
@@ -36,30 +32,47 @@ export default function VatPage() {
   const currentMonth = month || new Date().getMonth() + 1;
   const period = `${year}-${String(currentMonth).padStart(2, '0')}`;
 
+  // Fetch companies and VAT transactions from Supabase
+  useEffect(() => {
+    async function fetchData() {
+      setIsLoading(true);
+      try {
+        const [companiesData, transactionsData] = await Promise.all([
+          vatTransactionsApi.getCompanies(),
+          vatTransactionsApi.getByPeriod(period),
+        ]);
+        setCompanies(companiesData);
+        setAllTransactions(transactionsData);
+      } catch (error) {
+        console.error('Failed to fetch VAT data:', error);
+      } finally {
+        setIsLoading(false);
+      }
+    }
+    fetchData();
+  }, [period]);
+
   // Get filtered data
   const { vatInput, vatOutput, netVat, transactions, showCompany } = useMemo(() => {
-    const allTransactions = getAllVatTransactions();
-    const periodFiltered = allTransactions.filter(t => t.period === period);
-
-    let filtered = periodFiltered;
+    let filtered = allTransactions;
     if (dataScope !== 'all-companies') {
-      filtered = getVatTransactionsByCompany(dataScope).filter(t => t.period === period);
+      filtered = allTransactions.filter(t => t.companyId === dataScope);
     }
 
     const inputTransactions = filtered.filter(t => t.direction === 'input');
     const outputTransactions = filtered.filter(t => t.direction === 'output');
 
-    const vatInput = inputTransactions.reduce((sum, t) => sum + t.vatAmount, 0);
-    const vatOutput = outputTransactions.reduce((sum, t) => sum + t.vatAmount, 0);
+    const vatInputTotal = inputTransactions.reduce((sum, t) => sum + t.vatAmount, 0);
+    const vatOutputTotal = outputTransactions.reduce((sum, t) => sum + t.vatAmount, 0);
 
     return {
-      vatInput,
-      vatOutput,
-      netVat: vatOutput - vatInput,
+      vatInput: vatInputTotal,
+      vatOutput: vatOutputTotal,
+      netVat: vatOutputTotal - vatInputTotal,
       transactions: activeSubTab === 'input' ? inputTransactions : outputTransactions,
       showCompany: dataScope === 'all-companies',
     };
-  }, [dataScope, period, activeSubTab]);
+  }, [allTransactions, dataScope, activeSubTab]);
 
   // Calculate due date (15th of following month)
   const nextMonth = currentMonth === 12 ? 1 : currentMonth + 1;
@@ -151,10 +164,26 @@ export default function VatPage() {
         <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wider mb-3">
           {activeSubTab === 'output' ? 'VAT Output Transactions' : 'VAT Input Transactions'}
         </h3>
-        <VatTransactionTable
-          transactions={transactions}
-          showCompany={showCompany}
-        />
+        {isLoading ? (
+          <div className="flex items-center justify-center py-12">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#5A7A8F]"></div>
+            <span className="ml-3 text-gray-500">Loading VAT transactions...</span>
+          </div>
+        ) : transactions.length === 0 ? (
+          <div className="text-center py-12 text-gray-500">
+            <p>No VAT {activeSubTab === 'output' ? 'output' : 'input'} transactions found for this period.</p>
+            <p className="text-sm mt-1">
+              {activeSubTab === 'output'
+                ? 'VAT Output comes from paid receipts with tax amount.'
+                : 'VAT Input comes from approved expenses with VAT amount.'}
+            </p>
+          </div>
+        ) : (
+          <VatTransactionTable
+            transactions={transactions}
+            showCompany={showCompany}
+          />
+        )}
       </div>
     </div>
   );

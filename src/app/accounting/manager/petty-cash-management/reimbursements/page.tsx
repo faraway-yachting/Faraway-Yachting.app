@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { AppShell } from '@/components/accounting/AppShell';
 import { DataTable } from '@/components/accounting/DataTable';
@@ -15,18 +15,18 @@ import {
   Building2,
   User,
   DollarSign,
+  Loader2,
 } from 'lucide-react';
 
-// Data imports
+// Data imports - mock data as fallback
 import {
-  getAllReimbursements,
-  approveReimbursement,
-  processReimbursementPayment,
-  rejectReimbursement,
+  getAllReimbursements as getMockReimbursements,
+  approveReimbursement as approveMockReimbursement,
+  processReimbursementPayment as processMockReimbursementPayment,
+  rejectReimbursement as rejectMockReimbursement,
 } from '@/data/petty-cash/reimbursements';
-import { getExpenseById } from '@/data/petty-cash/expenses';
+import { getExpenseById as getMockExpenseById } from '@/data/petty-cash/expenses';
 import { getWalletById, addToWallet } from '@/data/petty-cash/wallets';
-import { getActiveCompanies } from '@/data/company/companies';
 import type { PettyCashReimbursement, PettyCashExpense } from '@/data/petty-cash/types';
 import {
   formatCurrency,
@@ -34,12 +34,51 @@ import {
   getStatusLabel,
   getStatusColor,
 } from '@/lib/petty-cash/utils';
+import { pettyCashApi, type PettyCashReimbursement as DbReimbursement } from '@/lib/supabase/api/pettyCash';
+import { companiesApi } from '@/lib/supabase/api/companies';
+import { useAuth } from '@/components/auth/AuthProvider';
 
 type StatusFilter = 'all' | 'pending' | 'approved' | 'paid' | 'rejected';
 type GroupBy = 'none' | 'company' | 'holder' | 'status';
 
+// Transform database reimbursement to frontend type
+function transformReimbursement(
+  db: DbReimbursement,
+  walletName: string,
+  companyName: string,
+  expenseNumber: string
+): PettyCashReimbursement {
+  return {
+    id: db.id,
+    reimbursementNumber: db.reimbursement_number,
+    expenseId: db.expense_id,
+    expenseNumber: expenseNumber,
+    walletId: db.wallet_id,
+    walletHolderName: walletName,
+    companyId: db.company_id,
+    companyName: companyName,
+    amount: db.amount,
+    adjustmentAmount: db.adjustment_amount || undefined,
+    adjustmentReason: db.adjustment_reason || undefined,
+    finalAmount: db.final_amount,
+    status: db.status,
+    bankAccountId: db.bank_account_id || undefined,
+    bankAccountName: undefined, // Would need to join with bank_accounts
+    paymentDate: db.payment_date || undefined,
+    paymentReference: db.payment_reference || undefined,
+    approvedBy: db.approved_by || undefined,
+    approvedAt: db.approved_at || undefined,
+    rejectedBy: db.rejected_by || undefined,
+    rejectedAt: db.rejected_at || undefined,
+    rejectionReason: db.rejection_reason || undefined,
+    createdAt: db.created_at,
+    updatedAt: db.updated_at,
+  };
+}
+
 export default function ReimbursementsPage() {
   const router = useRouter();
+  const { user } = useAuth();
   const [refreshKey, setRefreshKey] = useState(0);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [companyFilter, setCompanyFilter] = useState<string>('all');
@@ -50,12 +89,66 @@ export default function ReimbursementsPage() {
   const [selectedExpense, setSelectedExpense] = useState<PettyCashExpense | null>(null);
   const [showApprovalModal, setShowApprovalModal] = useState(false);
 
-  // Get data
-  const companies = useMemo(() => getActiveCompanies(), []);
-  const allReimbursements = useMemo(
-    () => getAllReimbursements(),
-    [refreshKey]
-  );
+  // Supabase data state
+  const [isLoading, setIsLoading] = useState(true);
+  const [dbReimbursements, setDbReimbursements] = useState<PettyCashReimbursement[]>([]);
+  const [companies, setCompanies] = useState<{ id: string; name: string }[]>([]);
+
+  // Load data from Supabase
+  useEffect(() => {
+    async function loadData() {
+      setIsLoading(true);
+      try {
+        // Fetch reimbursements, wallets, expenses, and companies in parallel
+        const [reimbursementsData, walletsData, expensesData, companiesData] = await Promise.all([
+          pettyCashApi.getAllReimbursements(),
+          pettyCashApi.getAllWallets(),
+          pettyCashApi.getAllExpenses(),
+          companiesApi.getAll(),
+        ]);
+
+        // Create lookup maps
+        const walletMap = new Map(walletsData.map(w => [w.id, w]));
+        const expenseMap = new Map(expensesData.map(e => [e.id, e]));
+        const companyMap = new Map(companiesData.map(c => [c.id, c]));
+
+        // Transform reimbursements
+        const transformed = reimbursementsData.map(r => {
+          const wallet = walletMap.get(r.wallet_id);
+          const expense = expenseMap.get(r.expense_id);
+          const company = companyMap.get(r.company_id);
+
+          return transformReimbursement(
+            r,
+            wallet?.user_name || 'Unknown',
+            company?.name || 'Unknown',
+            expense?.expense_number || 'Unknown'
+          );
+        });
+
+        setDbReimbursements(transformed);
+        setCompanies(companiesData.map(c => ({ id: c.id, name: c.name })));
+      } catch (error) {
+        console.error('Error loading reimbursements from Supabase:', error);
+        // Fall back to mock data
+        setDbReimbursements(getMockReimbursements());
+      } finally {
+        setIsLoading(false);
+      }
+    }
+
+    loadData();
+  }, [refreshKey]);
+
+  // Combine Supabase and mock data (if any)
+  const allReimbursements = useMemo(() => {
+    // If we have Supabase data, use it
+    if (dbReimbursements.length > 0) {
+      return dbReimbursements;
+    }
+    // Fall back to mock data
+    return getMockReimbursements();
+  }, [dbReimbursements]);
 
   // Apply filters
   const filteredReimbursements = useMemo(() => {
@@ -125,16 +218,65 @@ export default function ReimbursementsPage() {
     };
   }, [allReimbursements]);
 
+  // Loading state for fetching expense
+  const [isLoadingExpense, setIsLoadingExpense] = useState(false);
+
   // Handlers
-  const handleReview = useCallback((reimbursement: PettyCashReimbursement) => {
-    const expense = getExpenseById(reimbursement.expenseId);
+  const handleReview = useCallback(async (reimbursement: PettyCashReimbursement) => {
+    setIsLoadingExpense(true);
     setSelectedReimbursement(reimbursement);
-    setSelectedExpense(expense || null);
-    setShowApprovalModal(true);
+
+    try {
+      // First try to get from Supabase
+      const supabaseExpense = await pettyCashApi.getExpenseById(reimbursement.expenseId);
+
+      if (supabaseExpense) {
+        // Transform Supabase expense to frontend format
+        const amount = supabaseExpense.amount || 0;
+        const transformedExpense: PettyCashExpense = {
+          id: supabaseExpense.id,
+          expenseNumber: supabaseExpense.expense_number,
+          walletId: supabaseExpense.wallet_id,
+          walletHolderName: reimbursement.walletHolderName,
+          companyId: supabaseExpense.company_id,
+          companyName: reimbursement.companyName,
+          expenseDate: supabaseExpense.expense_date,
+          description: supabaseExpense.description || '',
+          amount: amount,
+          projectId: supabaseExpense.project_id,
+          projectName: '', // Project name not fetched here
+          receiptStatus: 'pending',
+          attachments: [],
+          lineItems: [],
+          subtotal: amount,
+          vatAmount: 0,
+          totalAmount: amount,
+          whtAmount: 0,
+          netAmount: amount,
+          status: (supabaseExpense.status === 'submitted' ? 'submitted' : 'draft') as 'draft' | 'submitted',
+          createdBy: supabaseExpense.created_by || '',
+          createdAt: supabaseExpense.created_at,
+          updatedAt: supabaseExpense.created_at,
+        };
+        setSelectedExpense(transformedExpense);
+      } else {
+        // Fall back to mock data
+        const mockExpense = getMockExpenseById(reimbursement.expenseId);
+        setSelectedExpense(mockExpense || null);
+      }
+    } catch (error) {
+      console.error('Error fetching expense:', error);
+      // Fall back to mock data
+      const mockExpense = getMockExpenseById(reimbursement.expenseId);
+      setSelectedExpense(mockExpense || null);
+    } finally {
+      setIsLoadingExpense(false);
+      setShowApprovalModal(true);
+    }
   }, []);
 
   const handleApprove = useCallback(
-    (
+    async (
       reimbursementId: string,
       bankAccountId: string,
       bankAccountName: string,
@@ -142,49 +284,87 @@ export default function ReimbursementsPage() {
       adjustmentAmount?: number,
       adjustmentReason?: string
     ) => {
-      // First approve with bank account info
-      approveReimbursement(
-        reimbursementId,
-        'current-manager',
-        bankAccountId,
-        bankAccountName,
-        adjustmentAmount,
-        adjustmentReason
-      );
+      try {
+        // Check if this is a Supabase reimbursement
+        const isDbReimbursement = dbReimbursements.some(r => r.id === reimbursementId);
 
-      // Then process payment
-      const updatedReimbursement = processReimbursementPayment(
-        reimbursementId,
-        paymentDate,
-        `PAY-${Date.now()}`
-      );
+        if (isDbReimbursement && user?.id) {
+          // Approve with bank account info in Supabase
+          await pettyCashApi.approveReimbursement(
+            reimbursementId,
+            bankAccountId,
+            user.id,
+            adjustmentAmount,
+            adjustmentReason
+          );
 
-      // Credit the wallet
-      if (updatedReimbursement) {
-        const wallet = getWalletById(updatedReimbursement.walletId);
-        if (wallet) {
-          addToWallet(wallet.id, updatedReimbursement.finalAmount);
+          // Then mark as paid
+          await pettyCashApi.markReimbursementPaid(
+            reimbursementId,
+            paymentDate,
+            `PAY-${Date.now()}`
+          );
+          // Note: The trigger in the database automatically updates wallet balance when status changes to 'paid'
+        } else {
+          // Fall back to mock data handlers
+          approveMockReimbursement(
+            reimbursementId,
+            'current-manager',
+            bankAccountId,
+            bankAccountName,
+            adjustmentAmount,
+            adjustmentReason
+          );
+
+          const updatedReimbursement = processMockReimbursementPayment(
+            reimbursementId,
+            paymentDate,
+            `PAY-${Date.now()}`
+          );
+
+          // Credit the wallet (mock)
+          if (updatedReimbursement) {
+            const wallet = getWalletById(updatedReimbursement.walletId);
+            if (wallet) {
+              addToWallet(wallet.id, updatedReimbursement.finalAmount);
+            }
+          }
         }
-      }
 
-      setShowApprovalModal(false);
-      setSelectedReimbursement(null);
-      setSelectedExpense(null);
-      setRefreshKey((prev) => prev + 1);
+        setShowApprovalModal(false);
+        setSelectedReimbursement(null);
+        setSelectedExpense(null);
+        setRefreshKey((prev) => prev + 1);
+      } catch (error) {
+        console.error('Error approving reimbursement:', error);
+        alert('Failed to approve reimbursement. Please try again.');
+      }
     },
-    []
+    [dbReimbursements, user]
   );
 
   const handleReject = useCallback(
-    (reimbursementId: string, reason: string) => {
-      rejectReimbursement(reimbursementId, 'current-manager', reason);
+    async (reimbursementId: string, reason: string) => {
+      try {
+        // Check if this is a Supabase reimbursement
+        const isDbReimbursement = dbReimbursements.some(r => r.id === reimbursementId);
 
-      setShowApprovalModal(false);
-      setSelectedReimbursement(null);
-      setSelectedExpense(null);
-      setRefreshKey((prev) => prev + 1);
+        if (isDbReimbursement && user?.id) {
+          await pettyCashApi.rejectReimbursement(reimbursementId, user.id, reason);
+        } else {
+          rejectMockReimbursement(reimbursementId, 'current-manager', reason);
+        }
+
+        setShowApprovalModal(false);
+        setSelectedReimbursement(null);
+        setSelectedExpense(null);
+        setRefreshKey((prev) => prev + 1);
+      } catch (error) {
+        console.error('Error rejecting reimbursement:', error);
+        alert('Failed to reject reimbursement. Please try again.');
+      }
     },
-    []
+    [dbReimbursements, user]
   );
 
   // Status badge
@@ -273,7 +453,7 @@ export default function ReimbursementsPage() {
   ];
 
   return (
-    <AppShell currentRole="manager">
+    <AppShell>
       {/* Header */}
       <div className="mb-6">
         <button
@@ -500,7 +680,17 @@ export default function ReimbursementsPage() {
         </div>
       ))}
 
-      {filteredReimbursements.length === 0 && (
+      {isLoading && (
+        <div className="text-center py-12">
+          <Loader2 className="h-12 w-12 text-gray-300 mx-auto mb-4 animate-spin" />
+          <h3 className="text-lg font-medium text-gray-900 mb-1">
+            Loading Reimbursements
+          </h3>
+          <p className="text-gray-500">Fetching data from database...</p>
+        </div>
+      )}
+
+      {!isLoading && filteredReimbursements.length === 0 && (
         <div className="text-center py-12">
           <Wallet className="h-12 w-12 text-gray-300 mx-auto mb-4" />
           <h3 className="text-lg font-medium text-gray-900 mb-1">
@@ -511,6 +701,16 @@ export default function ReimbursementsPage() {
               ? 'Try adjusting your filters'
               : 'No reimbursement requests have been submitted yet'}
           </p>
+        </div>
+      )}
+
+      {/* Loading Modal */}
+      {isLoadingExpense && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="bg-white rounded-lg p-6 flex items-center gap-3">
+            <Loader2 className="h-5 w-5 animate-spin text-[#5A7A8F]" />
+            <span>Loading expense details...</span>
+          </div>
         </div>
       )}
 
@@ -531,6 +731,27 @@ export default function ReimbursementsPage() {
             setRefreshKey((prev) => prev + 1);
           }}
         />
+      )}
+
+      {/* Error state when expense not found */}
+      {showApprovalModal && selectedReimbursement && !selectedExpense && !isLoadingExpense && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="bg-white rounded-lg p-6 max-w-md">
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">Expense Not Found</h3>
+            <p className="text-gray-600 mb-4">
+              The expense associated with this reimbursement could not be found.
+            </p>
+            <button
+              onClick={() => {
+                setShowApprovalModal(false);
+                setSelectedReimbursement(null);
+              }}
+              className="px-4 py-2 bg-[#5A7A8F] text-white rounded-lg hover:bg-[#4a6a7f]"
+            >
+              Close
+            </button>
+          </div>
+        </div>
       )}
     </AppShell>
   );

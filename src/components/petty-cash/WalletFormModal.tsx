@@ -79,31 +79,47 @@ export function WalletFormModal({
 
   // Initialize form with editing wallet data
   useEffect(() => {
-    if (editingWallet) {
-      setWalletName(editingWallet.walletName);
-      setUserName(editingWallet.userName);
-      setUserEmail(editingWallet.userEmail || "");
-      setUserRole(editingWallet.userRole || "");
-      setCompanyId(editingWallet.companyId);
-      setCurrency(editingWallet.currency);
-      setBeginningBalance(editingWallet.beginningBalance?.toString() || "");
-      setBalanceLimit(editingWallet.balanceLimit?.toString() || "");
-      setLowBalanceThreshold(editingWallet.lowBalanceThreshold?.toString() || "");
-      setStatus(editingWallet.status);
-    } else {
-      // Reset form for new wallet
-      setWalletName("");
-      setUserName("");
-      setUserEmail("");
-      setUserRole("");
-      setCompanyId(companies[0]?.id || "");
-      setCurrency("THB");
-      setBeginningBalance("");
-      setBalanceLimit("");
-      setLowBalanceThreshold("");
-      setStatus("active");
-    }
-    setErrors({});
+    const initializeForm = async () => {
+      if (editingWallet) {
+        setWalletName(editingWallet.walletName);
+        setUserName(editingWallet.userName);
+        setUserRole(editingWallet.userRole || "");
+        setCompanyId(editingWallet.companyId);
+        setCurrency(editingWallet.currency);
+        setBeginningBalance(editingWallet.beginningBalance?.toString() || "");
+        setBalanceLimit(editingWallet.balanceLimit?.toString() || "");
+        setLowBalanceThreshold(editingWallet.lowBalanceThreshold?.toString() || "");
+        setStatus(editingWallet.status);
+
+        // Fetch user email from user_profiles if wallet has a linked user
+        if (editingWallet.userId) {
+          try {
+            const email = await pettyCashApi.getUserEmailById(editingWallet.userId);
+            setUserEmail(email || "");
+          } catch (error) {
+            console.error('Failed to fetch user email:', error);
+            setUserEmail("");
+          }
+        } else {
+          setUserEmail("");
+        }
+      } else {
+        // Reset form for new wallet
+        setWalletName("");
+        setUserName("");
+        setUserEmail("");
+        setUserRole("");
+        setCompanyId(companies[0]?.id || "");
+        setCurrency("THB");
+        setBeginningBalance("");
+        setBalanceLimit("");
+        setLowBalanceThreshold("");
+        setStatus("active");
+      }
+      setErrors({});
+    };
+
+    initializeForm();
   }, [editingWallet, isOpen, companies]);
 
   // Validation functions
@@ -185,10 +201,11 @@ export function WalletFormModal({
 
     try {
       if (editingWallet) {
-        // Update existing wallet
-        await pettyCashApi.updateWallet(editingWallet.id, {
+        // Update existing wallet - pass user_email for automatic user linking
+        await pettyCashApi.updateWalletWithAutoLink(editingWallet.id, {
           wallet_name: walletName,
           user_name: userName,
+          user_email: userEmail || undefined,
           company_id: companyId,
           currency,
           balance_limit: balanceLimit ? parseFloat(balanceLimit) : null,
@@ -196,10 +213,11 @@ export function WalletFormModal({
           status,
         });
       } else {
-        // Create new wallet
-        await pettyCashApi.createWallet({
+        // Create new wallet - pass user_email for automatic user linking
+        await pettyCashApi.createWalletWithAutoLink({
           wallet_name: walletName,
           user_name: userName,
+          user_email: userEmail || undefined,
           company_id: companyId,
           balance: beginningBalance ? parseFloat(beginningBalance) : 0,
           currency,

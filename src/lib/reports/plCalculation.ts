@@ -3,6 +3,11 @@
  *
  * Generates Profit & Loss reports with multi-currency support.
  * All amounts can be displayed in original currency or converted to THB.
+ *
+ * REVENUE RECOGNITION:
+ * Income is only included in P&L when the service (charter) has been completed.
+ * Payments received before the charter date are held in "Charter Deposits Received" (2300)
+ * and are excluded from this P&L report until the service is delivered.
  */
 
 import { Currency } from '@/data/company/types';

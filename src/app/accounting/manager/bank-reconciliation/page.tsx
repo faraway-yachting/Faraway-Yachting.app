@@ -224,8 +224,14 @@ export default function BankReconciliationPage() {
     }
 
     // Status filter (display only)
-    if (selectedStatuses.length > 0 && !selectedStatuses.includes(line.status)) {
-      return false;
+    // Derive actual status from matches - if matches exist, it's matched
+    // This handles cases where database status is out of sync with actual matches
+    if (selectedStatuses.length > 0) {
+      const hasMatches = line.matches && line.matches.length > 0;
+      const actualStatus: BankFeedStatus = hasMatches ? 'matched' : line.status;
+      if (!selectedStatuses.includes(actualStatus)) {
+        return false;
+      }
     }
 
     return true;
@@ -478,6 +484,40 @@ export default function BankReconciliationPage() {
     }
   };
 
+  // Handle manual match from search results
+  const handleManualMatch = async (systemRecord: SystemRecord) => {
+    if (!selectedLine) return;
+
+    // Check if the bank feed line already has a match
+    if (selectedLine.matches.length > 0) {
+      alert('This bank transaction already has a match. Please remove the existing match first.');
+      return;
+    }
+
+    const matchedAmount = Math.abs(systemRecord.amount);
+    const amountDiff = Math.abs(selectedLine.amount) - matchedAmount;
+
+    try {
+      await bankFeedLinesApi.createMatch({
+        bank_feed_line_id: selectedLine.id,
+        system_record_type: systemRecord.type,
+        system_record_id: systemRecord.id,
+        project_id: systemRecord.projectId,
+        matched_amount: matchedAmount,
+        amount_difference: amountDiff,
+        matched_by: 'current-user',
+        match_score: 100, // Manual match = full confidence
+        match_method: 'manual',
+        adjustment_required: Math.abs(amountDiff) > 0.01,
+        adjustment_reason: Math.abs(amountDiff) > 0.01 ? 'Amount difference detected' : undefined,
+      });
+      await bankFeedLinesApi.updateStatus(selectedLine.id, 'matched', matchedAmount);
+      triggerRefresh();
+    } catch (error) {
+      console.error('Failed to create manual match:', error);
+    }
+  };
+
   // Run auto-matching on all unmatched lines
   const handleRunAutoMatch = useCallback(async () => {
     // Only include lines without existing matches
@@ -551,7 +591,7 @@ export default function BankReconciliationPage() {
 
   if (isLoading) {
     return (
-      <AppShell currentRole="manager">
+      <AppShell>
         <div className="flex items-center justify-center min-h-[400px]">
           <div className="flex flex-col items-center gap-3">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#5A7A8F]"></div>
@@ -563,7 +603,7 @@ export default function BankReconciliationPage() {
   }
 
   return (
-    <AppShell currentRole="manager">
+    <AppShell>
       <div className="space-y-6">
         {/* Sticky Header: Reconciliation Scope Bar */}
         <div className="sticky top-0 z-10 bg-white pb-4">
@@ -695,10 +735,12 @@ export default function BankReconciliationPage() {
               <MatchWorkbench
                 selectedLine={selectedLine}
                 suggestedMatches={suggestedMatches}
+                systemRecords={systemRecords}
                 onCreateMatch={handleCreateMatch}
                 onRemoveMatch={handleRemoveMatch}
                 onAcceptSuggestion={handleAcceptSuggestion}
                 onCreateNew={handleCreateNew}
+                onManualMatch={handleManualMatch}
               />
             </div>
           </div>
