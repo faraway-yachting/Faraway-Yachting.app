@@ -131,7 +131,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const fetchPermissions = async (userId: string): Promise<string[]> => {
     try {
       // Use the database function to get effective permissions
-      const { data, error } = await supabase.rpc('get_user_permissions', {
+      // Note: RPC function not in database.types.ts yet
+      const { data, error } = await (supabase.rpc as any)('get_user_permissions', {
         p_user_id: userId
       });
 
@@ -149,7 +150,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const fetchCompanyAccess = async (userId: string): Promise<UserCompanyAccess[]> => {
     try {
       const { data, error } = await supabase
-        .from('user_company_access')
+        .from('user_company_access' as any)
         .select('*')
         .eq('user_id', userId);
 
@@ -157,7 +158,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
         console.error('Error fetching company access:', error);
         return [];
       }
-      return data || [];
+      return (data as unknown as UserCompanyAccess[]) || [];
     } catch (error) {
       console.error('Error fetching company access:', error);
       return [];
@@ -167,7 +168,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const fetchProjectAccess = async (userId: string): Promise<UserProjectAccess[]> => {
     try {
       const { data, error } = await supabase
-        .from('user_project_access')
+        .from('user_project_access' as any)
         .select('*')
         .eq('user_id', userId);
 
@@ -175,7 +176,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
         console.error('Error fetching project access:', error);
         return [];
       }
-      return data || [];
+      return (data as unknown as UserProjectAccess[]) || [];
     } catch (error) {
       console.error('Error fetching project access:', error);
       return [];
@@ -197,12 +198,13 @@ export function AuthProvider({ children }: AuthProviderProps) {
         // Fetch menu visibility for this role
         // Wrap in try-catch to handle case where table doesn't exist yet
         try {
-          const { data: visibilityData, error: visError } = await supabase
-            .from('role_menu_visibility')
+          const { data: visibilityDataRaw, error: visError } = await supabase
+            .from('role_menu_visibility' as any)
             .select('menu_key, is_visible')
             .eq('module', module)
             .eq('role_key', roleKey);
 
+          const visibilityData = visibilityDataRaw as unknown as { menu_key: string; is_visible: boolean }[] | null;
           if (!visError && visibilityData) {
             config.menuVisibility[module] = config.menuVisibility[module] || {};
             for (const item of visibilityData) {
@@ -216,12 +218,13 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
         // Fetch data scopes for this role
         try {
-          const { data: scopeData, error: scopeError } = await supabase
-            .from('role_data_scope')
+          const { data: scopeDataRaw, error: scopeError } = await supabase
+            .from('role_data_scope' as any)
             .select('resource, scope_type')
             .eq('module', module)
             .eq('role_key', roleKey);
 
+          const scopeData = scopeDataRaw as unknown as { resource: string; scope_type: string }[] | null;
           if (!scopeError && scopeData) {
             config.dataScopes[module] = config.dataScopes[module] || {};
             for (const item of scopeData) {

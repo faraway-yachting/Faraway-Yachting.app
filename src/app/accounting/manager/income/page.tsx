@@ -88,7 +88,7 @@ export default function IncomePage() {
     .reduce((sum, item) => sum + parseFloat(item.amount.replace(/[$,]/g, "")), 0);
 
   return (
-    <AppShell currentRole="manager">
+    <AppShell>
       {/* Page Header */}
       <div className="mb-8">
         <h1 className="text-2xl font-bold text-gray-900">Income</h1>

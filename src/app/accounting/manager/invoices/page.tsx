@@ -43,7 +43,7 @@ export default function InvoicesPage() {
     .reduce((sum, inv) => sum + parseFloat(inv.amount.replace(/[$,]/g, "")), 0);
 
   return (
-    <AppShell currentRole="manager">
+    <AppShell>
       <div className="mb-8">
         <h1 className="text-2xl font-bold text-gray-900">Invoices</h1>
         <p className="mt-1 text-sm text-gray-500">

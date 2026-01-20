@@ -41,6 +41,7 @@ import { pettyCashApi } from '@/lib/supabase/api/pettyCash';
 import { companiesApi } from '@/lib/supabase/api/companies';
 import { projectsApi } from '@/lib/supabase/api/projects';
 import type { Database } from '@/lib/supabase/database.types';
+import type { Currency } from '@/data/company/types';
 
 // Mock data imports (still needed for some features not yet migrated)
 import {
@@ -98,7 +99,7 @@ type TransformedWallet = {
   userName: string;
   companyId: string;
   balance: number;
-  currency: string;
+  currency: Currency;
   status: string;
   balanceLimit: number | null;
   lowBalanceThreshold: number | null;
@@ -112,7 +113,7 @@ function transformWallet(dbWallet: SupabaseWallet): TransformedWallet {
     userName: dbWallet.user_name,
     companyId: dbWallet.company_id,
     balance: dbWallet.balance,
-    currency: dbWallet.currency,
+    currency: dbWallet.currency as Currency,
     status: dbWallet.status,
     balanceLimit: dbWallet.balance_limit,
     lowBalanceThreshold: dbWallet.low_balance_threshold,
@@ -128,7 +129,7 @@ function transformWalletWithCalculatedBalance(dbWallet: SupabaseWalletWithBalanc
     userName: dbWallet.user_name,
     companyId: dbWallet.company_id,
     balance: dbWallet.calculated_balance, // Use calculated balance instead of initial balance
-    currency: dbWallet.currency,
+    currency: dbWallet.currency as Currency,
     status: dbWallet.status,
     balanceLimit: dbWallet.balance_limit,
     lowBalanceThreshold: dbWallet.low_balance_threshold,
@@ -1129,7 +1130,7 @@ export default function PettyCashManagementPage() {
   // Loading state
   if (authLoading || myWalletLoading || isLoadingData || isLoadingAllWallets) {
     return (
-      <AppShell currentRole="manager">
+      <AppShell>
         <div className="flex items-center justify-center h-96">
           <div className="text-center">
             <Loader2 className="h-8 w-8 animate-spin text-[#5A7A8F] mx-auto mb-4" />
@@ -1141,7 +1142,7 @@ export default function PettyCashManagementPage() {
   }
 
   return (
-    <AppShell currentRole="manager">
+    <AppShell>
       {/* Header with View Toggle */}
       <div className="mb-6">
         <div className="flex items-start justify-between">

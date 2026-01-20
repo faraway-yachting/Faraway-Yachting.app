@@ -20,7 +20,7 @@ export default function ReportsPage() {
   ];
 
   return (
-    <AppShell currentRole="manager">
+    <AppShell>
       {/* Tab Navigation */}
       <div className="mb-6">
         <div className="border-b border-gray-200">

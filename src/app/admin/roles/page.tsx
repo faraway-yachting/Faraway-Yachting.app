@@ -134,7 +134,7 @@ export default function AdminRolesPage() {
 
       // Insert new role
       const { error: insertError } = await supabase
-        .from('role_definitions')
+        .from('role_definitions' as any)
         .insert({
           module: selectedModule,
           role_key: roleKey,
@@ -174,28 +174,28 @@ export default function AdminRolesPage() {
 
       // Delete role permissions
       await supabase
-        .from('role_permissions')
+        .from('role_permissions' as any)
         .delete()
         .eq('module', selectedModule)
         .eq('role', roleToDelete.role_key);
 
       // Delete menu visibility
       await supabase
-        .from('role_menu_visibility')
+        .from('role_menu_visibility' as any)
         .delete()
         .eq('module', selectedModule)
         .eq('role_key', roleToDelete.role_key);
 
       // Delete data scopes
       await supabase
-        .from('role_data_scope')
+        .from('role_data_scope' as any)
         .delete()
         .eq('module', selectedModule)
         .eq('role_key', roleToDelete.role_key);
 
       // Delete the role definition
       const { error: deleteError } = await supabase
-        .from('role_definitions')
+        .from('role_definitions' as any)
         .delete()
         .eq('id', roleToDelete.id);
 
@@ -220,13 +220,14 @@ export default function AdminRolesPage() {
   // Load role config when expanded
   useEffect(() => {
     if (!expandedRole) return;
+    const roleKey = expandedRole; // Capture non-null value for async closure
 
     async function loadRoleConfig() {
       try {
         const [groups, visibility, scopes] = await Promise.all([
-          roleConfigApi.getPermissionsGrouped(selectedModule, expandedRole),
-          roleConfigApi.getMenuVisibility(selectedModule, expandedRole),
-          roleConfigApi.getDataScopes(selectedModule, expandedRole),
+          roleConfigApi.getPermissionsGrouped(selectedModule, roleKey),
+          roleConfigApi.getMenuVisibility(selectedModule, roleKey),
+          roleConfigApi.getDataScopes(selectedModule, roleKey),
         ]);
         setPermissionGroups(groups);
         setMenuVisibility(visibility);

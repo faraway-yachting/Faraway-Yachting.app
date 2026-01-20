@@ -453,7 +453,7 @@ export default function ReimbursementsPage() {
   ];
 
   return (
-    <AppShell currentRole="manager">
+    <AppShell>
       {/* Header */}
       <div className="mb-6">
         <button

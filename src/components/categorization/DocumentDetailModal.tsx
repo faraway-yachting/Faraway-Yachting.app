@@ -100,7 +100,7 @@ export function DocumentDetailModal({
           const data = await expensesApi.getByIdWithDetails(documentId);
           setExpense(data);
         } else {
-          const data = await receiptsApi.getById(documentId);
+          const data = await receiptsApi.getByIdWithDetails(documentId);
           setReceipt(data);
         }
       } catch (err) {
@@ -242,7 +242,7 @@ function ExpenseDetails({ expense }: { expense: ExpenseWithDetails }) {
           <div>
             <p className="text-xs text-gray-500">Company</p>
             <p className="text-sm font-medium text-gray-900">
-              {expense.companies?.name || expense.company_id}
+              {expense.company_id}
             </p>
           </div>
         </div>
@@ -287,23 +287,23 @@ function ExpenseDetails({ expense }: { expense: ExpenseWithDetails }) {
             <span className="text-gray-600">Subtotal</span>
             <span className="font-medium text-gray-900">{formatCurrency(expense.subtotal || 0, expense.currency)}</span>
           </div>
-          {expense.vat_amount > 0 && (
+          {(expense.vat_amount ?? 0) > 0 && (
             <div className="flex justify-between text-sm">
               <span className="text-gray-600">VAT</span>
-              <span className="font-medium text-gray-900">{formatCurrency(expense.vat_amount, expense.currency)}</span>
+              <span className="font-medium text-gray-900">{formatCurrency(expense.vat_amount || 0, expense.currency)}</span>
             </div>
           )}
-          {expense.wht_amount > 0 && (
+          {(expense.wht_amount ?? 0) > 0 && (
             <div className="flex justify-between text-sm">
               <span className="text-gray-600">WHT</span>
-              <span className="font-medium text-red-600">-{formatCurrency(expense.wht_amount, expense.currency)}</span>
+              <span className="font-medium text-red-600">-{formatCurrency(expense.wht_amount || 0, expense.currency)}</span>
             </div>
           )}
           <div className="flex justify-between text-sm pt-2 border-t border-gray-200">
             <span className="font-medium text-gray-900">Total Amount</span>
             <span className="font-bold text-gray-900">{formatCurrency(expense.total_amount || 0, expense.currency)}</span>
           </div>
-          {expense.wht_amount > 0 && (
+          {(expense.wht_amount ?? 0) > 0 && (
             <div className="flex justify-between text-sm">
               <span className="font-medium text-gray-900">Net Payable</span>
               <span className="font-bold text-[#5A7A8F]">{formatCurrency(expense.net_payable || 0, expense.currency)}</span>
@@ -365,7 +365,7 @@ function ReceiptDetails({ receipt }: { receipt: ReceiptWithDetails }) {
           <div>
             <p className="text-xs text-gray-500">Company</p>
             <p className="text-sm font-medium text-gray-900">
-              {receipt.companies?.name || receipt.company_id}
+              {receipt.company_id}
             </p>
           </div>
         </div>
@@ -409,20 +409,15 @@ function ReceiptDetails({ receipt }: { receipt: ReceiptWithDetails }) {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200">
-                {receiptData.line_items.map((item) => {
-                  const account = item.account_code ? getAccountByCode(item.account_code) : null;
-                  return (
+                {receiptData.line_items.map((item) => (
                     <tr key={item.id}>
                       <td className="px-4 py-3 text-sm text-gray-900">{item.description || '-'}</td>
-                      <td className="px-4 py-3 text-sm text-gray-600">
-                        {account ? `${account.code} - ${account.name}` : (item.account_code || '-')}
-                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-600">-</td>
                       <td className="px-4 py-3 text-sm text-gray-900 text-right font-medium">
                         {formatCurrency(item.amount || 0, receipt.currency)}
                       </td>
                     </tr>
-                  );
-                })}
+                ))}
               </tbody>
             </table>
           </div>
@@ -442,20 +437,14 @@ function ReceiptDetails({ receipt }: { receipt: ReceiptWithDetails }) {
               <span className="font-medium text-gray-900">{formatCurrency(receipt.tax_amount, receipt.currency)}</span>
             </div>
           )}
-          {receipt.wht_amount > 0 && (
-            <div className="flex justify-between text-sm">
-              <span className="text-gray-600">WHT</span>
-              <span className="font-medium text-red-600">-{formatCurrency(receipt.wht_amount, receipt.currency)}</span>
-            </div>
-          )}
           <div className="flex justify-between text-sm pt-2 border-t border-gray-200">
             <span className="font-medium text-gray-900">Total Amount</span>
             <span className="font-bold text-gray-900">{formatCurrency(receipt.total_amount || 0, receipt.currency)}</span>
           </div>
-          {receipt.total_received > 0 && (
+          {(receipt.total_received ?? 0) > 0 && (
             <div className="flex justify-between text-sm">
               <span className="text-gray-600">Total Received</span>
-              <span className="font-medium text-green-600">{formatCurrency(receipt.total_received, receipt.currency)}</span>
+              <span className="font-medium text-green-600">{formatCurrency(receipt.total_received || 0, receipt.currency)}</span>
             </div>
           )}
         </div>

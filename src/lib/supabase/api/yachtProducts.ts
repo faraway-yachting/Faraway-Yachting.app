@@ -99,11 +99,11 @@ export const yachtProductsApi = {
   async getAll(): Promise<YachtProduct[]> {
     const supabase = createClient();
     const { data, error } = await supabase
-      .from('yacht_products')
+      .from('yacht_products' as any)
       .select('*')
       .order('display_order');
     if (error) throw error;
-    return (data ?? []).map(dbYachtProductToFrontend);
+    return ((data as unknown as DbYachtProduct[]) ?? []).map(dbYachtProductToFrontend);
   },
 
   /**
@@ -112,12 +112,12 @@ export const yachtProductsApi = {
   async getActive(): Promise<YachtProduct[]> {
     const supabase = createClient();
     const { data, error } = await supabase
-      .from('yacht_products')
+      .from('yacht_products' as any)
       .select('*')
       .eq('is_active', true)
       .order('display_order');
     if (error) throw error;
-    return (data ?? []).map(dbYachtProductToFrontend);
+    return ((data as unknown as DbYachtProduct[]) ?? []).map(dbYachtProductToFrontend);
   },
 
   /**
@@ -126,7 +126,7 @@ export const yachtProductsApi = {
   async getById(id: string): Promise<YachtProduct | null> {
     const supabase = createClient();
     const { data, error } = await supabase
-      .from('yacht_products')
+      .from('yacht_products' as any)
       .select('*')
       .eq('id', id)
       .single();
@@ -134,7 +134,7 @@ export const yachtProductsApi = {
       if (error.code === 'PGRST116') return null;
       throw error;
     }
-    return dbYachtProductToFrontend(data);
+    return dbYachtProductToFrontend(data as unknown as DbYachtProduct);
   },
 
   /**
@@ -143,13 +143,13 @@ export const yachtProductsApi = {
   async getByOwnYacht(projectId: string): Promise<YachtProduct[]> {
     const supabase = createClient();
     const { data, error } = await supabase
-      .from('yacht_products')
+      .from('yacht_products' as any)
       .select('*')
       .eq('yacht_source', 'own')
       .eq('project_id', projectId)
       .order('display_order');
     if (error) throw error;
-    return (data ?? []).map(dbYachtProductToFrontend);
+    return ((data as unknown as DbYachtProduct[]) ?? []).map(dbYachtProductToFrontend);
   },
 
   /**
@@ -158,14 +158,14 @@ export const yachtProductsApi = {
   async getActiveByOwnYacht(projectId: string): Promise<YachtProduct[]> {
     const supabase = createClient();
     const { data, error } = await supabase
-      .from('yacht_products')
+      .from('yacht_products' as any)
       .select('*')
       .eq('yacht_source', 'own')
       .eq('project_id', projectId)
       .eq('is_active', true)
       .order('display_order');
     if (error) throw error;
-    return (data ?? []).map(dbYachtProductToFrontend);
+    return ((data as unknown as DbYachtProduct[]) ?? []).map(dbYachtProductToFrontend);
   },
 
   /**
@@ -174,13 +174,13 @@ export const yachtProductsApi = {
   async getByExternalYacht(externalYachtId: string): Promise<YachtProduct[]> {
     const supabase = createClient();
     const { data, error } = await supabase
-      .from('yacht_products')
+      .from('yacht_products' as any)
       .select('*')
       .eq('yacht_source', 'external')
       .eq('external_yacht_id', externalYachtId)
       .order('display_order');
     if (error) throw error;
-    return (data ?? []).map(dbYachtProductToFrontend);
+    return ((data as unknown as DbYachtProduct[]) ?? []).map(dbYachtProductToFrontend);
   },
 
   /**
@@ -191,14 +191,14 @@ export const yachtProductsApi = {
   ): Promise<YachtProduct[]> {
     const supabase = createClient();
     const { data, error } = await supabase
-      .from('yacht_products')
+      .from('yacht_products' as any)
       .select('*')
       .eq('yacht_source', 'external')
       .eq('external_yacht_id', externalYachtId)
       .eq('is_active', true)
       .order('display_order');
     if (error) throw error;
-    return (data ?? []).map(dbYachtProductToFrontend);
+    return ((data as unknown as DbYachtProduct[]) ?? []).map(dbYachtProductToFrontend);
   },
 
   /**
@@ -233,12 +233,12 @@ export const yachtProductsApi = {
   async create(product: Partial<YachtProduct>): Promise<YachtProduct> {
     const supabase = createClient();
     const { data, error } = await supabase
-      .from('yacht_products')
+      .from('yacht_products' as any)
       .insert([frontendYachtProductToDb(product)])
       .select()
       .single();
     if (error) throw error;
-    return dbYachtProductToFrontend(data);
+    return dbYachtProductToFrontend(data as unknown as DbYachtProduct);
   },
 
   /**
@@ -269,13 +269,13 @@ export const yachtProductsApi = {
     if (updates.notes !== undefined) dbUpdates.notes = updates.notes ?? null;
 
     const { data, error } = await supabase
-      .from('yacht_products')
+      .from('yacht_products' as any)
       .update(dbUpdates)
       .eq('id', id)
       .select()
       .single();
     if (error) throw error;
-    return dbYachtProductToFrontend(data);
+    return dbYachtProductToFrontend(data as unknown as DbYachtProduct);
   },
 
   /**
@@ -284,7 +284,7 @@ export const yachtProductsApi = {
   async delete(id: string): Promise<void> {
     const supabase = createClient();
     const { error } = await supabase
-      .from('yacht_products')
+      .from('yacht_products' as any)
       .delete()
       .eq('id', id);
     if (error) throw error;
@@ -301,7 +301,7 @@ export const yachtProductsApi = {
   ): Promise<YachtProduct | null> {
     const supabase = createClient();
     let query = supabase
-      .from('yacht_products')
+      .from('yacht_products' as any)
       .select('*')
       .eq('yacht_source', yachtSource)
       .eq('charter_type', charterType)
@@ -317,7 +317,8 @@ export const yachtProductsApi = {
 
     const { data, error } = await query;
     if (error) throw error;
-    return data && data.length > 0 ? dbYachtProductToFrontend(data[0]) : null;
+    const typedData = data as unknown as DbYachtProduct[] | null;
+    return typedData && typedData.length > 0 ? dbYachtProductToFrontend(typedData[0]) : null;
   },
 
   /**
@@ -331,7 +332,7 @@ export const yachtProductsApi = {
   ): Promise<YachtProduct[]> {
     const supabase = createClient();
     let query = supabase
-      .from('yacht_products')
+      .from('yacht_products' as any)
       .select('*')
       .eq('yacht_source', yachtSource)
       .in('charter_type', charterTypes)
@@ -346,7 +347,7 @@ export const yachtProductsApi = {
 
     const { data, error } = await query;
     if (error) throw error;
-    return (data ?? []).map(dbYachtProductToFrontend);
+    return ((data as unknown as DbYachtProduct[]) ?? []).map(dbYachtProductToFrontend);
   },
 
   /**
@@ -361,7 +362,7 @@ export const yachtProductsApi = {
 
     for (const update of updates) {
       const { error } = await supabase
-        .from('yacht_products')
+        .from('yacht_products' as any)
         .update({ display_order: update.display_order })
         .eq('id', update.id);
       if (error) throw error;

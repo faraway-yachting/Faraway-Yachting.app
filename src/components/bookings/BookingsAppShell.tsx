@@ -49,6 +49,14 @@ const roleConfig: Record<BookingsRole, { name: string; allowedMenus: string[] }>
     name: "Viewer",
     allowedMenus: ["Calendar", "Bookings List"],
   },
+  investor: {
+    name: "Investor",
+    allowedMenus: ["Calendar"],
+  },
+  crew: {
+    name: "Crew",
+    allowedMenus: ["Calendar", "Bookings List"],
+  },
 };
 
 

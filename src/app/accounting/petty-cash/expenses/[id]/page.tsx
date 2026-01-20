@@ -253,7 +253,7 @@ export default function PettyCashExpenseDetailsPage() {
   // Handle loading state
   if (isLoadingExpense || isLoadingData) {
     return (
-      <AppShell currentRole="petty-cash">
+      <AppShell>
         <div className="flex flex-col items-center justify-center py-12">
           <Loader2 className="h-8 w-8 animate-spin text-[#5A7A8F] mb-4" />
           <p className="text-gray-500">Loading expense details...</p>
@@ -265,7 +265,7 @@ export default function PettyCashExpenseDetailsPage() {
   // Handle not found or error
   if (!expense || loadError) {
     return (
-      <AppShell currentRole="petty-cash">
+      <AppShell>
         <div className="flex flex-col items-center justify-center py-12">
           <AlertCircle className="h-12 w-12 text-red-500 mb-4" />
           <h2 className="text-xl font-semibold text-gray-900 mb-2">
@@ -291,7 +291,7 @@ export default function PettyCashExpenseDetailsPage() {
   const StatusIcon = statusConfig[displayStatus]?.icon || Clock;
 
   return (
-    <AppShell currentRole="petty-cash">
+    <AppShell>
       {/* Header */}
       <div className="mb-6">
         <button

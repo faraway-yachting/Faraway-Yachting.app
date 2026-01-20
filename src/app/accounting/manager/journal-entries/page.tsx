@@ -1077,7 +1077,7 @@ export default function JournalEntriesPage() {
   }, [isSelectionMode, selectedIds, allDraftsSelected, companies, handleToggleSelect, handleToggleSelectAll]);
 
   return (
-    <AppShell currentRole="manager">
+    <AppShell>
       <div className="space-y-6">
         {/* Header */}
         <div className="flex items-center justify-between">

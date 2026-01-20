@@ -591,7 +591,7 @@ export default function BankReconciliationPage() {
 
   if (isLoading) {
     return (
-      <AppShell currentRole="manager">
+      <AppShell>
         <div className="flex items-center justify-center min-h-[400px]">
           <div className="flex flex-col items-center gap-3">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#5A7A8F]"></div>
@@ -603,7 +603,7 @@ export default function BankReconciliationPage() {
   }
 
   return (
-    <AppShell currentRole="manager">
+    <AppShell>
       <div className="space-y-6">
         {/* Sticky Header: Reconciliation Scope Bar */}
         <div className="sticky top-0 z-10 bg-white pb-4">

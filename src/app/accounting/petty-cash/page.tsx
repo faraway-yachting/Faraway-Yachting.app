@@ -24,6 +24,7 @@ import { useAuth } from '@/components/auth';
 // Supabase API import
 import { pettyCashApi } from '@/lib/supabase/api/pettyCash';
 import type { Database } from '@/lib/supabase/database.types';
+import type { Currency } from '@/data/company/types';
 
 // Data imports
 import { companiesApi } from '@/lib/supabase/api/companies';
@@ -81,7 +82,7 @@ function transformWallet(dbWallet: SupabaseWallet) {
     userName: dbWallet.user_name,
     companyId: dbWallet.company_id,
     balance: dbWallet.balance,
-    currency: dbWallet.currency,
+    currency: dbWallet.currency as Currency,
     status: dbWallet.status,
     balanceLimit: dbWallet.balance_limit,
     lowBalanceThreshold: dbWallet.low_balance_threshold,
@@ -503,7 +504,7 @@ export default function PettyCashDashboard() {
   // Loading state
   if (authLoading || walletLoading) {
     return (
-      <AppShell currentRole="petty-cash">
+      <AppShell>
         <div className="flex items-center justify-center h-96">
           <div className="text-center">
             <Loader2 className="h-8 w-8 animate-spin text-[#5A7A8F] mx-auto mb-4" />
@@ -516,7 +517,7 @@ export default function PettyCashDashboard() {
 
   if (!wallet) {
     return (
-      <AppShell currentRole="petty-cash">
+      <AppShell>
         <div className="flex items-center justify-center h-96">
           <div className="text-center">
             <Wallet className="h-12 w-12 text-gray-300 mx-auto mb-4" />
@@ -533,7 +534,7 @@ export default function PettyCashDashboard() {
   }
 
   return (
-    <AppShell currentRole="petty-cash">
+    <AppShell>
       {/* Info Banner */}
       <div className="mb-6 rounded-lg border border-blue-200 bg-blue-50 p-4">
         <div className="flex items-start gap-3">

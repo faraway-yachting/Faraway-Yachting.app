@@ -1,5 +1,10 @@
 import { createClient } from '../client';
 
+// Note: These tables are defined in migrations but not yet in database.types.ts
+// Using 'as any' type assertions until types are regenerated
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type AnySupabaseClient = ReturnType<typeof createClient> extends infer T ? T : never;
+
 // Types
 export interface RoleDefinition {
   id: string;
@@ -82,13 +87,13 @@ export const roleConfigApi = {
   async getRoleDefinitions(module: string): Promise<RoleDefinition[]> {
     const supabase = createClient();
     const { data, error } = await supabase
-      .from('role_definitions')
+      .from('role_definitions' as any)
       .select('*')
       .eq('module', module)
       .order('sort_order', { ascending: true });
 
     if (error) throw error;
-    return data || [];
+    return (data as unknown as RoleDefinition[]) || [];
   },
 
   /**
@@ -97,7 +102,7 @@ export const roleConfigApi = {
   async getRoleDefinition(module: string, roleKey: string): Promise<RoleDefinition | null> {
     const supabase = createClient();
     const { data, error } = await supabase
-      .from('role_definitions')
+      .from('role_definitions' as any)
       .select('*')
       .eq('module', module)
       .eq('role_key', roleKey)
@@ -107,7 +112,7 @@ export const roleConfigApi = {
       if (error.code === 'PGRST116') return null; // Not found
       throw error;
     }
-    return data;
+    return data as unknown as RoleDefinition;
   },
 
   /**
@@ -120,7 +125,7 @@ export const roleConfigApi = {
   ): Promise<RoleDefinition> {
     const supabase = createClient();
     const { data, error } = await supabase
-      .from('role_definitions')
+      .from('role_definitions' as any)
       .update({ ...updates, updated_at: new Date().toISOString() })
       .eq('module', module)
       .eq('role_key', roleKey)
@@ -128,7 +133,7 @@ export const roleConfigApi = {
       .single();
 
     if (error) throw error;
-    return data;
+    return data as unknown as RoleDefinition;
   },
 
   // ============================================================================
@@ -141,14 +146,14 @@ export const roleConfigApi = {
   async getAllPermissions(module: string): Promise<Permission[]> {
     const supabase = createClient();
     const { data, error } = await supabase
-      .from('permissions')
+      .from('permissions' as any)
       .select('*')
       .eq('module', module)
       .order('resource')
       .order('action');
 
     if (error) throw error;
-    return data || [];
+    return (data as unknown as Permission[]) || [];
   },
 
   /**
@@ -157,13 +162,13 @@ export const roleConfigApi = {
   async getRolePermissions(module: string, roleKey: string): Promise<string[]> {
     const supabase = createClient();
     const { data, error } = await supabase
-      .from('role_permissions')
+      .from('role_permissions' as any)
       .select('permission_code')
       .eq('module', module)
       .eq('role', roleKey);
 
     if (error) throw error;
-    return (data || []).map((p) => p.permission_code);
+    return ((data as unknown as { permission_code: string }[]) || []).map((p) => p.permission_code);
   },
 
   /**
@@ -178,7 +183,7 @@ export const roleConfigApi = {
 
     // Delete existing permissions
     const { error: deleteError } = await supabase
-      .from('role_permissions')
+      .from('role_permissions' as any)
       .delete()
       .eq('module', module)
       .eq('role', roleKey);
@@ -187,7 +192,7 @@ export const roleConfigApi = {
 
     // Insert new permissions
     if (permissionCodes.length > 0) {
-      const { error: insertError } = await supabase.from('role_permissions').insert(
+      const { error: insertError } = await supabase.from('role_permissions' as any).insert(
         permissionCodes.map((code) => ({
           module,
           role: roleKey,
@@ -212,7 +217,7 @@ export const roleConfigApi = {
 
     if (enabled) {
       // Add permission
-      const { error } = await supabase.from('role_permissions').upsert(
+      const { error } = await supabase.from('role_permissions' as any).upsert(
         {
           module,
           role: roleKey,
@@ -224,7 +229,7 @@ export const roleConfigApi = {
     } else {
       // Remove permission
       const { error } = await supabase
-        .from('role_permissions')
+        .from('role_permissions' as any)
         .delete()
         .eq('module', module)
         .eq('role', roleKey)
@@ -243,7 +248,7 @@ export const roleConfigApi = {
   async getMenuVisibility(module: string, roleKey: string): Promise<Record<string, boolean>> {
     const supabase = createClient();
     const { data, error } = await supabase
-      .from('role_menu_visibility')
+      .from('role_menu_visibility' as any)
       .select('menu_key, is_visible')
       .eq('module', module)
       .eq('role_key', roleKey);
@@ -251,7 +256,7 @@ export const roleConfigApi = {
     if (error) throw error;
 
     const visibility: Record<string, boolean> = {};
-    (data || []).forEach((item) => {
+    ((data as unknown as { menu_key: string; is_visible: boolean }[]) || []).forEach((item) => {
       visibility[item.menu_key] = item.is_visible;
     });
     return visibility;
@@ -276,7 +281,7 @@ export const roleConfigApi = {
     }));
 
     const { error } = await supabase
-      .from('role_menu_visibility')
+      .from('role_menu_visibility' as any)
       .upsert(records, { onConflict: 'module,role_key,menu_key' });
 
     if (error) throw error;
@@ -292,7 +297,7 @@ export const roleConfigApi = {
     isVisible: boolean
   ): Promise<void> {
     const supabase = createClient();
-    const { error } = await supabase.from('role_menu_visibility').upsert(
+    const { error } = await supabase.from('role_menu_visibility' as any).upsert(
       {
         module,
         role_key: roleKey,
@@ -319,7 +324,7 @@ export const roleConfigApi = {
   ): Promise<Record<string, 'own' | 'project' | 'company' | 'all'>> {
     const supabase = createClient();
     const { data, error } = await supabase
-      .from('role_data_scope')
+      .from('role_data_scope' as any)
       .select('resource, scope_type')
       .eq('module', module)
       .eq('role_key', roleKey);
@@ -327,7 +332,7 @@ export const roleConfigApi = {
     if (error) throw error;
 
     const scopes: Record<string, 'own' | 'project' | 'company' | 'all'> = {};
-    (data || []).forEach((item) => {
+    ((data as unknown as { resource: string; scope_type: string }[]) || []).forEach((item) => {
       scopes[item.resource] = item.scope_type as 'own' | 'project' | 'company' | 'all';
     });
     return scopes;
@@ -352,7 +357,7 @@ export const roleConfigApi = {
     }));
 
     const { error } = await supabase
-      .from('role_data_scope')
+      .from('role_data_scope' as any)
       .upsert(records, { onConflict: 'module,role_key,resource' });
 
     if (error) throw error;
@@ -368,7 +373,7 @@ export const roleConfigApi = {
     scopeType: 'own' | 'project' | 'company' | 'all'
   ): Promise<void> {
     const supabase = createClient();
-    const { error } = await supabase.from('role_data_scope').upsert(
+    const { error } = await supabase.from('role_data_scope' as any).upsert(
       {
         module,
         role_key: roleKey,

@@ -17,7 +17,7 @@ export default function ExpensesLayout({ children }: { children: React.ReactNode
   const pathname = usePathname();
 
   return (
-    <AppShell currentRole="manager">
+    <AppShell>
       {/* Module Header */}
       <div className="bg-white border-b border-gray-200 -mx-4 sm:-mx-6 lg:-mx-8 px-4 sm:px-6 lg:px-8 py-6">
         <h1 className="text-2xl font-bold text-gray-900">Expenses</h1>

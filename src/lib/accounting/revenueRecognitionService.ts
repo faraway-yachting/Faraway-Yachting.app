@@ -21,6 +21,7 @@ import {
   DEFERRED_REVENUE_ACCOUNT,
 } from '@/data/revenueRecognition/types';
 import { charterTypeAccountCodes, type CharterType } from '@/data/income/types';
+import type { Currency } from '@/data/company/types';
 
 /**
  * Create a deferred revenue record when a receipt is paid
@@ -64,7 +65,7 @@ export async function createDeferredRevenueRecord(
   };
 
   const { data, error } = await supabase
-    .from('revenue_recognition')
+    .from('revenue_recognition' as any)
     .insert([record])
     .select()
     .single();
@@ -73,7 +74,7 @@ export async function createDeferredRevenueRecord(
     throw new Error(error.message || error.details || error.hint || 'Failed to create revenue recognition record');
   }
 
-  return mapDbRowToRevenueRecognition(data);
+  return mapDbRowToRevenueRecognition(data as unknown as Record<string, unknown>);
 }
 
 /**
@@ -85,7 +86,7 @@ export async function getPendingRecognition(
   const supabase = createClient();
 
   let query = supabase
-    .from('pending_revenue_recognition')
+    .from('pending_revenue_recognition' as any)
     .select('*')
     .order('charter_date_to', { ascending: true, nullsFirst: true });
 
@@ -97,7 +98,7 @@ export async function getPendingRecognition(
 
   if (error) throw error;
 
-  return (data ?? []).map(mapDbRowToPendingView);
+  return ((data as unknown as Record<string, unknown>[]) ?? []).map(mapDbRowToPendingView);
 }
 
 /**
@@ -109,7 +110,7 @@ export async function getItemsNeedingReview(
   const supabase = createClient();
 
   let query = supabase
-    .from('revenue_recognition')
+    .from('revenue_recognition' as any)
     .select(`
       *,
       projects(name),
@@ -126,7 +127,8 @@ export async function getItemsNeedingReview(
 
   if (error) throw error;
 
-  return (data ?? []).map((row) => ({
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return ((data as any[]) ?? []).map((row) => ({
     id: row.id,
     companyId: row.company_id,
     projectId: row.project_id,
@@ -158,14 +160,14 @@ export async function getRecordsReadyForRecognition(): Promise<RevenueRecognitio
   const today = new Date().toISOString().split('T')[0];
 
   const { data, error } = await supabase
-    .from('revenue_recognition')
+    .from('revenue_recognition' as any)
     .select('*')
     .eq('recognition_status', 'pending')
     .lte('charter_date_to', today);
 
   if (error) throw error;
 
-  return (data ?? []).map(mapDbRowToRevenueRecognition);
+  return ((data as unknown as Record<string, unknown>[]) ?? []).map(mapDbRowToRevenueRecognition);
 }
 
 /**
@@ -183,7 +185,7 @@ export async function recognizeRevenueManually(
     trigger === 'immediate' ? 'manual_recognized' : 'recognized';
 
   const { data, error } = await supabase
-    .from('revenue_recognition')
+    .from('revenue_recognition' as any)
     .update({
       recognition_status: finalStatus,
       recognition_date: recognitionDate || new Date().toISOString().split('T')[0],
@@ -203,7 +205,7 @@ export async function recognizeRevenueManually(
   // Dr: Charter Deposits Received (2300)
   // Cr: Revenue (4010-4070)
 
-  return mapDbRowToRevenueRecognition(data);
+  return mapDbRowToRevenueRecognition(data as unknown as Record<string, unknown>);
 }
 
 /**
@@ -261,7 +263,7 @@ export async function updateCharterDates(
   }
 
   const { data, error } = await supabase
-    .from('revenue_recognition')
+    .from('revenue_recognition' as any)
     .update(updates)
     .eq('id', recognitionId)
     .select()
@@ -269,7 +271,7 @@ export async function updateCharterDates(
 
   if (error) throw error;
 
-  return mapDbRowToRevenueRecognition(data);
+  return mapDbRowToRevenueRecognition(data as unknown as Record<string, unknown>);
 }
 
 /**
@@ -280,7 +282,7 @@ export async function getDeferredRevenueSummary(
 ): Promise<DeferredRevenueSummary> {
   const supabase = createClient();
 
-  const { data, error } = await supabase.rpc('get_deferred_revenue_balance', {
+  const { data, error } = await (supabase.rpc as any)('get_deferred_revenue_balance', {
     p_company_id: companyId,
   });
 
@@ -302,7 +304,7 @@ export async function getById(id: string): Promise<RevenueRecognition | null> {
   const supabase = createClient();
 
   const { data, error } = await supabase
-    .from('revenue_recognition')
+    .from('revenue_recognition' as any)
     .select('*')
     .eq('id', id)
     .single();
@@ -312,7 +314,7 @@ export async function getById(id: string): Promise<RevenueRecognition | null> {
     throw error;
   }
 
-  return mapDbRowToRevenueRecognition(data);
+  return mapDbRowToRevenueRecognition(data as unknown as Record<string, unknown>);
 }
 
 /**
@@ -322,14 +324,14 @@ export async function getByReceiptId(receiptId: string): Promise<RevenueRecognit
   const supabase = createClient();
 
   const { data, error } = await supabase
-    .from('revenue_recognition')
+    .from('revenue_recognition' as any)
     .select('*')
     .eq('receipt_id', receiptId)
     .order('created_at', { ascending: false });
 
   if (error) throw error;
 
-  return (data ?? []).map(mapDbRowToRevenueRecognition);
+  return ((data as unknown as Record<string, unknown>[]) ?? []).map(mapDbRowToRevenueRecognition);
 }
 
 /**
@@ -342,7 +344,7 @@ export async function getRecentlyRecognized(
   const supabase = createClient();
 
   let query = supabase
-    .from('revenue_recognition')
+    .from('revenue_recognition' as any)
     .select('*')
     .in('recognition_status', ['recognized', 'manual_recognized'])
     .order('recognition_date', { ascending: false })
@@ -356,7 +358,7 @@ export async function getRecentlyRecognized(
 
   if (error) throw error;
 
-  return (data ?? []).map(mapDbRowToRevenueRecognition);
+  return ((data as unknown as Record<string, unknown>[]) ?? []).map(mapDbRowToRevenueRecognition);
 }
 
 /**
@@ -366,7 +368,7 @@ export async function hasUnrecognizedRevenue(receiptId: string): Promise<boolean
   const supabase = createClient();
 
   const { count, error } = await supabase
-    .from('revenue_recognition')
+    .from('revenue_recognition' as any)
     .select('*', { count: 'exact', head: true })
     .eq('receipt_id', receiptId)
     .in('recognition_status', ['pending', 'needs_review']);
@@ -401,7 +403,7 @@ function mapDbRowToRevenueRecognition(row: Record<string, unknown>): RevenueReco
     charterDateTo: (row.charter_date_to as string) || undefined,
     recognitionStatus: row.recognition_status as RevenueRecognitionStatus,
     amount: parseFloat(row.amount as string),
-    currency: row.currency as string,
+    currency: row.currency as Currency,
     fxRate: parseFloat(row.fx_rate as string),
     thbAmount: parseFloat(row.thb_amount as string),
     deferredRevenueAccount: row.deferred_revenue_account as string,
@@ -433,7 +435,7 @@ function mapDbRowToPendingView(row: Record<string, unknown>): PendingRevenueReco
     charterDateFrom: (row.charter_date_from as string) || undefined,
     charterDateTo: (row.charter_date_to as string) || undefined,
     amount: parseFloat(row.amount as string),
-    currency: row.currency as string,
+    currency: row.currency as Currency,
     thbAmount: parseFloat(row.thb_amount as string),
     revenueAccount: row.revenue_account as string,
     charterType: (row.charter_type as CharterType) || undefined,

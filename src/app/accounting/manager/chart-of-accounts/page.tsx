@@ -177,7 +177,7 @@ export default function ChartOfAccountsPage() {
   };
 
   return (
-    <AppShell currentRole="manager">
+    <AppShell>
       <div className="mb-6">
         <div className="flex items-center gap-3 mb-2">
           <BookOpen className="h-6 w-6 text-[#5A7A8F]" />

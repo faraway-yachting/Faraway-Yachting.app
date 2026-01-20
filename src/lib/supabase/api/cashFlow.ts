@@ -90,7 +90,7 @@ export const cashFlowApi = {
         amount: expense.total_amount || 0,
         currency: (expense.currency as Currency) || 'THB',
         description: expense.vendor_name || 'Unknown Vendor',
-        category: expense.category || 'Expense',
+        category: 'Expense',
         sourceDocument: expense.expense_number,
         companyId: expense.company_id,
         companyName: company?.name || 'Unknown Company',

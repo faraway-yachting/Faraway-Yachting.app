@@ -43,7 +43,7 @@ export default function InvestorDashboard() {
   ];
 
   return (
-    <AppShell currentRole="investor">
+    <AppShell>
       {/* Info Banner */}
       <div className="mb-6 rounded-lg border border-blue-200 bg-blue-50 p-4">
         <div className="flex items-start gap-3">

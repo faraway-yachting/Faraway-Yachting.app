@@ -4,6 +4,7 @@ import { useState, useMemo, useEffect } from 'react';
 import { FileText, Filter, Search, CheckCircle, AlertCircle, RefreshCw, Calendar, Clock, DollarSign, ExternalLink } from 'lucide-react';
 import { DocumentDetailModal } from '@/components/categorization/DocumentDetailModal';
 import { AppShell } from '@/components/accounting/AppShell';
+import { useAuth } from '@/components/auth';
 import AccountCodeSelector from '@/components/accounting/AccountCodeSelector';
 import { expensesApi, type ExpenseWithDetails } from '@/lib/supabase/api';
 import { receiptsApi, type ReceiptWithDetails } from '@/lib/supabase/api/receipts';
@@ -55,6 +56,7 @@ function determineRecognitionStatus(charterDateTo?: string | null): RevenueRecog
 }
 
 export default function CategorizationPage() {
+  const { user } = useAuth();
   const [filterType, setFilterType] = useState<FilterType>('uncategorized');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
@@ -378,7 +380,7 @@ export default function CategorizationPage() {
         // Recognize existing record
         await revenueRecognitionApi.recognize(
           existingRecord.id,
-          null, // TODO: Get from auth context
+          user?.id || 'system',
           item.charterDateTo ? 'manual' : 'immediate'
         );
       } else {
@@ -420,7 +422,7 @@ export default function CategorizationPage() {
           if (newRecord && newRecord.recognitionStatus !== 'recognized') {
             await revenueRecognitionApi.recognize(
               newRecord.id,
-              null,
+              user?.id || 'system',
               'immediate'
             );
           }
@@ -472,7 +474,7 @@ export default function CategorizationPage() {
           // Recognize existing record
           await revenueRecognitionApi.recognize(
             existingRecord.id,
-            null,
+            user?.id || 'system',
             item.charterDateTo ? 'manual' : 'immediate'
           );
         } else {
@@ -500,7 +502,7 @@ export default function CategorizationPage() {
             revenueAccount: item.currentAccountCode || '4490',
             description: item.description,
             clientName: item.counterparty,
-            createdBy: null,
+            createdBy: user?.id,
           });
 
           // If needs manual recognition
@@ -510,7 +512,7 @@ export default function CategorizationPage() {
             if (newRecord && newRecord.recognitionStatus !== 'recognized') {
               await revenueRecognitionApi.recognize(
                 newRecord.id,
-                null,
+                user?.id || 'system',
                 'immediate'
               );
             }
@@ -566,7 +568,7 @@ export default function CategorizationPage() {
   };
 
   return (
-    <AppShell currentRole="manager">
+    <AppShell>
       <div className="space-y-6">
         {/* Header */}
         <div className="flex items-center justify-between">

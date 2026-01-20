@@ -5,7 +5,7 @@ import { ProjectPLReport } from "@/components/reports/ProjectPLReport";
 
 export default function InvestorProjectPLPage() {
   return (
-    <AppShell currentRole="investor">
+    <AppShell>
       <ProjectPLReport projectId="" />
     </AppShell>
   );

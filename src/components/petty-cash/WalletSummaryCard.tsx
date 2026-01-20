@@ -2,6 +2,7 @@
 
 import { Wallet, TrendingDown, Clock, AlertTriangle } from 'lucide-react';
 import { formatCurrency } from '@/lib/petty-cash/utils';
+import type { Currency } from '@/data/company/types';
 
 // Simplified wallet type for display purposes
 interface WalletDisplay {
@@ -9,7 +10,7 @@ interface WalletDisplay {
   walletName: string;
   userName: string;
   balance: number;
-  currency: string;
+  currency: Currency;
   status: string;
   balanceLimit?: number | null;
   lowBalanceThreshold?: number | null;

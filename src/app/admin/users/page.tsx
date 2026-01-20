@@ -141,25 +141,27 @@ export default function AdminUsersPage() {
         .order('name');
 
       // Load company access for all users
-      const { data: companyAccessData } = await supabase
-        .from('user_company_access')
+      const { data: companyAccessDataRaw } = await supabase
+        .from('user_company_access' as any)
         .select('*, company:companies(id, name)');
+      const companyAccessData = companyAccessDataRaw as unknown as UserCompanyAccess[];
 
       // Load project access for all users
-      const { data: projectAccessData } = await supabase
-        .from('user_project_access')
+      const { data: projectAccessDataRaw } = await supabase
+        .from('user_project_access' as any)
         .select('*, project:projects(id, name, company_id)');
+      const projectAccessData = projectAccessDataRaw as unknown as UserProjectAccess[];
 
       // Load role definitions from database
       const { data: roleDefsData } = await supabase
-        .from('role_definitions')
+        .from('role_definitions' as any)
         .select('id, module, role_key, display_name, description')
         .eq('is_active', true)
         .order('sort_order');
 
       setCompanies(companiesData || []);
       setProjects(projectsData || []);
-      setRoleDefinitions(roleDefsData || []);
+      setRoleDefinitions((roleDefsData as unknown as RoleDefinition[]) || []);
 
       // Combine user data with access data
       const extendedUsers: ExtendedUser[] = usersData.map(user => ({
@@ -303,7 +305,7 @@ export default function AdminUsersPage() {
         );
 
         if (companiesToAdd.length > 0) {
-          await supabase.from('user_company_access').insert(
+          await supabase.from('user_company_access' as any).insert(
             companiesToAdd.map(c => ({
               user_id: userId,
               company_id: c.id,
@@ -313,7 +315,7 @@ export default function AdminUsersPage() {
         }
       } else {
         // Add single company
-        await supabase.from('user_company_access').insert({
+        await supabase.from('user_company_access' as any).insert({
           user_id: userId,
           company_id: newCompanyId,
           access_type: newCompanyAccessType,
@@ -333,7 +335,7 @@ export default function AdminUsersPage() {
   const handleRemoveCompanyAccess = async (accessId: string) => {
     try {
       const supabase = createClient();
-      await supabase.from('user_company_access').delete().eq('id', accessId);
+      await supabase.from('user_company_access' as any).delete().eq('id', accessId);
       await loadData();
     } catch (err) {
       setError('Failed to remove company access');
@@ -355,7 +357,7 @@ export default function AdminUsersPage() {
         );
 
         if (projectsToAdd.length > 0) {
-          await supabase.from('user_project_access').insert(
+          await supabase.from('user_project_access' as any).insert(
             projectsToAdd.map(p => ({
               user_id: userId,
               project_id: p.id,
@@ -365,7 +367,7 @@ export default function AdminUsersPage() {
         }
       } else {
         // Add single project
-        await supabase.from('user_project_access').insert({
+        await supabase.from('user_project_access' as any).insert({
           user_id: userId,
           project_id: newProjectId,
           access_type: newProjectAccessType,
@@ -385,7 +387,7 @@ export default function AdminUsersPage() {
   const handleRemoveProjectAccess = async (accessId: string) => {
     try {
       const supabase = createClient();
-      await supabase.from('user_project_access').delete().eq('id', accessId);
+      await supabase.from('user_project_access' as any).delete().eq('id', accessId);
       await loadData();
     } catch (err) {
       setError('Failed to remove project access');

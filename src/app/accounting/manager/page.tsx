@@ -57,7 +57,7 @@ export default function ManagerDashboard() {
   ];
 
   return (
-    <AppShell currentRole="manager">
+    <AppShell>
       {/* KPI Cards */}
       <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4 mb-8">
         <KPICard

@@ -121,7 +121,7 @@ export default function CompaniesPage() {
   };
 
   return (
-    <AppShell currentRole="manager">
+    <AppShell>
       {/* Header */}
       <div className="mb-8 flex items-center justify-between">
         <div>
