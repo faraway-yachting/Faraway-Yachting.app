@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { createClient } from '@/lib/supabase/client';
+import { useState, useEffect, useCallback } from 'react';
+import { createClient, clearSupabaseClient } from '@/lib/supabase/client';
 import type { User } from '@supabase/supabase-js';
 
 /**
@@ -14,7 +14,6 @@ export function useAuthStatus() {
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [mounted, setMounted] = useState(false);
-  const supabaseRef = useRef(createClient());
 
   useEffect(() => {
     setMounted(true);
@@ -23,11 +22,12 @@ export function useAuthStatus() {
   useEffect(() => {
     if (!mounted) return;
 
-    const supabase = supabaseRef.current;
     let isCancelled = false;
 
     const checkAuth = async () => {
       try {
+        // Get fresh client each time to ensure we don't use stale cached state
+        const supabase = createClient();
         const { data: { session }, error: sessionError } = await supabase.auth.getSession();
 
         if (isCancelled) return;
@@ -46,7 +46,8 @@ export function useAuthStatus() {
 
           // Fetch super admin status in background
           try {
-            const { data: profile } = await supabase
+            const supabaseForProfile = createClient();
+            const { data: profile } = await supabaseForProfile
               .from('user_profiles')
               .select('is_super_admin')
               .eq('id', session.user.id)
@@ -75,6 +76,8 @@ export function useAuthStatus() {
 
     checkAuth();
 
+    // Get fresh client for subscription
+    const supabase = createClient();
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (isCancelled) return;
 
@@ -93,7 +96,8 @@ export function useAuthStatus() {
 
         if (event === 'SIGNED_IN') {
           try {
-            const { data: profile } = await supabase
+            const supabaseForProfile = createClient();
+            const { data: profile } = await supabaseForProfile
               .from('user_profiles')
               .select('is_super_admin')
               .eq('id', session.user.id)
@@ -116,22 +120,29 @@ export function useAuthStatus() {
   }, [mounted]);
 
   const signOut = useCallback(async () => {
-    console.log('Sign out called');
-    const supabase = supabaseRef.current;
+    console.log('Sign out called from useAuthStatus');
 
     try {
       // Clear state first for immediate UI feedback
       setUser(null);
       setIsSuperAdmin(false);
 
-      // Then sign out from Supabase
-      const { error } = await supabase.auth.signOut({ scope: 'local' });
+      // Get fresh client for sign out
+      const supabase = createClient();
+
+      // Sign out from Supabase with GLOBAL scope (terminates session on server)
+      // This invalidates all session tokens, not just the current tab
+      const { error } = await supabase.auth.signOut({ scope: 'global' });
 
       if (error) {
         console.error('Sign out error:', error);
       } else {
         console.log('Sign out successful');
       }
+
+      // Clear the singleton so next createClient() gets a fresh instance
+      // This ensures no stale session data persists
+      clearSupabaseClient();
     } catch (error) {
       console.error('Sign out error:', error);
     }
