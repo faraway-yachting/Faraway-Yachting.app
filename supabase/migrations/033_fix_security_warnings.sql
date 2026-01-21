@@ -70,15 +70,30 @@ SELECT
   rr.booking_id,
   rr.charter_date_from,
   rr.charter_date_to,
-  rr.revenue_type,
   rr.amount,
   rr.currency,
-  rr.recognition_date,
-  rr.status,
-  rr.created_at
+  rr.thb_amount,
+  rr.revenue_account,
+  rr.charter_type,
+  rr.client_name,
+  rr.description,
+  rr.recognition_status,
+  rr.created_at,
+  CASE
+    WHEN rr.charter_date_to IS NULL THEN 'No charter date'
+    WHEN rr.charter_date_to <= CURRENT_DATE THEN 'Ready to recognize'
+    ELSE 'Awaiting charter completion'
+  END as status_label,
+  CASE
+    WHEN rr.charter_date_to IS NOT NULL THEN rr.charter_date_to - CURRENT_DATE
+    ELSE NULL
+  END as days_until_recognition
 FROM revenue_recognition rr
 LEFT JOIN projects p ON p.id = rr.project_id
 LEFT JOIN receipts r ON r.id = rr.receipt_id
-WHERE rr.status = 'pending';
+WHERE rr.recognition_status IN ('pending', 'needs_review')
+ORDER BY
+  CASE WHEN rr.charter_date_to IS NULL THEN 1 ELSE 0 END,
+  rr.charter_date_to ASC;
 
 COMMENT ON VIEW pending_revenue_recognition IS 'Shows pending revenue recognition records. Uses SECURITY INVOKER to respect RLS.';
