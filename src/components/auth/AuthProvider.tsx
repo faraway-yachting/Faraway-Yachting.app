@@ -1,7 +1,7 @@
 'use client';
 
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
-import { createClient } from '@/lib/supabase/client';
+import { createClient, clearSupabaseClient } from '@/lib/supabase/client';
 import type { User, Session } from '@supabase/supabase-js';
 import type { Database } from '@/lib/supabase/database.types';
 import type { ModuleName, UserModuleRole } from '@/lib/supabase/api/userModuleRoles';
@@ -419,7 +419,14 @@ export function AuthProvider({ children }: AuthProviderProps) {
   }, []);
 
   const signOut = async () => {
-    await supabase.auth.signOut();
+    try {
+      // Sign out from Supabase
+      await supabase.auth.signOut({ scope: 'global' });
+    } catch (error) {
+      console.error('Error during sign out:', error);
+    }
+
+    // Clear all local state
     setUser(null);
     setProfile(null);
     setSession(null);
@@ -428,6 +435,9 @@ export function AuthProvider({ children }: AuthProviderProps) {
     setCompanyAccess([]);
     setProjectAccess([]);
     setRoleConfig({ menuVisibility: {}, dataScopes: {} });
+
+    // Clear the singleton Supabase client to ensure fresh state on next sign-in
+    clearSupabaseClient();
   };
 
   const value: AuthContextType = {
