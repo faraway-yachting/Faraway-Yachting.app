@@ -17,3 +17,8 @@ export function createClient() {
 
   return supabaseClient;
 }
+
+// Clear the singleton instance (call this on sign-out)
+export function clearSupabaseClient() {
+  supabaseClient = null;
+}

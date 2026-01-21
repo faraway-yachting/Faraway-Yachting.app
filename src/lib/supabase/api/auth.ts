@@ -50,7 +50,8 @@ export const authApi = {
 
   async signOut() {
     const supabase = createClient();
-    const { error } = await supabase.auth.signOut();
+    // Use global scope to clear all sessions across tabs/windows
+    const { error } = await supabase.auth.signOut({ scope: 'global' });
     if (error) throw error;
   },
 
