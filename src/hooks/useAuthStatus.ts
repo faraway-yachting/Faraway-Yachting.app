@@ -26,43 +26,33 @@ export function useAuthStatus() {
 
     const checkAuth = async () => {
       try {
-        // Get fresh client each time to ensure we don't use stale cached state
         const supabase = createClient();
-        const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+        const { data: { user: currentUser }, error } = await supabase.auth.getUser();
 
         if (isCancelled) return;
 
-        if (sessionError) {
-          console.error('Error getting session:', sessionError);
+        if (error || !currentUser) {
           setUser(null);
           setIsSuperAdmin(false);
           setIsLoading(false);
           return;
         }
 
-        if (session?.user) {
-          setUser(session.user);
-          setIsLoading(false);
+        setUser(currentUser);
+        setIsLoading(false);
 
-          // Fetch super admin status in background
-          try {
-            const supabaseForProfile = createClient();
-            const { data: profile } = await supabaseForProfile
-              .from('user_profiles')
-              .select('is_super_admin')
-              .eq('id', session.user.id)
-              .single();
+        try {
+          const { data: profile } = await supabase
+            .from('user_profiles')
+            .select('is_super_admin')
+            .eq('id', currentUser.id)
+            .single();
 
-            if (!isCancelled) {
-              setIsSuperAdmin(profile?.is_super_admin ?? false);
-            }
-          } catch (err) {
-            console.error('Error fetching super admin status:', err);
+          if (!isCancelled) {
+            setIsSuperAdmin(profile?.is_super_admin ?? false);
           }
-        } else {
-          setUser(null);
-          setIsSuperAdmin(false);
-          setIsLoading(false);
+        } catch (err) {
+          console.error('Error fetching super admin status:', err);
         }
       } catch (error) {
         console.error('Error checking auth:', error);

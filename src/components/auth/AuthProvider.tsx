@@ -339,35 +339,43 @@ export function AuthProvider({ children }: AuthProviderProps) {
   };
 
   useEffect(() => {
-    // Get initial session
     const getInitialSession = async () => {
       try {
-        const { data: { session: initialSession } } = await supabase.auth.getSession();
-        setSession(initialSession);
-        setUser(initialSession?.user ?? null);
+        const client = createClient();
+        const { data: { user: currentUser }, error } = await client.auth.getUser();
+        
+        if (error || !currentUser) {
+          setUser(null);
+          setSession(null);
+          setIsLoading(false);
+          return;
+        }
 
-        if (initialSession?.user) {
-          const [profileData, rolesData, permsData, companyData, projectData] = await Promise.all([
-            fetchProfile(initialSession.user.id),
-            fetchModuleRoles(initialSession.user.id),
-            fetchPermissions(initialSession.user.id),
-            fetchCompanyAccess(initialSession.user.id),
-            fetchProjectAccess(initialSession.user.id)
-          ]);
-          setProfile(profileData);
-          setModuleRoles(rolesData);
-          setPermissions(permsData);
-          setCompanyAccess(companyData);
-          setProjectAccess(projectData);
+        const { data: { session: currentSession } } = await client.auth.getSession();
+        setSession(currentSession);
+        setUser(currentUser);
 
-          // Fetch role config after getting module roles
-          if (rolesData.length > 0) {
-            const config = await fetchRoleConfig(rolesData);
-            setRoleConfig(config);
-          }
+        const [profileData, rolesData, permsData, companyData, projectData] = await Promise.all([
+          fetchProfile(currentUser.id),
+          fetchModuleRoles(currentUser.id),
+          fetchPermissions(currentUser.id),
+          fetchCompanyAccess(currentUser.id),
+          fetchProjectAccess(currentUser.id)
+        ]);
+        setProfile(profileData);
+        setModuleRoles(rolesData);
+        setPermissions(permsData);
+        setCompanyAccess(companyData);
+        setProjectAccess(projectData);
+
+        if (rolesData.length > 0) {
+          const config = await fetchRoleConfig(rolesData);
+          setRoleConfig(config);
         }
       } catch (error) {
         console.error('Error getting session:', error);
+        setUser(null);
+        setSession(null);
       } finally {
         setIsLoading(false);
       }
@@ -375,8 +383,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
     getInitialSession();
 
-    // Listen for auth changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+    const client = createClient();
+    const { data: { subscription } } = client.auth.onAuthStateChange(
       async (event, currentSession) => {
         setSession(currentSession);
         setUser(currentSession?.user ?? null);
