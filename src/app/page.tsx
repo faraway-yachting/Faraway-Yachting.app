@@ -41,8 +41,6 @@ export default function Home() {
 
   const handleSignOut = async () => {
     await signOut();
-    // Force a full page refresh to clear any cached state
-    window.location.href = '/';
   };
 
   return (

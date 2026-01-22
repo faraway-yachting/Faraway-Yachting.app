@@ -120,34 +120,19 @@ export function useAuthStatus() {
   }, [mounted]);
 
   const signOut = useCallback(async () => {
-    console.log('Sign out called from useAuthStatus');
+    setUser(null);
+    setIsSuperAdmin(false);
+    setIsLoading(false);
 
     try {
-      // Clear state first for immediate UI feedback
-      setUser(null);
-      setIsSuperAdmin(false);
-
-      // Get fresh client for sign out
       const supabase = createClient();
-
-      // Sign out from Supabase with GLOBAL scope (terminates session on server)
-      // This invalidates all session tokens, not just the current tab
-      const { error } = await supabase.auth.signOut({ scope: 'global' });
-
-      if (error) {
-        console.error('Sign out error:', error);
-      } else {
-        console.log('Sign out successful');
-      }
-
-      // Clear the singleton so next createClient() gets a fresh instance
-      // This ensures no stale session data persists
+      await supabase.auth.signOut({ scope: 'global' });
       clearSupabaseClient();
     } catch (error) {
       console.error('Sign out error:', error);
     }
 
-    setIsLoading(false);
+    window.location.href = '/login';
   }, []);
 
   if (!mounted) {

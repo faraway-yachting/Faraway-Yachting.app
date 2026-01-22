@@ -2,7 +2,7 @@
 
 import { useState, ReactNode } from "react";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { useAuth } from "@/components/auth";
 import {
   Calendar,
@@ -77,7 +77,6 @@ export function BookingsAppShell({ children, currentRole }: BookingsAppShellProp
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [userDropdownOpen, setUserDropdownOpen] = useState(false);
   const pathname = usePathname();
-  const router = useRouter();
 
   // Get auth context for real user data
   const { user, profile, signOut, isSuperAdmin, getModuleRole, isMenuVisible } = useAuth();
@@ -93,8 +92,6 @@ export function BookingsAppShell({ children, currentRole }: BookingsAppShellProp
   const handleSignOut = async () => {
     try {
       await signOut();
-      router.push('/');
-      router.refresh();
     } catch (error) {
       console.error('Sign out error:', error);
     }

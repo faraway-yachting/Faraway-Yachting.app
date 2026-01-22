@@ -2,7 +2,7 @@
 
 import { useState, useEffect, ReactNode } from "react";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { useAuth } from "@/components/auth";
 import { usePermissions, ACCOUNTING_PERMISSIONS, ADMIN_PERMISSIONS } from "@/hooks/usePermissions";
 import { NotificationDropdown } from './NotificationDropdown';
@@ -152,7 +152,6 @@ export function AppShell({ children }: AppShellProps) {
   const [userDropdownOpen, setUserDropdownOpen] = useState(false);
   const [notificationDropdownOpen, setNotificationDropdownOpen] = useState(false);
   const pathname = usePathname();
-  const router = useRouter();
 
   // Get auth and permissions
   const { user, profile, signOut, isSuperAdmin, getModuleRole, isMenuVisible } = useAuth();
@@ -165,8 +164,6 @@ export function AppShell({ children }: AppShellProps) {
   const handleSignOut = async () => {
     try {
       await signOut();
-      router.push('/');
-      router.refresh();
     } catch (error) {
       console.error('Sign out error:', error);
     }

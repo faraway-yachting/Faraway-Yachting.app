@@ -419,14 +419,6 @@ export function AuthProvider({ children }: AuthProviderProps) {
   }, []);
 
   const signOut = async () => {
-    try {
-      // Sign out from Supabase
-      await supabase.auth.signOut({ scope: 'global' });
-    } catch (error) {
-      console.error('Error during sign out:', error);
-    }
-
-    // Clear all local state
     setUser(null);
     setProfile(null);
     setSession(null);
@@ -436,8 +428,16 @@ export function AuthProvider({ children }: AuthProviderProps) {
     setProjectAccess([]);
     setRoleConfig({ menuVisibility: {}, dataScopes: {} });
 
-    // Clear the singleton Supabase client to ensure fresh state on next sign-in
+    try {
+      const freshClient = createClient();
+      await freshClient.auth.signOut({ scope: 'global' });
+    } catch (error) {
+      console.error('Error during sign out:', error);
+    }
+
     clearSupabaseClient();
+
+    window.location.href = '/login';
   };
 
   const value: AuthContextType = {
