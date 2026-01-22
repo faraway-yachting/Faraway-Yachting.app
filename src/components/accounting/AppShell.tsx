@@ -275,15 +275,6 @@ export function AppShell({ children }: AppShellProps) {
 
             {/* Bottom Links */}
             <div className="mt-auto space-y-2 px-4 pb-6 border-t border-white/10 pt-6">
-              {canAccessAdmin && (
-                <Link
-                  href="/admin/users"
-                  className="group flex items-center px-4 py-3 text-sm font-medium text-gray-300 hover:bg-white/10 hover:text-white rounded-xl transition-all duration-200"
-                >
-                  <Shield className="mr-3 h-5 w-5 flex-shrink-0 text-gray-400 group-hover:text-white" />
-                  Admin
-                </Link>
-              )}
               <Link
                 href="/"
                 className="group flex items-center px-4 py-3 text-sm font-medium text-gray-300 hover:bg-white/10 hover:text-white rounded-xl transition-all duration-200"
@@ -353,16 +344,6 @@ export function AppShell({ children }: AppShellProps) {
                       </ul>
                     </li>
                     <li className="mt-auto space-y-2 border-t border-white/10 pt-6">
-                      {canAccessAdmin && (
-                        <Link
-                          href="/admin/users"
-                          onClick={() => setSidebarOpen(false)}
-                          className="group flex items-center gap-x-3 rounded-xl px-4 py-3 text-sm font-medium text-gray-300 hover:bg-white/10 hover:text-white transition-all duration-200"
-                        >
-                          <Shield className="h-5 w-5 shrink-0" />
-                          Admin
-                        </Link>
-                      )}
                       <Link
                         href="/"
                         onClick={() => setSidebarOpen(false)}
