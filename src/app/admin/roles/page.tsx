@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { roleConfigApi, type RoleDefinition, type PermissionGroup } from '@/lib/supabase/api';
 import { createClient } from '@/lib/supabase/client';
 import { Loader2, ChevronDown, ChevronUp, RotateCcw, Save, Shield, Plus, X, Trash2 } from 'lucide-react';
@@ -87,8 +87,7 @@ export default function AdminRolesPage() {
   const [roleToDelete, setRoleToDelete] = useState<RoleDefinition | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
-  // Load roles function
-  const loadRoles = async () => {
+  const loadRoles = useCallback(async () => {
     setIsLoading(true);
     setError(null);
     try {
@@ -100,13 +99,12 @@ export default function AdminRolesPage() {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [selectedModule]);
 
-  // Load roles for selected module
   useEffect(() => {
     loadRoles();
     setExpandedRole(null);
-  }, [selectedModule]);
+  }, [loadRoles]);
 
   // Create new role
   const handleCreateRole = async () => {
