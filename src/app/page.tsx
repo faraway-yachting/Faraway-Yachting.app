@@ -77,11 +77,10 @@ export default function Home() {
   const { user, isSuperAdmin, moduleAccess, isLoaded } = useHomeAuth();
 
   const visibleModules = useMemo((): Module[] => {
-    if (!isLoaded || !user) return modules;
+    if (!user) return modules;
+    if (!isLoaded) return modules;
     if (isSuperAdmin) return modules;
-    return modules.filter(
-      (m) => m.status === "coming-soon" || moduleAccess.includes(m.moduleKey)
-    );
+    return modules.filter((m) => moduleAccess.includes(m.moduleKey));
   }, [user, isSuperAdmin, moduleAccess, isLoaded]);
 
   useEffect(() => {
