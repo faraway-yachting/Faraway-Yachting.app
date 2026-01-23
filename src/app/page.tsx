@@ -35,30 +35,42 @@ function useHomeAuth(): UserAccess {
     let isMounted = true;
 
     const loadUserData = async (user: SupabaseUser) => {
-      const [profileRes, rolesRes] = await Promise.all([
-        supabase.from('user_profiles').select('is_super_admin').eq('id', user.id).single(),
-        supabase.from('user_module_roles').select('module').eq('user_id', user.id).eq('is_active', true),
-      ]);
+      try {
+        const [profileRes, rolesRes] = await Promise.all([
+          supabase.from('user_profiles').select('is_super_admin').eq('id', user.id).single(),
+          supabase.from('user_module_roles').select('module').eq('user_id', user.id).eq('is_active', true),
+        ]);
 
-      if (isMounted) {
-        setState({
-          user,
-          isSuperAdmin: profileRes.data?.is_super_admin ?? false,
-          moduleAccess: (rolesRes.data || []).map((r: { module: string }) => r.module as ModuleName),
-          isLoaded: true,
-        });
+        if (isMounted) {
+          setState({
+            user,
+            isSuperAdmin: profileRes.data?.is_super_admin ?? false,
+            moduleAccess: (rolesRes.data || []).map((r: { module: string }) => r.module as ModuleName),
+            isLoaded: true,
+          });
+        }
+      } catch {
+        if (isMounted) {
+          setState({ user, isSuperAdmin: false, moduleAccess: [], isLoaded: true });
+        }
       }
     };
 
     const initAuth = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      
-      if (!isMounted) return;
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        
+        if (!isMounted) return;
 
-      if (session?.user) {
-        await loadUserData(session.user);
-      } else {
-        setState({ user: null, isSuperAdmin: false, moduleAccess: [], isLoaded: true });
+        if (session?.user) {
+          await loadUserData(session.user);
+        } else {
+          setState({ user: null, isSuperAdmin: false, moduleAccess: [], isLoaded: true });
+        }
+      } catch {
+        if (isMounted) {
+          setState({ user: null, isSuperAdmin: false, moduleAccess: [], isLoaded: true });
+        }
       }
     };
 
@@ -69,8 +81,10 @@ function useHomeAuth(): UserAccess {
       
       if (event === 'SIGNED_OUT' || !session?.user) {
         setState({ user: null, isSuperAdmin: false, moduleAccess: [], isLoaded: true });
-      } else if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
-        await loadUserData(session.user);
+      } else if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'INITIAL_SESSION') {
+        if (session?.user) {
+          await loadUserData(session.user);
+        }
       }
     });
 
