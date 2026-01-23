@@ -21,6 +21,7 @@ import {
   ChevronUp,
   X,
   Check,
+  Trash2,
 } from 'lucide-react';
 
 interface Company {
@@ -117,6 +118,10 @@ export default function AdminUsersPage() {
   const [editingProjectAccess, setEditingProjectAccess] = useState<string | null>(null);
   const [newProjectId, setNewProjectId] = useState('');
   const [newProjectAccessType, setNewProjectAccessType] = useState<typeof PROJECT_ACCESS_TYPES[number]>('investor');
+
+  // Delete user
+  const [deletingUser, setDeletingUser] = useState<ExtendedUser | null>(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -395,6 +400,28 @@ export default function AdminUsersPage() {
     }
   };
 
+  const handleDeleteUser = async () => {
+    if (!deletingUser) return;
+    setDeleteLoading(true);
+    setError(null);
+
+    try {
+      const result = await userModuleRolesApi.deleteUser(deletingUser.id);
+      if (result.error) {
+        setError(result.error);
+      } else {
+        setDeletingUser(null);
+        if (expandedUserId === deletingUser.id) setExpandedUserId(null);
+        await loadData();
+      }
+    } catch (err) {
+      setError('Failed to delete user');
+      console.error('Error deleting user:', err);
+    } finally {
+      setDeleteLoading(false);
+    }
+  };
+
   const filteredUsers = users.filter(user => {
     const searchLower = searchTerm.toLowerCase();
     return (
@@ -535,6 +562,49 @@ export default function AdminUsersPage() {
         </div>
       )}
 
+      {/* Delete Confirmation Modal */}
+      {deletingUser && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-md p-6">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="flex items-center justify-center w-10 h-10 bg-red-100 rounded-full">
+                <Trash2 className="h-5 w-5 text-red-600" />
+              </div>
+              <h2 className="text-lg font-semibold text-gray-900">Delete User</h2>
+            </div>
+
+            <p className="text-gray-600 mb-2">
+              Are you sure you want to delete this user?
+            </p>
+            <div className="bg-gray-50 rounded-lg p-3 mb-4">
+              <p className="font-medium text-gray-900">{deletingUser.full_name || 'No name'}</p>
+              <p className="text-sm text-gray-500">{deletingUser.email}</p>
+            </div>
+            <p className="text-sm text-red-600 mb-4">
+              This action cannot be undone. All user data, roles, and access will be permanently removed.
+            </p>
+
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => setDeletingUser(null)}
+                disabled={deleteLoading}
+                className="px-4 py-2 text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDeleteUser}
+                disabled={deleteLoading}
+                className="inline-flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 disabled:opacity-50"
+              >
+                {deleteLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                Delete User
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Search Bar */}
       <div className="relative">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
@@ -633,8 +703,16 @@ export default function AdminUsersPage() {
                           <button
                             onClick={() => startEditUser(user)}
                             className="text-purple-600 hover:text-purple-800 text-sm font-medium"
+                            title="Edit user"
                           >
                             <Edit2 className="h-4 w-4" />
+                          </button>
+                          <button
+                            onClick={() => setDeletingUser(user)}
+                            className="text-red-500 hover:text-red-700 text-sm font-medium"
+                            title="Delete user"
+                          >
+                            <Trash2 className="h-4 w-4" />
                           </button>
                           <button
                             onClick={() => setExpandedUserId(expandedUserId === user.id ? null : user.id)}

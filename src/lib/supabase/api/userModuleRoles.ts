@@ -268,4 +268,25 @@ export const userModuleRolesApi = {
     if (error) return false;
     return data?.is_super_admin || false;
   },
+
+  async deleteUser(userId: string): Promise<{ success: boolean; error: string | null }> {
+    try {
+      const response = await fetch('/api/admin/delete-user', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        return { success: false, error: data.error || 'Failed to delete user' };
+      }
+
+      return { success: true, error: null };
+    } catch (err) {
+      console.error('Error deleting user:', err);
+      return { success: false, error: 'Failed to delete user' };
+    }
+  },
 };
