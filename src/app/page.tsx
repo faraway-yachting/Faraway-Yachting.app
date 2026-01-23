@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { Footer } from "@/components/Footer";
@@ -30,69 +30,50 @@ function useHomeAuth(): UserAccess {
     isLoaded: false,
   });
 
+  const loadUserData = useCallback(async (supabase: ReturnType<typeof createClient>, user: SupabaseUser) => {
+    try {
+      const [profileRes, rolesRes] = await Promise.all([
+        supabase.from('user_profiles').select('is_super_admin').eq('id', user.id).single(),
+        supabase.from('user_module_roles').select('module').eq('user_id', user.id).eq('is_active', true),
+      ]);
+
+      setState({
+        user,
+        isSuperAdmin: profileRes.data?.is_super_admin ?? false,
+        moduleAccess: (rolesRes.data || []).map((r: { module: string }) => r.module as ModuleName),
+        isLoaded: true,
+      });
+    } catch {
+      setState({ user, isSuperAdmin: false, moduleAccess: [], isLoaded: true });
+    }
+  }, []);
+
   useEffect(() => {
     const supabase = createClient();
-    let isMounted = true;
 
-    const loadUserData = async (user: SupabaseUser) => {
-      try {
-        const [profileRes, rolesRes] = await Promise.all([
-          supabase.from('user_profiles').select('is_super_admin').eq('id', user.id).single(),
-          supabase.from('user_module_roles').select('module').eq('user_id', user.id).eq('is_active', true),
-        ]);
-
-        if (isMounted) {
-          setState({
-            user,
-            isSuperAdmin: profileRes.data?.is_super_admin ?? false,
-            moduleAccess: (rolesRes.data || []).map((r: { module: string }) => r.module as ModuleName),
-            isLoaded: true,
-          });
-        }
-      } catch {
-        if (isMounted) {
-          setState({ user, isSuperAdmin: false, moduleAccess: [], isLoaded: true });
-        }
+    const checkAuth = async () => {
+      const { data: { user }, error } = await supabase.auth.getUser();
+      
+      if (error || !user) {
+        setState({ user: null, isSuperAdmin: false, moduleAccess: [], isLoaded: true });
+        return;
       }
+
+      await loadUserData(supabase, user);
     };
 
-    const initAuth = async () => {
-      try {
-        const { data: { session } } = await supabase.auth.getSession();
-        
-        if (!isMounted) return;
-
-        if (session?.user) {
-          await loadUserData(session.user);
-        } else {
-          setState({ user: null, isSuperAdmin: false, moduleAccess: [], isLoaded: true });
-        }
-      } catch {
-        if (isMounted) {
-          setState({ user: null, isSuperAdmin: false, moduleAccess: [], isLoaded: true });
-        }
-      }
-    };
-
-    initAuth();
+    checkAuth();
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (!isMounted) return;
-      
-      if (event === 'SIGNED_OUT' || !session?.user) {
+      if (event === 'SIGNED_OUT') {
         setState({ user: null, isSuperAdmin: false, moduleAccess: [], isLoaded: true });
-      } else if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'INITIAL_SESSION') {
-        if (session?.user) {
-          await loadUserData(session.user);
-        }
+      } else if (session?.user) {
+        await loadUserData(supabase, session.user);
       }
     });
 
-    return () => {
-      isMounted = false;
-      subscription.unsubscribe();
-    };
-  }, []);
+    return () => subscription.unsubscribe();
+  }, [loadUserData]);
 
   return state;
 }
