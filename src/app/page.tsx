@@ -149,9 +149,7 @@ export default function Home() {
             </div>
           </div>
 
-          {!isLoaded ? (
-            <div className="h-20 mb-6" />
-          ) : user ? (
+          {user ? (
             <h1 className="text-3xl md:text-4xl font-bold text-white mb-6">
               Welcome, {user.user_metadata?.full_name || user.email?.split('@')[0] || 'User'}
             </h1>
@@ -166,9 +164,7 @@ export default function Home() {
             </>
           )}
 
-          {!isLoaded ? (
-            <div className="flex justify-center h-12" />
-          ) : user ? (
+          {user ? (
             <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
               <div className="flex items-center gap-3 bg-white/20 backdrop-blur-sm rounded-lg px-4 py-2.5">
                 <div className="h-8 w-8 rounded-full bg-white/30 flex items-center justify-center">
