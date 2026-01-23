@@ -1,6 +1,26 @@
 import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 
+type ModuleName = 'accounting' | 'bookings' | 'inventory' | 'maintenance' | 'customers' | 'hr';
+
+const MODULE_ROUTES: Record<ModuleName, string> = {
+  accounting: '/accounting',
+  bookings: '/bookings',
+  inventory: '/inventory',
+  maintenance: '/maintenance',
+  customers: '/customers',
+  hr: '/hr',
+};
+
+function getModuleFromPath(pathname: string): ModuleName | null {
+  for (const [module, route] of Object.entries(MODULE_ROUTES)) {
+    if (pathname.startsWith(route)) {
+      return module as ModuleName;
+    }
+  }
+  return null;
+}
+
 export async function middleware(request: NextRequest) {
   let supabaseResponse = NextResponse.next({
     request
@@ -29,32 +49,24 @@ export async function middleware(request: NextRequest) {
     }
   );
 
-  // Do not run code between createServerClient and
-  // supabase.auth.getUser(). A simple mistake could make it very hard to debug
-  // issues with users being randomly logged out.
-
   const {
     data: { user }
   } = await supabase.auth.getUser();
 
   const pathname = request.nextUrl.pathname;
 
-  // Protected routes that require authentication
-  const protectedRoutes = ['/accounting', '/admin'];
+  const protectedRoutes = ['/accounting', '/bookings', '/admin'];
   const isProtectedRoute = protectedRoutes.some((route) =>
     pathname.startsWith(route)
   );
 
-  // Admin routes that require super admin status
   const isAdminRoute = pathname.startsWith('/admin');
 
-  // Auth routes that should redirect if already logged in
   const authRoutes = ['/login', '/signup'];
   const isAuthRoute = authRoutes.some((route) =>
     pathname.startsWith(route)
   );
 
-  // If accessing a protected route without being logged in, redirect to login
   if (isProtectedRoute && !user) {
     const url = request.nextUrl.clone();
     url.pathname = '/login';
@@ -62,9 +74,7 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  // If accessing admin routes, check super admin status
   if (isAdminRoute && user) {
-    // Fetch user profile to check super admin status
     const { data: profile } = await supabase
       .from('user_profiles')
       .select('is_super_admin')
@@ -78,7 +88,32 @@ export async function middleware(request: NextRequest) {
     }
   }
 
-  // If accessing auth routes while logged in, redirect to home page
+  const targetModule = getModuleFromPath(pathname);
+  if (targetModule && user && !isAdminRoute) {
+    const { data: profile } = await supabase
+      .from('user_profiles')
+      .select('is_super_admin')
+      .eq('id', user.id)
+      .single();
+
+    if (!profile?.is_super_admin) {
+      const { data: moduleRole } = await supabase
+        .from('user_module_roles')
+        .select('role')
+        .eq('user_id', user.id)
+        .eq('module', targetModule)
+        .eq('is_active', true)
+        .single();
+
+      if (!moduleRole) {
+        const url = request.nextUrl.clone();
+        url.pathname = '/unauthorized';
+        url.searchParams.set('module', targetModule);
+        return NextResponse.redirect(url);
+      }
+    }
+  }
+
   if (isAuthRoute && user) {
     const url = request.nextUrl.clone();
     url.pathname = '/';

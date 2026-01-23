@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { Footer } from "@/components/Footer";
@@ -10,14 +10,22 @@ import { ModuleCard } from "@/components/ModuleCard";
 import { NotifyMeModal } from "@/components/NotifyMeModal";
 import { appConfig } from "@/config/app.config";
 import { modules } from "@/data/modules";
-import { useAuthStatus } from "@/hooks/useAuthStatus";
+import { AuthProvider, useAuth } from "@/components/auth";
 import { User, LogOut, Shield } from "lucide-react";
 
-export default function Home() {
+function HomeContent() {
   const [modalOpen, setModalOpen] = useState(false);
   const [selectedModule, setSelectedModule] = useState("");
   const router = useRouter();
-  const { user, isSuperAdmin, isLoading, signOut } = useAuthStatus();
+  const { user, isSuperAdmin, isLoading, hasModuleAccess, signOut } = useAuth();
+
+  const visibleModules = useMemo(() => {
+    if (!user) return modules;
+    if (isSuperAdmin) return modules;
+    return modules.filter(
+      (m) => m.status === "coming-soon" || hasModuleAccess(m.moduleKey)
+    );
+  }, [user, isSuperAdmin, hasModuleAccess]);
 
   // Detect invite token in URL hash and redirect to password setup
   useEffect(() => {
@@ -140,7 +148,7 @@ export default function Home() {
           </p>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {modules.map((module) => (
+          {visibleModules.map((module) => (
             <ModuleCard
               key={module.title}
               module={module}
@@ -172,12 +180,19 @@ export default function Home() {
 
       <Footer />
 
-      {/* Modal */}
       <NotifyMeModal
         isOpen={modalOpen}
         onClose={() => setModalOpen(false)}
         moduleName={selectedModule}
       />
     </div>
+  );
+}
+
+export default function Home() {
+  return (
+    <AuthProvider>
+      <HomeContent />
+    </AuthProvider>
   );
 }
