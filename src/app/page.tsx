@@ -9,33 +9,87 @@ import { Section } from "@/components/ui/Section";
 import { ModuleCard } from "@/components/ModuleCard";
 import { NotifyMeModal } from "@/components/NotifyMeModal";
 import { appConfig } from "@/config/app.config";
-import { modules } from "@/data/modules";
-import { AuthProvider, useAuth } from "@/components/auth";
+import { modules, Module } from "@/data/modules";
 import { User, LogOut, Shield } from "lucide-react";
+import { createClient } from "@/lib/supabase/client";
+import type { User as SupabaseUser } from "@supabase/supabase-js";
+import type { ModuleName } from "@/lib/supabase/api/userModuleRoles";
 
-function HomeContent() {
+interface UserAccess {
+  user: SupabaseUser | null;
+  isSuperAdmin: boolean;
+  moduleAccess: ModuleName[];
+  isLoaded: boolean;
+}
+
+function useHomeAuth(): UserAccess {
+  const [state, setState] = useState<UserAccess>({
+    user: null,
+    isSuperAdmin: false,
+    moduleAccess: [],
+    isLoaded: false,
+  });
+
+  useEffect(() => {
+    const supabase = createClient();
+
+    const loadUser = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      if (!user) {
+        setState({ user: null, isSuperAdmin: false, moduleAccess: [], isLoaded: true });
+        return;
+      }
+
+      const [profileRes, rolesRes] = await Promise.all([
+        supabase.from('user_profiles').select('is_super_admin').eq('id', user.id).single(),
+        supabase.from('user_module_roles').select('module').eq('user_id', user.id).eq('is_active', true),
+      ]);
+
+      setState({
+        user,
+        isSuperAdmin: profileRes.data?.is_super_admin ?? false,
+        moduleAccess: (rolesRes.data || []).map((r: { module: string }) => r.module as ModuleName),
+        isLoaded: true,
+      });
+    };
+
+    loadUser();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'SIGNED_OUT') {
+        setState({ user: null, isSuperAdmin: false, moduleAccess: [], isLoaded: true });
+      } else if (session?.user) {
+        loadUser();
+      }
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  return state;
+}
+
+export default function Home() {
   const [modalOpen, setModalOpen] = useState(false);
   const [selectedModule, setSelectedModule] = useState("");
   const router = useRouter();
-  const { user, isSuperAdmin, isLoading, hasModuleAccess, signOut } = useAuth();
+  const { user, isSuperAdmin, moduleAccess, isLoaded } = useHomeAuth();
 
-  const visibleModules = useMemo(() => {
-    if (!user) return modules;
+  const visibleModules = useMemo((): Module[] => {
+    if (!isLoaded || !user) return modules;
     if (isSuperAdmin) return modules;
     return modules.filter(
-      (m) => m.status === "coming-soon" || hasModuleAccess(m.moduleKey)
+      (m) => m.status === "coming-soon" || moduleAccess.includes(m.moduleKey)
     );
-  }, [user, isSuperAdmin, hasModuleAccess]);
+  }, [user, isSuperAdmin, moduleAccess, isLoaded]);
 
-  // Detect invite token in URL hash and redirect to password setup
   useEffect(() => {
     const hash = window.location.hash;
     if (hash) {
       const hashParams = new URLSearchParams(hash.substring(1));
       const accessToken = hashParams.get('access_token');
       const type = hashParams.get('type');
-
-      // If this is an invite link, redirect to password setup page with the hash
       if (accessToken && type === 'invite') {
         router.push(`/auth/setup-password${hash}`);
       }
@@ -48,15 +102,15 @@ function HomeContent() {
   };
 
   const handleSignOut = async () => {
-    await signOut();
+    const supabase = createClient();
+    await supabase.auth.signOut();
+    window.location.href = '/';
   };
 
   return (
     <div className="min-h-screen bg-[#A8C5D6] flex flex-col">
-      {/* Hero Section */}
       <section className="bg-[#A8C5D6]">
         <div className="max-w-7xl mx-auto px-6 py-8 md:py-10 text-center">
-          {/* Logo */}
           <div className="mb-6">
             <div className="inline-flex items-center justify-center w-40 h-40 bg-white rounded-full p-4">
               <Image
@@ -83,11 +137,8 @@ function HomeContent() {
               </p>
             </>
           )}
-          {isLoading ? (
-            <div className="flex justify-center">
-              <div className="h-12 w-48 bg-white/20 rounded-lg animate-pulse" />
-            </div>
-          ) : user ? (
+
+          {user ? (
             <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
               <div className="flex items-center gap-3 bg-white/20 backdrop-blur-sm rounded-lg px-4 py-2.5">
                 <div className="h-8 w-8 rounded-full bg-white/30 flex items-center justify-center">
@@ -116,7 +167,6 @@ function HomeContent() {
         </div>
       </section>
 
-      {/* Benefits Strip */}
       <Section background="white">
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
           {appConfig.benefits.map((benefit) => {
@@ -136,7 +186,6 @@ function HomeContent() {
         </div>
       </Section>
 
-      {/* Modules Section */}
       <Section background="gray">
         <div className="text-center mb-12">
           <h2 className="text-3xl md:text-4xl font-bold text-gray-900 mb-4">
@@ -157,7 +206,6 @@ function HomeContent() {
           ))}
         </div>
 
-        {/* More Modules Button */}
         <div className="flex justify-end mt-4">
           <button className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-[#5A7A8F] hover:text-[#2c3e50] transition-colors">
             <svg
@@ -186,13 +234,5 @@ function HomeContent() {
         moduleName={selectedModule}
       />
     </div>
-  );
-}
-
-export default function Home() {
-  return (
-    <AuthProvider>
-      <HomeContent />
-    </AuthProvider>
   );
 }
