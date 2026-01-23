@@ -33,6 +33,7 @@ function useHomeAuth(): UserAccess {
   useEffect(() => {
     const supabase = createClient();
     let isMounted = true;
+    let hasInitialized = false;
 
     const loadUserData = async (user: SupabaseUser) => {
       try {
@@ -56,18 +57,41 @@ function useHomeAuth(): UserAccess {
       }
     };
 
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    const initializeAuth = async () => {
+      if (hasInitialized) return;
+      hasInitialized = true;
+
+      const { data: { session } } = await supabase.auth.getSession();
+      
       if (!isMounted) return;
+
       if (session?.user) {
-        loadUserData(session.user);
+        await loadUserData(session.user);
       } else {
-        setState({ user: null, isSuperAdmin: false, moduleAccess: [], isLoaded: true });
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!isMounted) return;
+        
+        if (user) {
+          await loadUserData(user);
+        } else {
+          setState({ user: null, isSuperAdmin: false, moduleAccess: [], isLoaded: true });
+        }
       }
-    });
+    };
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (!isMounted) return;
-      if (event === 'SIGNED_IN' && session?.user) {
+
+      if (event === 'INITIAL_SESSION') {
+        if (!hasInitialized) {
+          hasInitialized = true;
+          if (session?.user) {
+            await loadUserData(session.user);
+          } else {
+            setState({ user: null, isSuperAdmin: false, moduleAccess: [], isLoaded: true });
+          }
+        }
+      } else if (event === 'SIGNED_IN' && session?.user) {
         await loadUserData(session.user);
       } else if (event === 'SIGNED_OUT') {
         setState({ user: null, isSuperAdmin: false, moduleAccess: [], isLoaded: true });
@@ -76,8 +100,15 @@ function useHomeAuth(): UserAccess {
       }
     });
 
+    const timer = setTimeout(() => {
+      if (!hasInitialized && isMounted) {
+        initializeAuth();
+      }
+    }, 100);
+
     return () => {
       isMounted = false;
+      clearTimeout(timer);
       subscription.unsubscribe();
     };
   }, []);
