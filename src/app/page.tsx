@@ -56,16 +56,18 @@ function useHomeAuth(): UserAccess {
       }
     };
 
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (!isMounted) return;
+      if (session?.user) {
+        loadUserData(session.user);
+      } else {
+        setState({ user: null, isSuperAdmin: false, moduleAccess: [], isLoaded: true });
+      }
+    });
+
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (!isMounted) return;
-
-      if (event === 'INITIAL_SESSION') {
-        if (session?.user) {
-          await loadUserData(session.user);
-        } else {
-          setState({ user: null, isSuperAdmin: false, moduleAccess: [], isLoaded: true });
-        }
-      } else if (event === 'SIGNED_IN' && session?.user) {
+      if (event === 'SIGNED_IN' && session?.user) {
         await loadUserData(session.user);
       } else if (event === 'SIGNED_OUT') {
         setState({ user: null, isSuperAdmin: false, moduleAccess: [], isLoaded: true });
