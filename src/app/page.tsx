@@ -31,12 +31,21 @@ function useHomeAuth(): UserAccess {
   });
 
   useEffect(() => {
-    const supabase = createClient();
     let isMounted = true;
-    let hasInitialized = false;
 
-    const loadUserData = async (user: SupabaseUser) => {
+    const loadAuth = async () => {
+      const supabase = createClient();
+      
       try {
+        const { data: { user }, error } = await supabase.auth.getUser();
+        
+        if (!isMounted) return;
+
+        if (error || !user) {
+          setState({ user: null, isSuperAdmin: false, moduleAccess: [], isLoaded: true });
+          return;
+        }
+
         const [profileRes, rolesRes] = await Promise.all([
           supabase.from('user_profiles').select('is_super_admin').eq('id', user.id).single(),
           supabase.from('user_module_roles').select('module').eq('user_id', user.id).eq('is_active', true),
@@ -52,63 +61,38 @@ function useHomeAuth(): UserAccess {
         }
       } catch {
         if (isMounted) {
-          setState({ user, isSuperAdmin: false, moduleAccess: [], isLoaded: true });
-        }
-      }
-    };
-
-    const initializeAuth = async () => {
-      if (hasInitialized) return;
-      hasInitialized = true;
-
-      const { data: { session } } = await supabase.auth.getSession();
-      
-      if (!isMounted) return;
-
-      if (session?.user) {
-        await loadUserData(session.user);
-      } else {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (!isMounted) return;
-        
-        if (user) {
-          await loadUserData(user);
-        } else {
           setState({ user: null, isSuperAdmin: false, moduleAccess: [], isLoaded: true });
         }
       }
     };
 
+    loadAuth();
+
+    const supabase = createClient();
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (!isMounted) return;
 
-      if (event === 'INITIAL_SESSION') {
-        if (!hasInitialized) {
-          hasInitialized = true;
-          if (session?.user) {
-            await loadUserData(session.user);
-          } else {
-            setState({ user: null, isSuperAdmin: false, moduleAccess: [], isLoaded: true });
-          }
-        }
-      } else if (event === 'SIGNED_IN' && session?.user) {
-        await loadUserData(session.user);
-      } else if (event === 'SIGNED_OUT') {
+      if (event === 'SIGNED_OUT') {
         setState({ user: null, isSuperAdmin: false, moduleAccess: [], isLoaded: true });
-      } else if (event === 'TOKEN_REFRESHED' && session?.user) {
-        await loadUserData(session.user);
+      } else if ((event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') && session?.user) {
+        const [profileRes, rolesRes] = await Promise.all([
+          supabase.from('user_profiles').select('is_super_admin').eq('id', session.user.id).single(),
+          supabase.from('user_module_roles').select('module').eq('user_id', session.user.id).eq('is_active', true),
+        ]);
+
+        if (isMounted) {
+          setState({
+            user: session.user,
+            isSuperAdmin: profileRes.data?.is_super_admin ?? false,
+            moduleAccess: (rolesRes.data || []).map((r: { module: string }) => r.module as ModuleName),
+            isLoaded: true,
+          });
+        }
       }
     });
 
-    const timer = setTimeout(() => {
-      if (!hasInitialized && isMounted) {
-        initializeAuth();
-      }
-    }, 100);
-
     return () => {
       isMounted = false;
-      clearTimeout(timer);
       subscription.unsubscribe();
     };
   }, []);
