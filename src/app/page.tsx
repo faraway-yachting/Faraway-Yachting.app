@@ -32,39 +32,52 @@ function useHomeAuth(): UserAccess {
 
   useEffect(() => {
     const supabase = createClient();
+    let isMounted = true;
 
-    const loadUser = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      
-      if (!user) {
-        setState({ user: null, isSuperAdmin: false, moduleAccess: [], isLoaded: true });
-        return;
-      }
-
+    const loadUserData = async (user: SupabaseUser) => {
       const [profileRes, rolesRes] = await Promise.all([
         supabase.from('user_profiles').select('is_super_admin').eq('id', user.id).single(),
         supabase.from('user_module_roles').select('module').eq('user_id', user.id).eq('is_active', true),
       ]);
 
-      setState({
-        user,
-        isSuperAdmin: profileRes.data?.is_super_admin ?? false,
-        moduleAccess: (rolesRes.data || []).map((r: { module: string }) => r.module as ModuleName),
-        isLoaded: true,
-      });
+      if (isMounted) {
+        setState({
+          user,
+          isSuperAdmin: profileRes.data?.is_super_admin ?? false,
+          moduleAccess: (rolesRes.data || []).map((r: { module: string }) => r.module as ModuleName),
+          isLoaded: true,
+        });
+      }
     };
 
-    loadUser();
+    const initAuth = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      if (!isMounted) return;
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      if (event === 'SIGNED_OUT') {
+      if (session?.user) {
+        await loadUserData(session.user);
+      } else {
         setState({ user: null, isSuperAdmin: false, moduleAccess: [], isLoaded: true });
-      } else if (session?.user) {
-        loadUser();
+      }
+    };
+
+    initAuth();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (!isMounted) return;
+      
+      if (event === 'SIGNED_OUT' || !session?.user) {
+        setState({ user: null, isSuperAdmin: false, moduleAccess: [], isLoaded: true });
+      } else if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+        await loadUserData(session.user);
       }
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      isMounted = false;
+      subscription.unsubscribe();
+    };
   }, []);
 
   return state;
@@ -122,7 +135,9 @@ export default function Home() {
             </div>
           </div>
 
-          {user ? (
+          {!isLoaded ? (
+            <div className="h-20 mb-6" />
+          ) : user ? (
             <h1 className="text-3xl md:text-4xl font-bold text-white mb-6">
               Welcome, {user.user_metadata?.full_name || user.email?.split('@')[0] || 'User'}
             </h1>
@@ -137,7 +152,9 @@ export default function Home() {
             </>
           )}
 
-          {user ? (
+          {!isLoaded ? (
+            <div className="flex justify-center h-12" />
+          ) : user ? (
             <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
               <div className="flex items-center gap-3 bg-white/20 backdrop-blur-sm rounded-lg px-4 py-2.5">
                 <div className="h-8 w-8 rounded-full bg-white/30 flex items-center justify-center">
