@@ -1,5 +1,12 @@
 import { createClient } from '../client';
 import type { Database } from '../database.types';
+import { createAndProcessEvent } from '@/lib/accounting/eventProcessor';
+import type {
+  PettyCashExpenseEventData,
+  PettyCashTopupEventData,
+  PettyCashReimbursementEventData,
+  ExpenseApprovedEventData,
+} from '@/lib/accounting/eventTypes';
 
 type PettyCashWallet = Database['public']['Tables']['petty_cash_wallets']['Row'];
 type PettyCashWalletInsert = Database['public']['Tables']['petty_cash_wallets']['Insert'];
@@ -123,7 +130,7 @@ async function grantPettyCashPermissions(userId: string): Promise<void> {
 
 /**
  * Calculate the correct wallet balance from transactions
- * Balance = Initial balance + Top-ups - Expenses
+ * Balance = Initial balance + Top-ups + Paid Reimbursements - Expenses
  * Note: The `balance` field in the wallets table is the initial/starting balance,
  * not the current balance. The current balance must be calculated from transactions.
  */
@@ -142,16 +149,26 @@ async function calculateWalletBalance(
 
   const topupTotal = (topups ?? []).reduce((sum, t) => sum + (t.amount || 0), 0);
 
-  // Get sum of expenses (all expenses reduce balance)
+  // Get sum of submitted expenses only (drafts don't reduce balance)
   const { data: expenses } = await supabase
     .from('petty_cash_expenses')
     .select('amount')
-    .eq('wallet_id', walletId);
+    .eq('wallet_id', walletId)
+    .eq('status', 'submitted');
 
   const expenseTotal = (expenses ?? []).reduce((sum, e) => sum + (e.amount || 0), 0);
 
-  // Current balance = Initial + Topups - Expenses
-  return initialBalance + topupTotal - expenseTotal;
+  // Get sum of paid reimbursements (money returned to wallet)
+  const { data: reimbursements } = await (supabase as any)
+    .from('petty_cash_reimbursements')
+    .select('final_amount')
+    .eq('wallet_id', walletId)
+    .eq('status', 'paid');
+
+  const reimbursementTotal = ((reimbursements ?? []) as any[]).reduce((sum: number, r: any) => sum + (r.final_amount || 0), 0);
+
+  // Current balance = Initial + Topups + Paid Reimbursements - Expenses
+  return initialBalance + topupTotal + reimbursementTotal - expenseTotal;
 }
 
 export const pettyCashApi = {
@@ -386,11 +403,19 @@ export const pettyCashApi = {
     const { data: allExpenses } = await supabase
       .from('petty_cash_expenses')
       .select('wallet_id, amount')
-      .in('wallet_id', walletIds);
+      .in('wallet_id', walletIds)
+      .eq('status', 'submitted');
 
-    // Group topups and expenses by wallet
+    const { data: allReimbursements } = await (supabase as any)
+      .from('petty_cash_reimbursements')
+      .select('wallet_id, final_amount')
+      .in('wallet_id', walletIds)
+      .eq('status', 'paid');
+
+    // Group topups, expenses, and reimbursements by wallet
     const topupsByWallet = new Map<string, number>();
     const expensesByWallet = new Map<string, number>();
+    const reimbursementsByWallet = new Map<string, number>();
 
     for (const topup of allTopups ?? []) {
       const current = topupsByWallet.get(topup.wallet_id) || 0;
@@ -402,10 +427,15 @@ export const pettyCashApi = {
       expensesByWallet.set(expense.wallet_id, current + (expense.amount || 0));
     }
 
+    for (const reimb of (allReimbursements ?? []) as any[]) {
+      const current = reimbursementsByWallet.get(reimb.wallet_id) || 0;
+      reimbursementsByWallet.set(reimb.wallet_id, current + (reimb.final_amount || 0));
+    }
+
     // Calculate current balance for each wallet
     return wallets.map(wallet => ({
       ...wallet,
-      calculated_balance: (wallet.balance || 0) + (topupsByWallet.get(wallet.id) || 0) - (expensesByWallet.get(wallet.id) || 0),
+      calculated_balance: (wallet.balance || 0) + (topupsByWallet.get(wallet.id) || 0) + (reimbursementsByWallet.get(wallet.id) || 0) - (expensesByWallet.get(wallet.id) || 0),
     }));
   },
 
@@ -493,13 +523,52 @@ export const pettyCashApi = {
 
   /**
    * Create an expense with auto-generated expense number
+   * Also triggers an accounting event for automatic journal generation
    */
   async createExpenseWithNumber(expense: Omit<PettyCashExpenseInsert, 'expense_number'>): Promise<PettyCashExpense> {
     const expenseNumber = await this.generateExpenseNumber();
-    return this.createExpense({
+    const createdExpense = await this.createExpense({
       ...expense,
       expense_number: expenseNumber,
     });
+
+    // Fetch wallet info for event data
+    try {
+      const wallet = await this.getWalletById(expense.wallet_id);
+      if (wallet && wallet.company_id) {
+        const eventData: PettyCashExpenseEventData = {
+          expenseId: createdExpense.id,
+          expenseNumber: createdExpense.expense_number || expenseNumber,
+          walletId: expense.wallet_id,
+          walletName: wallet.wallet_name || 'Petty Cash Wallet',
+          companyId: wallet.company_id,
+          projectId: createdExpense.project_id || undefined,
+          expenseDate: createdExpense.expense_date,
+          description: createdExpense.description || 'Petty cash expense',
+          amount: createdExpense.amount || 0,
+          category: undefined,
+          currency: wallet.currency || 'THB',
+        };
+
+        // Create and process the accounting event (don't await to avoid blocking)
+        createAndProcessEvent(
+          'PETTYCASH_EXPENSE_CREATED',
+          createdExpense.expense_date,
+          [wallet.company_id],
+          eventData as unknown as Record<string, unknown>,
+          'petty_cash_expense',
+          createdExpense.id,
+          createdExpense.created_by || undefined
+        ).catch(err => {
+          console.error('Failed to create petty cash expense event:', err);
+        });
+      }
+    } catch (err) {
+      // Don't fail the expense creation if event creation fails
+      console.error('Error creating petty cash expense event:', err);
+    }
+
+    return createdExpense;
   },
 
   /**
@@ -585,8 +654,24 @@ export const pettyCashApi = {
     return data;
   },
 
+  /**
+   * Update a top-up
+   * Triggers an accounting event when status changes to 'completed'
+   */
   async updateTopup(id: string, updates: PettyCashTopupUpdate): Promise<PettyCashTopup> {
     const supabase = createClient();
+
+    // If updating to 'completed' status, we need the original topup data first
+    let originalTopup: PettyCashTopup | null = null;
+    if (updates.status === 'completed') {
+      const { data: orig } = await supabase
+        .from('petty_cash_topups')
+        .select('*')
+        .eq('id', id)
+        .single();
+      originalTopup = orig;
+    }
+
     const { data, error } = await supabase
       .from('petty_cash_topups')
       .update(updates)
@@ -594,6 +679,46 @@ export const pettyCashApi = {
       .select()
       .single();
     if (error) throw error;
+
+    // Trigger event when status changes to 'completed'
+    if (updates.status === 'completed' && originalTopup && originalTopup.status !== 'completed') {
+      try {
+        const wallet = await this.getWalletById(data.wallet_id);
+        if (wallet && wallet.company_id) {
+          const eventData: PettyCashTopupEventData = {
+            topupId: data.id,
+            walletId: data.wallet_id,
+            walletName: wallet.wallet_name || 'Petty Cash Wallet',
+            companyId: wallet.company_id,
+            topupDate: data.topup_date,
+            amount: data.amount,
+            bankAccountId: data.bank_account_id || undefined,
+            // Note: bank account GL code would need to be fetched from bank_accounts table
+            // For now, use default
+            bankAccountCode: undefined,
+            bankAccountName: undefined,
+            reference: undefined,
+            currency: wallet.currency || 'THB',
+          };
+
+          // Create and process the accounting event
+          createAndProcessEvent(
+            'PETTYCASH_TOPUP_COMPLETED',
+            data.topup_date,
+            [wallet.company_id],
+            eventData as unknown as Record<string, unknown>,
+            'petty_cash_topup',
+            data.id,
+            undefined
+          ).catch(err => {
+            console.error('Failed to create petty cash topup event:', err);
+          });
+        }
+      } catch (err) {
+        console.error('Error creating petty cash topup event:', err);
+      }
+    }
+
     return data;
   },
 
@@ -686,6 +811,37 @@ export const pettyCashApi = {
     return (data ?? []) as PettyCashReimbursement[];
   },
 
+  /**
+   * Get pending reimbursements with wallet holder name and company name
+   */
+  async getPendingReimbursementsWithDetails(): Promise<(PettyCashReimbursement & { wallet_holder_name: string; company_name: string })[]> {
+    const supabase = createClient();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data, error } = await (supabase as any)
+      .from('petty_cash_reimbursements')
+      .select(`
+        *,
+        wallet:petty_cash_wallets(user_name, company_id),
+        company:companies(name)
+      `)
+      .eq('status', 'pending')
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+
+    return (data ?? []).map((item: { wallet: { user_name: string; company_id: string } | null; company: { name: string } | null }) => {
+      const walletData = item.wallet as { user_name: string; company_id: string } | null;
+      const companyData = item.company as { name: string } | null;
+      return {
+        ...item,
+        wallet_holder_name: walletData?.user_name || '',
+        company_name: companyData?.name || '',
+        wallet: undefined,
+        company: undefined,
+      };
+    }) as (PettyCashReimbursement & { wallet_holder_name: string; company_name: string })[];
+  },
+
   async getReimbursementsByWallet(walletId: string): Promise<PettyCashReimbursement[]> {
     const supabase = createClient();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -696,6 +852,149 @@ export const pettyCashApi = {
       .order('created_at', { ascending: false });
     if (error) throw error;
     return (data ?? []) as PettyCashReimbursement[];
+  },
+
+  /**
+   * Get paid petty cash expenses with reimbursement info by date range
+   * Used for P&L reports to include petty cash expenses that may not have linked expenses
+   * Also fetches the account code from the linked expense in the main expenses table
+   */
+  async getPaidPettyCashExpensesByDateRange(
+    startDate: string,
+    endDate: string
+  ): Promise<Array<{
+    id: string;
+    expenseNumber: string;
+    expenseDate: string;
+    amount: number;
+    description: string | null;
+    projectId: string | null;
+    companyId: string;
+    walletHolderName: string;
+    accountingExpenseAccountCode: string | null;
+    attachments: Array<{ id: string; name: string; url: string }>;
+  }>> {
+    const supabase = createClient();
+
+    // Get paid reimbursements with their expense details
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data, error } = await (supabase as any)
+      .from('petty_cash_reimbursements')
+      .select(`
+        *,
+        expense:petty_cash_expenses!expense_id(*),
+        wallet:petty_cash_wallets!wallet_id(user_name)
+      `)
+      .eq('status', 'paid')
+      .gte('payment_date', startDate)
+      .lte('payment_date', endDate)
+      .order('payment_date', { ascending: false });
+
+    if (error) throw error;
+
+    // Get all petty cash expense IDs to fetch linked expenses
+    const pettyCashExpenseIds = (data || [])
+      .map((r: { expense_id: string }) => r.expense_id)
+      .filter(Boolean);
+
+    // Fetch linked expenses from main expenses table to get account codes
+    // The linked expense has petty_cash_expense_id pointing to the PC expense
+    // Note: petty_cash_expense_id column was added in migration 032
+    const linkedExpenseMap = new Map<string, string>();
+    if (pettyCashExpenseIds.length > 0) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data: linkedExpenses } = await (supabase as any)
+        .from('expenses')
+        .select(`
+          petty_cash_expense_id,
+          line_items:expense_line_items(account_code)
+        `)
+        .in('petty_cash_expense_id', pettyCashExpenseIds);
+
+      if (linkedExpenses) {
+        for (const le of linkedExpenses as Array<{
+          petty_cash_expense_id: string;
+          line_items?: Array<{ account_code?: string | null }>;
+        }>) {
+          const pcExpenseId = le.petty_cash_expense_id;
+          const accountCode = le.line_items?.[0]?.account_code;
+          if (pcExpenseId && accountCode) {
+            linkedExpenseMap.set(pcExpenseId, accountCode);
+          }
+        }
+      }
+    }
+
+    // Map to result format, using expense_account_code from petty_cash_expenses,
+    // with fallback to linked expense account code for backwards compatibility
+    // Also deduplicate by expense ID (in case multiple reimbursements reference the same expense)
+    const seenExpenseIds = new Set<string>();
+    const results: Array<{
+      id: string;
+      expenseNumber: string;
+      expenseDate: string;
+      amount: number;
+      description: string | null;
+      projectId: string | null;
+      companyId: string;
+      walletHolderName: string;
+      accountingExpenseAccountCode: string | null;
+      attachments: Array<{ id: string; name: string; url: string }>;
+    }> = [];
+
+    for (const r of (data || []) as Array<{
+      expense_id: string;
+      company_id: string;
+      expense: {
+        id: string;
+        expense_number: string;
+        expense_date: string;
+        amount: number | null;
+        description: string | null;
+        project_id: string | null;
+        expense_account_code: string | null;
+        attachments: unknown;
+      } | null;
+      wallet: { user_name: string } | null;
+    }>) {
+      const pcExpenseId = r.expense?.id || r.expense_id;
+
+      // Skip if we've already processed this expense
+      if (seenExpenseIds.has(pcExpenseId)) continue;
+      seenExpenseIds.add(pcExpenseId);
+
+      // First try expense_account_code from petty_cash_expenses (new column)
+      // Fall back to linked expense account code for backwards compatibility
+      const accountCode = r.expense?.expense_account_code || linkedExpenseMap.get(pcExpenseId) || null;
+
+      // Parse attachments from JSONB
+      let attachments: Array<{ id: string; name: string; url: string }> = [];
+      if (r.expense?.attachments) {
+        try {
+          const parsed = Array.isArray(r.expense.attachments)
+            ? r.expense.attachments
+            : JSON.parse(r.expense.attachments as string);
+          attachments = parsed.filter((a: { url?: string }) => a?.url);
+        } catch {
+          // Ignore parse errors
+        }
+      }
+
+      results.push({
+        id: pcExpenseId,
+        expenseNumber: r.expense?.expense_number || 'Unknown',
+        expenseDate: r.expense?.expense_date || '',
+        amount: r.expense?.amount || 0,
+        description: r.expense?.description || null,
+        projectId: r.expense?.project_id || null,
+        companyId: r.company_id,
+        walletHolderName: r.wallet?.user_name || 'Unknown',
+        accountingExpenseAccountCode: accountCode,
+        attachments,
+      });
+    }
+
+    return results;
   },
 
   /**
@@ -805,6 +1104,7 @@ export const pettyCashApi = {
 
   /**
    * Mark reimbursement as paid (after bank transfer)
+   * Triggers an accounting event for automatic journal generation
    */
   async markReimbursementPaid(
     id: string,
@@ -825,7 +1125,47 @@ export const pettyCashApi = {
       .select()
       .single();
     if (error) throw error;
-    return data as PettyCashReimbursement;
+
+    const reimbursement = data as PettyCashReimbursement;
+
+    // Trigger accounting event for paid reimbursement
+    try {
+      const wallet = await this.getWalletById(reimbursement.wallet_id);
+      if (wallet && wallet.company_id) {
+        const eventData: PettyCashReimbursementEventData = {
+          reimbursementId: reimbursement.id,
+          reimbursementNumber: reimbursement.reimbursement_number,
+          walletId: reimbursement.wallet_id,
+          walletName: wallet.wallet_name || 'Petty Cash Wallet',
+          companyId: wallet.company_id,
+          paymentDate: paymentDate,
+          finalAmount: reimbursement.final_amount,
+          bankAccountId: reimbursement.bank_account_id || undefined,
+          // Note: bank account GL code would need to be fetched from bank_accounts table
+          bankAccountCode: undefined,
+          bankAccountName: undefined,
+          paymentReference: paymentReference || undefined,
+          currency: wallet.currency || 'THB',
+        };
+
+        // Create and process the accounting event
+        createAndProcessEvent(
+          'PETTYCASH_REIMBURSEMENT_PAID',
+          paymentDate,
+          [wallet.company_id],
+          eventData as unknown as Record<string, unknown>,
+          'petty_cash_reimbursement',
+          reimbursement.id,
+          reimbursement.approved_by || undefined
+        ).catch(err => {
+          console.error('Failed to create petty cash reimbursement event:', err);
+        });
+      }
+    } catch (err) {
+      console.error('Error creating petty cash reimbursement event:', err);
+    }
+
+    return reimbursement;
   },
 
   /**
@@ -896,14 +1236,19 @@ export const pettyCashApi = {
     pettyCashExpenseId: string,
     expenseData: {
       companyId: string;
-      vendorId: string;
-      vendorName: string;
+      vendorId?: string;
+      vendorName?: string;
       expenseDate: string;
       amount: number;
-      projectId: string;
+      projectId?: string;
       description?: string;
       accountCode?: string;
       createdBy?: string;
+      // VAT fields
+      vatType?: 'no_vat' | 'include' | 'exclude';
+      vatRate?: number;
+      vatAmount?: number;
+      subtotal?: number;
     }
   ): Promise<{ expenseId: string }> {
     const supabase = createClient();
@@ -920,18 +1265,43 @@ export const pettyCashApi = {
 
     const expenseNumber = `${prefix}${((count || 0) + 1).toString().padStart(4, '0')}`;
 
+    // Calculate VAT breakdown
+    let subtotal = expenseData.amount;
+    let vatAmount = 0;
+    let totalAmount = expenseData.amount;
+
+    if (expenseData.vatType && expenseData.vatType !== 'no_vat' && expenseData.vatRate) {
+      const rate = expenseData.vatRate / 100;
+      if (expenseData.vatType === 'include') {
+        // VAT is included in the amount
+        subtotal = expenseData.amount / (1 + rate);
+        vatAmount = expenseData.amount - subtotal;
+        totalAmount = expenseData.amount;
+      } else if (expenseData.vatType === 'exclude') {
+        // VAT is excluded - add on top
+        subtotal = expenseData.amount;
+        vatAmount = expenseData.amount * rate;
+        totalAmount = expenseData.amount + vatAmount;
+      }
+    }
+
+    // Use provided values if available (they may have been pre-calculated)
+    if (expenseData.subtotal !== undefined) subtotal = expenseData.subtotal;
+    if (expenseData.vatAmount !== undefined) vatAmount = expenseData.vatAmount;
+
     // Create the expense
     const { data: expense, error: expenseError } = await supabase
       .from('expenses')
       .insert([{
         company_id: expenseData.companyId,
         expense_number: expenseNumber,
-        vendor_id: expenseData.vendorId,
-        vendor_name: expenseData.vendorName,
+        vendor_id: expenseData.vendorId || null,
+        vendor_name: expenseData.vendorName || 'Petty Cash Expense',
         expense_date: expenseData.expenseDate,
-        subtotal: expenseData.amount,
-        total_amount: expenseData.amount,
-        net_payable: expenseData.amount,
+        subtotal: subtotal,
+        vat_amount: vatAmount,
+        total_amount: totalAmount,
+        net_payable: totalAmount,
         status: 'approved',
         payment_status: 'paid', // Petty cash expenses are already paid
         currency: 'THB',
@@ -949,16 +1319,50 @@ export const pettyCashApi = {
       .from('expense_line_items')
       .insert([{
         expense_id: expense.id,
-        project_id: expenseData.projectId,
+        project_id: expenseData.projectId || '',
         description: expenseData.description || 'Petty cash expense',
-        amount: expenseData.amount,
-        account_code: expenseData.accountCode,
+        amount: subtotal,
+        account_code: expenseData.accountCode || null,
         quantity: 1,
-        unit_price: expenseData.amount,
+        unit_price: subtotal,
         line_order: 1,
       }]);
 
     if (lineError) throw lineError;
+
+    // Trigger EXPENSE_APPROVED event to create journal entry
+    // This ensures the expense appears in P&L reports
+    try {
+      const approvedEventData: ExpenseApprovedEventData = {
+        expenseId: expense.id,
+        expenseNumber,
+        vendorName: expenseData.vendorName || 'Petty Cash Expense',
+        expenseDate: expenseData.expenseDate,
+        lineItems: [{
+          description: expenseData.description || 'Petty cash expense',
+          accountCode: expenseData.accountCode || null,
+          amount: subtotal,
+        }],
+        totalSubtotal: subtotal,
+        totalVatAmount: vatAmount,
+        totalAmount: totalAmount,
+        currency: 'THB',
+      };
+
+      await createAndProcessEvent(
+        'EXPENSE_APPROVED',
+        expenseData.expenseDate,
+        [expenseData.companyId],
+        approvedEventData as unknown as Record<string, unknown>,
+        'expense',
+        expense.id,
+        expenseData.createdBy,
+        true // forcePost: true - ensures journal is posted immediately for P&L reporting
+      );
+    } catch (eventError) {
+      // Log but don't fail - the expense is created, journal entry can be created later
+      console.warn('Failed to create journal entry for linked expense:', eventError);
+    }
 
     return { expenseId: expense.id };
   }

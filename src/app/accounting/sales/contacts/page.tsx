@@ -2,13 +2,53 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { AppShell } from '@/components/accounting/AppShell';
-import { Users, Plus, Edit2, Search, Building2, ShoppingCart, Loader2 } from 'lucide-react';
+import { Users, Plus, Edit2, Search, Building2, ShoppingCart, Loader2, Ship } from 'lucide-react';
 import { ContactFormModal } from '@/components/contact/ContactFormModal';
 import { contactsApi } from '@/lib/supabase/api';
 import { dbContactToFrontend, frontendContactToDb } from '@/lib/supabase/transforms';
 import { Contact, ContactType } from '@/data/contact/types';
 
-type FilterTab = 'all' | 'customer' | 'vendor';
+type FilterTab = 'all' | 'customer' | 'vendor' | 'agency' | 'boat_operator';
+
+const typeStyles: Record<ContactType, string> = {
+  customer: 'bg-blue-100 text-blue-800',
+  vendor: 'bg-orange-100 text-orange-800',
+  agency: 'bg-green-100 text-green-800',
+  boat_operator: 'bg-teal-100 text-teal-800',
+};
+
+const typeLabels: Record<ContactType, string> = {
+  customer: 'Customer',
+  vendor: 'Vendor',
+  agency: 'Agency',
+  boat_operator: 'Operator',
+};
+
+function TypeIcon({ type }: { type: ContactType }) {
+  switch (type) {
+    case 'customer':
+      return <ShoppingCart className="h-3.5 w-3.5 text-blue-600" />;
+    case 'vendor':
+      return <Building2 className="h-3.5 w-3.5 text-orange-600" />;
+    case 'agency':
+      return <Building2 className="h-3.5 w-3.5 text-green-600" />;
+    case 'boat_operator':
+      return <Ship className="h-3.5 w-3.5 text-teal-600" />;
+  }
+}
+
+function TypeBadges({ types }: { types: ContactType[] }) {
+  return (
+    <div className="flex flex-wrap gap-1">
+      {types.map((t) => (
+        <span key={t} className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${typeStyles[t]}`}>
+          <TypeIcon type={t} />
+          {typeLabels[t]}
+        </span>
+      ))}
+    </div>
+  );
+}
 
 export default function ContactsPage() {
   const [contacts, setContacts] = useState<Contact[]>([]);
@@ -44,9 +84,11 @@ export default function ContactsPage() {
       // Filter by active status
       if (!showInactive && !contact.isActive) return false;
 
-      // Filter by type
-      if (filterTab === 'customer' && contact.type === 'vendor') return false;
-      if (filterTab === 'vendor' && contact.type === 'customer') return false;
+      // Filter by type (array-based)
+      if (filterTab === 'customer' && !contact.type.includes('customer')) return false;
+      if (filterTab === 'vendor' && !contact.type.includes('vendor')) return false;
+      if (filterTab === 'agency' && !contact.type.includes('agency')) return false;
+      if (filterTab === 'boat_operator' && !contact.type.includes('boat_operator')) return false;
 
       // Filter by search query
       if (searchQuery) {
@@ -87,39 +129,11 @@ export default function ContactsPage() {
     await fetchContacts();
   };
 
-  const getTypeIcon = (type: ContactType) => {
-    switch (type) {
-      case 'customer':
-        return <ShoppingCart className="h-4 w-4 text-blue-600" />;
-      case 'vendor':
-        return <Building2 className="h-4 w-4 text-orange-600" />;
-      case 'both':
-        return <Users className="h-4 w-4 text-purple-600" />;
-    }
-  };
-
-  const getTypeBadge = (type: ContactType) => {
-    const styles = {
-      customer: 'bg-blue-100 text-blue-800',
-      vendor: 'bg-orange-100 text-orange-800',
-      both: 'bg-purple-100 text-purple-800',
-    };
-    const labels = {
-      customer: 'Customer',
-      vendor: 'Vendor',
-      both: 'Both',
-    };
-    return (
-      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${styles[type]}`}>
-        {getTypeIcon(type)}
-        {labels[type]}
-      </span>
-    );
-  };
-
   // Count contacts by type for tabs
-  const customerCount = contacts.filter(c => (showInactive || c.isActive) && (c.type === 'customer' || c.type === 'both')).length;
-  const vendorCount = contacts.filter(c => (showInactive || c.isActive) && (c.type === 'vendor' || c.type === 'both')).length;
+  const customerCount = contacts.filter(c => (showInactive || c.isActive) && c.type.includes('customer')).length;
+  const vendorCount = contacts.filter(c => (showInactive || c.isActive) && c.type.includes('vendor')).length;
+  const agencyCount = contacts.filter(c => (showInactive || c.isActive) && c.type.includes('agency')).length;
+  const operatorCount = contacts.filter(c => (showInactive || c.isActive) && c.type.includes('boat_operator')).length;
   const allCount = contacts.filter(c => showInactive || c.isActive).length;
 
   return (
@@ -161,37 +175,26 @@ export default function ContactsPage() {
         <div className="rounded-lg border border-gray-200 bg-white p-4">
           <div className="flex flex-col md:flex-row md:items-center gap-4">
             {/* Tabs */}
-            <div className="flex gap-1 bg-gray-100 p-1 rounded-lg">
-              <button
-                onClick={() => setFilterTab('all')}
-                className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
-                  filterTab === 'all'
-                    ? 'bg-white text-gray-900 shadow-sm'
-                    : 'text-gray-600 hover:text-gray-900'
-                }`}
-              >
-                All ({allCount})
-              </button>
-              <button
-                onClick={() => setFilterTab('customer')}
-                className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
-                  filterTab === 'customer'
-                    ? 'bg-white text-gray-900 shadow-sm'
-                    : 'text-gray-600 hover:text-gray-900'
-                }`}
-              >
-                Customers ({customerCount})
-              </button>
-              <button
-                onClick={() => setFilterTab('vendor')}
-                className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
-                  filterTab === 'vendor'
-                    ? 'bg-white text-gray-900 shadow-sm'
-                    : 'text-gray-600 hover:text-gray-900'
-                }`}
-              >
-                Vendors ({vendorCount})
-              </button>
+            <div className="flex flex-wrap gap-1 bg-gray-100 p-1 rounded-lg">
+              {([
+                { key: 'all' as FilterTab, label: 'All', count: allCount },
+                { key: 'customer' as FilterTab, label: 'Customers', count: customerCount },
+                { key: 'vendor' as FilterTab, label: 'Vendors', count: vendorCount },
+                { key: 'agency' as FilterTab, label: 'Agencies', count: agencyCount },
+                { key: 'boat_operator' as FilterTab, label: 'Operators', count: operatorCount },
+              ]).map((tab) => (
+                <button
+                  key={tab.key}
+                  onClick={() => setFilterTab(tab.key)}
+                  className={`px-3 py-2 text-sm font-medium rounded-md transition-colors ${
+                    filterTab === tab.key
+                      ? 'bg-white text-gray-900 shadow-sm'
+                      : 'text-gray-600 hover:text-gray-900'
+                  }`}
+                >
+                  {tab.label} ({tab.count})
+                </button>
+              ))}
             </div>
 
             {/* Search */}
@@ -298,7 +301,7 @@ export default function ContactsPage() {
                         )}
                       </td>
                       <td className="px-4 py-3">
-                        {getTypeBadge(contact.type)}
+                        <TypeBadges types={contact.type} />
                       </td>
                       <td className="px-4 py-3 text-sm text-gray-600">
                         {contact.contactPerson || '-'}

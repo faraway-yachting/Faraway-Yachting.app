@@ -174,6 +174,7 @@ export const bankFeedLinesApi = {
         matches:bank_matches(*)
       `)
       .eq('bank_account_id', bankAccountId)
+      .neq('status', 'deleted')
       .order('transaction_date', { ascending: false });
     if (error) throw error;
     return (data ?? []) as BankFeedLineWithMatches[];
@@ -188,6 +189,7 @@ export const bankFeedLinesApi = {
         matches:bank_matches(*)
       `)
       .eq('company_id', companyId)
+      .neq('status', 'deleted')
       .order('transaction_date', { ascending: false });
     if (error) throw error;
     return (data ?? []) as BankFeedLineWithMatches[];
@@ -261,11 +263,45 @@ export const bankFeedLinesApi = {
     return data;
   },
 
-  async delete(id: string): Promise<void> {
+  async delete(id: string, deletedBy?: string): Promise<void> {
     const supabase = getSupabase();
     const { error } = await supabase
       .from('bank_feed_lines')
-      .delete()
+      .update({
+        status: 'deleted',
+        ignored_by: deletedBy || null,
+        ignored_at: new Date().toISOString(),
+        ignored_reason: 'Deleted by user',
+      })
+      .eq('id', id);
+    if (error) throw error;
+  },
+
+  async getDeleted(companyIds: string[]): Promise<BankFeedLineWithMatches[]> {
+    const supabase = getSupabase();
+    const { data, error } = await supabase
+      .from('bank_feed_lines')
+      .select(`
+        *,
+        matches:bank_matches(*)
+      `)
+      .in('company_id', companyIds)
+      .eq('status', 'deleted')
+      .order('updated_at', { ascending: false });
+    if (error) throw error;
+    return (data ?? []) as BankFeedLineWithMatches[];
+  },
+
+  async restore(id: string): Promise<void> {
+    const supabase = getSupabase();
+    const { error } = await supabase
+      .from('bank_feed_lines')
+      .update({
+        status: 'unmatched',
+        ignored_by: null,
+        ignored_at: null,
+        ignored_reason: null,
+      })
       .eq('id', id);
     if (error) throw error;
   },

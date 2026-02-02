@@ -13,7 +13,8 @@ export type BankFeedStatus =
   | 'partially_matched' // Some amount matched
   | 'needs_review'      // Matched but has issues
   | 'ignored'           // User marked as non-business
-  | 'unmatched';        // Default state
+  | 'unmatched'         // Default state
+  | 'deleted';          // Soft-deleted by user
 
 export type ReconciliationScope = 'group' | 'company' | 'project';
 export type ViewMode = 'bank-first' | 'system-first';

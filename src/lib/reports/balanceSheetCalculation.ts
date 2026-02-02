@@ -7,9 +7,15 @@
  */
 
 import { Currency } from '@/data/company/types';
-import { chartOfAccounts, AccountType, ChartOfAccount } from '@/data/accounting/chartOfAccounts';
-import { getAllJournalEntries } from '@/data/accounting/journalEntries';
-import { JournalEntry, JournalEntryLine } from '@/data/accounting/journalEntryTypes';
+import {
+  journalEntriesApi,
+  chartOfAccountsApi,
+  JournalEntryWithLines,
+} from '@/lib/supabase/api/journalEntries';
+import type { Database } from '@/lib/supabase/database.types';
+
+type ChartOfAccountRow = Database['public']['Tables']['chart_of_accounts']['Row'];
+export type AccountType = 'Asset' | 'Liability' | 'Equity' | 'Revenue' | 'Expense';
 
 // ============================================================================
 // Types
@@ -81,63 +87,41 @@ export interface BalanceSheet {
 // ============================================================================
 
 /**
- * Get all posted journal entries up to the specified date
- */
-function getPostedEntriesUpToDate(
-  asOfDate: string,
-  companyId?: string
-): JournalEntry[] {
-  const allEntries = getAllJournalEntries();
-
-  return allEntries.filter(entry => {
-    // Only posted entries
-    if (entry.status !== 'posted') return false;
-
-    // Up to and including the as-of date
-    if (entry.date > asOfDate) return false;
-
-    // Company filter if specified
-    if (companyId && entry.companyId !== companyId) return false;
-
-    return true;
-  });
-}
-
-/**
  * Calculate account balances from journal entry lines
  */
 function calculateAccountBalances(
-  entries: JournalEntry[],
-  accountType: AccountType
+  entries: JournalEntryWithLines[],
+  accountType: AccountType,
+  chartOfAccounts: ChartOfAccountRow[]
 ): Map<string, AccountBalance> {
   const balanceMap = new Map<string, AccountBalance>();
 
   // Get all accounts of this type from chart of accounts
-  const accountsOfType = chartOfAccounts.filter(a => a.accountType === accountType);
+  const accountsOfType = chartOfAccounts.filter(a => a.account_type === accountType);
 
   // Initialize all accounts with zero balances
   for (const account of accountsOfType) {
     balanceMap.set(account.code, {
       accountCode: account.code,
       accountName: account.name,
-      category: account.category,
-      subType: account.subType,
-      normalBalance: account.normalBalance,
+      category: (account as ChartOfAccountRow & { category?: string }).category || '',
+      subType: (account as ChartOfAccountRow & { sub_type?: string }).sub_type || '',
+      normalBalance: account.normal_balance as 'Debit' | 'Credit',
       debitTotal: 0,
       creditTotal: 0,
       balance: 0,
       balanceTHB: 0,
-      currency: account.currency,
+      currency: (account as ChartOfAccountRow & { currency?: string }).currency as Currency | undefined,
     });
   }
 
   // Process all journal entry lines
   for (const entry of entries) {
     for (const line of entry.lines) {
-      const accountBalance = balanceMap.get(line.accountCode);
+      const accountBalance = balanceMap.get(line.account_code);
       if (!accountBalance) continue; // Skip if not in our account type
 
-      if (line.type === 'debit') {
+      if (line.entry_type === 'debit') {
         accountBalance.debitTotal += line.amount;
       } else {
         accountBalance.creditTotal += line.amount;
@@ -211,11 +195,12 @@ function groupBySubType(
  * Build a section (Assets, Liabilities, or Equity)
  */
 function buildSection(
-  entries: JournalEntry[],
+  entries: JournalEntryWithLines[],
   accountType: AccountType,
-  sectionName: string
+  sectionName: string,
+  chartOfAccounts: ChartOfAccountRow[]
 ): BalanceSheetSection {
-  const balances = calculateAccountBalances(entries, accountType);
+  const balances = calculateAccountBalances(entries, accountType, chartOfAccounts);
   const subTypes = groupBySubType(balances);
 
   const total = subTypes.reduce((sum, st) => sum + st.total, 0);
@@ -240,13 +225,71 @@ function buildSection(
 export async function generateBalanceSheet(options: BalanceSheetOptions): Promise<BalanceSheet> {
   const { companyId, asOfDate } = options;
 
-  // Get all posted entries up to the as-of date
-  const entries = getPostedEntriesUpToDate(asOfDate, companyId);
+  // Fetch posted entries from Supabase
+  const entries = await journalEntriesApi.getPostedEntriesWithLinesUpToDate(asOfDate, companyId);
+
+  // Fetch chart of accounts from Supabase
+  const chartOfAccounts = await chartOfAccountsApi.getAll();
 
   // Build each section
-  const assets = buildSection(entries, 'Asset', 'Assets');
-  const liabilities = buildSection(entries, 'Liability', 'Liabilities');
-  const equity = buildSection(entries, 'Equity', 'Equity');
+  const assets = buildSection(entries, 'Asset', 'Assets', chartOfAccounts);
+  const liabilities = buildSection(entries, 'Liability', 'Liabilities', chartOfAccounts);
+  const equity = buildSection(entries, 'Equity', 'Equity', chartOfAccounts);
+
+  // --- Virtual Closing: Current Year Earnings ---
+  // Per IFRS/IAS 1, the Balance Sheet must reflect net income in Equity.
+  // Instead of requiring explicit year-end closing entries, we compute
+  // net income (Revenue - Expenses) from posted journals and inject it
+  // as "Current Year Earnings" (3210) under Equity → Retained Earnings.
+  // This is the standard approach used by QuickBooks, Xero, etc.
+  const revenueBalances = calculateAccountBalances(entries, 'Revenue', chartOfAccounts);
+  const expenseBalances = calculateAccountBalances(entries, 'Expense', chartOfAccounts);
+
+  let totalRevenue = 0;
+  for (const bal of revenueBalances.values()) {
+    totalRevenue += bal.balance; // credit-normal: positive = income
+  }
+
+  let totalExpenses = 0;
+  for (const bal of expenseBalances.values()) {
+    totalExpenses += bal.balance; // debit-normal: positive = expense
+  }
+
+  const currentYearEarnings = totalRevenue - totalExpenses;
+
+  if (Math.abs(currentYearEarnings) >= 0.01) {
+    const cyeAccount: AccountBalance = {
+      accountCode: '3210',
+      accountName: 'Current Year Earnings',
+      category: 'Equity',
+      subType: 'Retained Earnings',
+      normalBalance: 'Credit',
+      debitTotal: 0,
+      creditTotal: 0,
+      balance: currentYearEarnings,
+      balanceTHB: currentYearEarnings,
+    };
+
+    let retainedEarningsSubType = equity.subTypes.find(st => st.name === 'Retained Earnings');
+    if (!retainedEarningsSubType) {
+      retainedEarningsSubType = { name: 'Retained Earnings', accounts: [], total: 0, totalTHB: 0 };
+      equity.subTypes.push(retainedEarningsSubType);
+      // Re-sort subtypes
+      const order = ['Current Asset', 'Non-Current Asset', 'Current Liability', 'Non-Current Liability', 'Share Capital', 'Reserves', 'Retained Earnings', 'Other Equity'];
+      equity.subTypes.sort((a, b) => order.indexOf(a.name) - order.indexOf(b.name));
+    }
+
+    // Remove any existing 3210 from actual journal entries to avoid double-counting
+    retainedEarningsSubType.accounts = retainedEarningsSubType.accounts.filter(a => a.accountCode !== '3210');
+    retainedEarningsSubType.accounts.push(cyeAccount);
+    retainedEarningsSubType.accounts.sort((a, b) => a.accountCode.localeCompare(b.accountCode));
+
+    retainedEarningsSubType.total = retainedEarningsSubType.accounts.reduce((s, a) => s + a.balance, 0);
+    retainedEarningsSubType.totalTHB = retainedEarningsSubType.accounts.reduce((s, a) => s + a.balanceTHB, 0);
+
+    equity.total = equity.subTypes.reduce((s, st) => s + st.total, 0);
+    equity.totalTHB = equity.subTypes.reduce((s, st) => s + st.totalTHB, 0);
+  }
 
   // Calculate totals
   const totalAssets = assets.total;
@@ -264,13 +307,9 @@ export async function generateBalanceSheet(options: BalanceSheetOptions): Promis
   const differenceTHB = totalAssetsTHB - totalLiabilitiesAndEquityTHB;
   const isBalanced = Math.abs(differenceTHB) < 0.01;
 
-  // Collect unique currencies from all entries
+  // Collect unique currencies from chart of accounts (since entries don't have currency on lines)
   const currencySet = new Set<Currency>();
-  for (const entry of entries) {
-    for (const line of entry.lines) {
-      currencySet.add(line.currency);
-    }
-  }
+  currencySet.add('THB'); // Default currency
 
   return {
     options,

@@ -125,6 +125,18 @@ export const invoicesApi = {
     return data ?? [];
   },
 
+  async getByBookingId(bookingId: string) {
+    const supabase = createClient();
+    const { data, error } = await supabase
+      .from('invoices')
+      .select('id, invoice_number, status, total_amount, currency, invoice_date, quotation_id, created_at, company_id')
+      .eq('booking_id', bookingId)
+      .neq('status', 'void')
+      .order('created_at', { ascending: true });
+    if (error) throw error;
+    return data ?? [];
+  },
+
   async getByCompany(companyId: string): Promise<Invoice[]> {
     const supabase = createClient();
     const { data, error } = await supabase

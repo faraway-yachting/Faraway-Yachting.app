@@ -126,7 +126,7 @@ export function dbContactToFrontend(db: DbContact): Contact {
   return {
     id: db.id,
     name: db.name,
-    type: db.type as ContactType,
+    type: db.type as ContactType[],
     contactPerson: db.contact_person ?? undefined,
     email: db.email ?? undefined,
     phone: db.phone ?? undefined,

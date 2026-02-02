@@ -36,18 +36,28 @@ import {
 } from '@/lib/petty-cash/utils';
 import { pettyCashApi, type PettyCashReimbursement as DbReimbursement } from '@/lib/supabase/api/pettyCash';
 import { companiesApi } from '@/lib/supabase/api/companies';
+import { projectsApi } from '@/lib/supabase/api/projects';
 import { useAuth } from '@/components/auth/AuthProvider';
+import { notifyWalletHolderClaimPaid, notifyWalletHolderClaimRejected } from '@/data/notifications/notifications';
 
 type StatusFilter = 'all' | 'pending' | 'approved' | 'paid' | 'rejected';
 type GroupBy = 'none' | 'company' | 'holder' | 'status';
+
+// Extended reimbursement type with project info
+interface ReimbursementWithProject extends PettyCashReimbursement {
+  projectId?: string;
+  projectName?: string;
+}
 
 // Transform database reimbursement to frontend type
 function transformReimbursement(
   db: DbReimbursement,
   walletName: string,
   companyName: string,
-  expenseNumber: string
-): PettyCashReimbursement {
+  expenseNumber: string,
+  projectId?: string,
+  projectName?: string
+): ReimbursementWithProject {
   return {
     id: db.id,
     reimbursementNumber: db.reimbursement_number,
@@ -73,6 +83,8 @@ function transformReimbursement(
     rejectionReason: db.rejection_reason || undefined,
     createdAt: db.created_at,
     updatedAt: db.updated_at,
+    projectId,
+    projectName,
   };
 }
 
@@ -91,7 +103,7 @@ export default function ReimbursementsPage() {
 
   // Supabase data state
   const [isLoading, setIsLoading] = useState(true);
-  const [dbReimbursements, setDbReimbursements] = useState<PettyCashReimbursement[]>([]);
+  const [dbReimbursements, setDbReimbursements] = useState<ReimbursementWithProject[]>([]);
   const [companies, setCompanies] = useState<{ id: string; name: string }[]>([]);
 
   // Load data from Supabase
@@ -99,30 +111,79 @@ export default function ReimbursementsPage() {
     async function loadData() {
       setIsLoading(true);
       try {
-        // Fetch reimbursements, wallets, expenses, and companies in parallel
-        const [reimbursementsData, walletsData, expensesData, companiesData] = await Promise.all([
+        // Fetch reimbursements, wallets, expenses, companies, and projects in parallel
+        const [reimbursementsData, walletsData, expensesData, companiesData, projectsData] = await Promise.all([
           pettyCashApi.getAllReimbursements(),
           pettyCashApi.getAllWallets(),
           pettyCashApi.getAllExpenses(),
           companiesApi.getAll(),
+          projectsApi.getAll(),
         ]);
 
         // Create lookup maps
         const walletMap = new Map(walletsData.map(w => [w.id, w]));
         const expenseMap = new Map(expensesData.map(e => [e.id, e]));
         const companyMap = new Map(companiesData.map(c => [c.id, c]));
+        const projectMap = new Map(projectsData.map(p => [p.id, p]));
+
+        // Find submitted expenses that don't have reimbursements
+        const existingExpenseIds = new Set(reimbursementsData.map(r => r.expense_id));
+        const submittedExpensesWithoutReimbursement = expensesData.filter(
+          e => e.status === 'submitted' && !existingExpenseIds.has(e.id) && e.company_id
+        );
+
+        // Auto-create reimbursements for submitted expenses that don't have them
+        const createdReimbursements = await Promise.all(
+          submittedExpensesWithoutReimbursement.map(async (expense) => {
+            try {
+              const reimbursement = await pettyCashApi.createReimbursementWithNumber({
+                wallet_id: expense.wallet_id,
+                expense_id: expense.id,
+                amount: expense.amount || 0,
+                final_amount: expense.amount || 0,
+                company_id: expense.company_id!,
+                status: 'pending' as const,
+                // Optional fields - set to null for auto-created reimbursements
+                bank_account_id: null,
+                payment_date: null,
+                payment_reference: null,
+                adjustment_amount: null,
+                adjustment_reason: null,
+                approved_by: null,
+                rejected_by: null,
+                rejection_reason: null,
+                bank_feed_line_id: null,
+                created_by: null,
+              });
+              console.log(`Auto-created reimbursement for expense ${expense.expense_number}`);
+              return reimbursement;
+            } catch (error) {
+              console.error(`Failed to auto-create reimbursement for expense ${expense.expense_number}:`, error);
+              return null;
+            }
+          })
+        );
+
+        // Combine original and newly created reimbursements
+        const allReimbursementsData = [
+          ...reimbursementsData,
+          ...createdReimbursements.filter((r): r is NonNullable<typeof r> => r !== null),
+        ];
 
         // Transform reimbursements
-        const transformed = reimbursementsData.map(r => {
+        const transformed = allReimbursementsData.map(r => {
           const wallet = walletMap.get(r.wallet_id);
           const expense = expenseMap.get(r.expense_id);
           const company = companyMap.get(r.company_id);
+          const project = expense?.project_id ? projectMap.get(expense.project_id) : null;
 
           return transformReimbursement(
             r,
             wallet?.user_name || 'Unknown',
             company?.name || 'Unknown',
-            expense?.expense_number || 'Unknown'
+            expense?.expense_number || 'Unknown',
+            expense?.project_id || undefined,
+            project?.name || undefined
           );
         });
 
@@ -141,13 +202,13 @@ export default function ReimbursementsPage() {
   }, [refreshKey]);
 
   // Combine Supabase and mock data (if any)
-  const allReimbursements = useMemo(() => {
+  const allReimbursements = useMemo((): ReimbursementWithProject[] => {
     // If we have Supabase data, use it
     if (dbReimbursements.length > 0) {
       return dbReimbursements;
     }
-    // Fall back to mock data
-    return getMockReimbursements();
+    // Fall back to mock data (no project info available)
+    return getMockReimbursements().map(r => ({ ...r, projectId: undefined, projectName: undefined }));
   }, [dbReimbursements]);
 
   // Apply filters
@@ -173,7 +234,7 @@ export default function ReimbursementsPage() {
       return { 'All Reimbursements': filteredReimbursements };
     }
 
-    const groups: Record<string, PettyCashReimbursement[]> = {};
+    const groups: Record<string, ReimbursementWithProject[]> = {};
 
     filteredReimbursements.forEach((r) => {
       let key: string;
@@ -231,6 +292,41 @@ export default function ReimbursementsPage() {
       const supabaseExpense = await pettyCashApi.getExpenseById(reimbursement.expenseId);
 
       if (supabaseExpense) {
+        // Fetch project name if project_id exists
+        let projectName = '';
+        if (supabaseExpense.project_id) {
+          try {
+            const project = await projectsApi.getById(supabaseExpense.project_id);
+            projectName = project?.name || '';
+          } catch (err) {
+            console.error('Error fetching project:', err);
+          }
+        }
+
+        // Parse attachments from JSON string (column added in migration 032)
+        // Cast to extended type since attachments is not in auto-generated types
+        const extendedExpense = supabaseExpense as typeof supabaseExpense & { attachments?: unknown };
+        let attachments: Array<{ id: string; name: string; url: string; size: number; type: string; uploadedAt: string }> = [];
+        if (extendedExpense.attachments) {
+          try {
+            const parsed = typeof extendedExpense.attachments === 'string'
+              ? JSON.parse(extendedExpense.attachments)
+              : extendedExpense.attachments;
+            if (Array.isArray(parsed)) {
+              attachments = parsed.map((a: { id?: string; name?: string; url?: string; size?: number; type?: string; uploadedAt?: string }) => ({
+                id: a.id || '',
+                name: a.name || '',
+                url: a.url || '',
+                size: a.size || 0,
+                type: a.type || '',
+                uploadedAt: a.uploadedAt || new Date().toISOString(),
+              }));
+            }
+          } catch (err) {
+            console.error('Error parsing attachments:', err);
+          }
+        }
+
         // Transform Supabase expense to frontend format
         const amount = supabaseExpense.amount || 0;
         const transformedExpense: PettyCashExpense = {
@@ -244,9 +340,9 @@ export default function ReimbursementsPage() {
           description: supabaseExpense.description || '',
           amount: amount,
           projectId: supabaseExpense.project_id,
-          projectName: '', // Project name not fetched here
-          receiptStatus: 'pending',
-          attachments: [],
+          projectName: projectName,
+          receiptStatus: attachments.length > 0 ? 'original_received' : 'pending',
+          attachments: attachments,
           lineItems: [],
           subtotal: amount,
           vatAmount: 0,
@@ -281,6 +377,10 @@ export default function ReimbursementsPage() {
       bankAccountId: string,
       bankAccountName: string,
       paymentDate: string,
+      expenseAccountCode: string,
+      companyId: string,
+      vatType: 'include' | 'exclude' | 'no_vat',
+      vatRate: number,
       adjustmentAmount?: number,
       adjustmentReason?: string
     ) => {
@@ -305,6 +405,45 @@ export default function ReimbursementsPage() {
             `PAY-${Date.now()}`
           );
           // Note: The trigger in the database automatically updates wallet balance when status changes to 'paid'
+
+          // Create linked expense in main expenses table for P&L/Finances
+          // This ensures the expense shows in Finances and Reports
+          if (selectedExpense && selectedReimbursement) {
+            try {
+              await pettyCashApi.createLinkedExpense(
+                selectedExpense.id,
+                {
+                  companyId: companyId || selectedReimbursement.companyId || selectedExpense.companyId,
+                  vendorName: 'Petty Cash - ' + (selectedReimbursement.walletHolderName || 'Unknown'),
+                  expenseDate: selectedExpense.expenseDate,
+                  amount: selectedExpense.amount,
+                  projectId: selectedExpense.projectId,
+                  description: selectedExpense.description || `Petty Cash: ${selectedExpense.expenseNumber}`,
+                  accountCode: expenseAccountCode, // Use the account code from the modal
+                  createdBy: user.id,
+                  // VAT information from the modal
+                  vatType: vatType,
+                  vatRate: vatRate,
+                }
+              );
+            } catch (linkError) {
+              // Don't fail the approval if linked expense creation fails
+              // The expense might already be linked
+              console.warn('Could not create linked expense (may already exist):', linkError);
+            }
+          }
+
+          // Notify wallet holder that their claim has been processed
+          if (selectedReimbursement) {
+            const finalAmount = adjustmentAmount !== undefined
+              ? selectedReimbursement.amount + adjustmentAmount
+              : selectedReimbursement.amount;
+            notifyWalletHolderClaimPaid(
+              reimbursementId,
+              selectedReimbursement.reimbursementNumber,
+              finalAmount
+            );
+          }
         } else {
           // Fall back to mock data handlers
           approveMockReimbursement(
@@ -328,6 +467,13 @@ export default function ReimbursementsPage() {
             if (wallet) {
               addToWallet(wallet.id, updatedReimbursement.finalAmount);
             }
+
+            // Notify wallet holder that their claim has been processed
+            notifyWalletHolderClaimPaid(
+              reimbursementId,
+              updatedReimbursement.reimbursementNumber,
+              updatedReimbursement.finalAmount
+            );
           }
         }
 
@@ -340,7 +486,7 @@ export default function ReimbursementsPage() {
         alert('Failed to approve reimbursement. Please try again.');
       }
     },
-    [dbReimbursements, user]
+    [dbReimbursements, user, selectedExpense, selectedReimbursement]
   );
 
   const handleReject = useCallback(
@@ -355,6 +501,16 @@ export default function ReimbursementsPage() {
           rejectMockReimbursement(reimbursementId, 'current-manager', reason);
         }
 
+        // Notify wallet holder that their claim has been rejected
+        if (selectedReimbursement) {
+          notifyWalletHolderClaimRejected(
+            reimbursementId,
+            selectedReimbursement.reimbursementNumber,
+            selectedReimbursement.amount,
+            reason
+          );
+        }
+
         setShowApprovalModal(false);
         setSelectedReimbursement(null);
         setSelectedExpense(null);
@@ -364,7 +520,7 @@ export default function ReimbursementsPage() {
         alert('Failed to reject reimbursement. Please try again.');
       }
     },
-    [dbReimbursements, user]
+    [dbReimbursements, user, selectedReimbursement]
   );
 
   // Status badge
@@ -387,7 +543,7 @@ export default function ReimbursementsPage() {
     {
       key: 'expenseNumber',
       header: 'Expense',
-      render: (row: PettyCashReimbursement) => (
+      render: (row: ReimbursementWithProject) => (
         <button
           onClick={(e) => {
             e.stopPropagation();
@@ -399,6 +555,13 @@ export default function ReimbursementsPage() {
         </button>
       ),
     },
+    {
+      key: 'projectName',
+      header: 'Project',
+      render: (row: ReimbursementWithProject) => (
+        <span className="text-gray-700">{row.projectName || '-'}</span>
+      ),
+    },
     ...(groupBy !== 'company'
       ? [{ key: 'companyName', header: 'Company' }]
       : []),
@@ -406,7 +569,7 @@ export default function ReimbursementsPage() {
       key: 'finalAmount',
       header: 'Amount',
       align: 'right' as const,
-      render: (row: PettyCashReimbursement) => (
+      render: (row: ReimbursementWithProject) => (
         <span className="font-medium">{formatCurrency(row.finalAmount)}</span>
       ),
     },
@@ -416,7 +579,7 @@ export default function ReimbursementsPage() {
             key: 'status',
             header: 'Status',
             align: 'center' as const,
-            render: (row: PettyCashReimbursement) => (
+            render: (row: ReimbursementWithProject) => (
               <span
                 className={`inline-flex rounded-full px-2 py-1 text-xs font-semibold ${getStatusBadgeClass(
                   row.status
@@ -431,13 +594,13 @@ export default function ReimbursementsPage() {
     {
       key: 'createdAt',
       header: 'Requested',
-      render: (row: PettyCashReimbursement) => formatDate(row.createdAt),
+      render: (row: ReimbursementWithProject) => formatDate(row.createdAt),
     },
     {
       key: 'actions',
       header: '',
       align: 'right' as const,
-      render: (row: PettyCashReimbursement) => (
+      render: (row: ReimbursementWithProject) => (
         <button
           onClick={() => handleReview(row)}
           className={`px-3 py-1 text-xs font-medium rounded-lg transition-colors ${

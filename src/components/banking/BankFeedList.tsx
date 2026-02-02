@@ -1,6 +1,6 @@
 'use client';
 
-import { CheckCircle, AlertCircle, AlertTriangle, XCircle, Eye, Lightbulb } from 'lucide-react';
+import { CheckCircle, AlertCircle, AlertTriangle, XCircle, Eye, Lightbulb, Trash2 } from 'lucide-react';
 import { BankFeedLine, BankFeedStatus } from '@/data/banking/bankReconciliationTypes';
 
 interface BankFeedListProps {
@@ -9,6 +9,7 @@ interface BankFeedListProps {
   onSelectLine: (lineId: string) => void;
   onQuickMatch: (lineId: string) => void;
   onIgnore: (lineId: string) => void;
+  onDelete?: (lineId: string) => void;
 }
 
 export function BankFeedList({
@@ -17,6 +18,7 @@ export function BankFeedList({
   onSelectLine,
   onQuickMatch,
   onIgnore,
+  onDelete,
 }: BankFeedListProps) {
   const getStatusIcon = (status: BankFeedStatus) => {
     switch (status) {
@@ -44,6 +46,7 @@ export function BankFeedList({
       needs_review: 'bg-orange-100 text-orange-800',
       ignored: 'bg-gray-100 text-gray-600',
       unmatched: 'bg-yellow-100 text-yellow-800',
+      deleted: 'bg-red-100 text-red-600',
     };
 
     const labels: Record<BankFeedStatus, string> = {
@@ -53,6 +56,7 @@ export function BankFeedList({
       needs_review: 'Review',
       ignored: 'Ignored',
       unmatched: 'Unmatched',
+      deleted: 'Deleted',
     };
 
     return (
@@ -215,6 +219,20 @@ export function BankFeedList({
                       <Eye className="h-3 w-3" />
                       Details
                     </button>
+                    {onDelete && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (confirm('Delete this transaction? It will be moved to the Deleted tab.')) {
+                            onDelete(line.id);
+                          }
+                        }}
+                        className="flex items-center gap-1 px-2 py-1 text-xs font-medium text-red-600 hover:bg-red-50 rounded transition-colors"
+                        title="Delete transaction"
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </button>
+                    )}
                   </div>
 
                   {/* Running balance indicator */}

@@ -15,6 +15,7 @@ interface PLReportFiltersProps {
   onCompanyChange: (companyId: string) => void;
   onProjectChange: (projectId: string) => void;
   onShowInTHBChange: (showInTHB: boolean) => void;
+  isLoadingFilters?: boolean;
 }
 
 export function PLReportFilters({
@@ -30,6 +31,7 @@ export function PLReportFilters({
   onCompanyChange,
   onProjectChange,
   onShowInTHBChange,
+  isLoadingFilters = false,
 }: PLReportFiltersProps) {
   return (
     <div className="bg-white rounded-lg border border-gray-200 p-4 mb-6">
@@ -68,7 +70,8 @@ export function PLReportFilters({
           <select
             value={companyId}
             onChange={(e) => onCompanyChange(e.target.value)}
-            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            disabled={isLoadingFilters}
+            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-50"
           >
             <option value="">All Companies</option>
             {companies.map((company) => (
@@ -87,7 +90,8 @@ export function PLReportFilters({
           <select
             value={projectId}
             onChange={(e) => onProjectChange(e.target.value)}
-            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            disabled={isLoadingFilters}
+            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-50"
           >
             <option value="">All Projects</option>
             {projects.map((project) => (

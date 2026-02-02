@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { X, Save, FileText, Printer, XCircle, Building2, AlertCircle, Share2, Receipt, ChevronDown, Pencil, Loader2 } from 'lucide-react';
 import ClientSelector from './ClientSelector';
@@ -8,11 +8,15 @@ import LineItemEditor from './LineItemEditor';
 import QuotationPrintView from './QuotationPrintView';
 import { CharterInfoBox } from './CharterInfoBox';
 import type { Quotation, LineItem, PricingType, CharterType } from '@/data/income/types';
+import type { Booking, BookingType, BookingStatus } from '@/data/booking/types';
+import { BookingFormContainer } from '@/components/bookings/form/BookingFormContainer';
+import { bookingsApi } from '@/lib/supabase/api/bookings';
 import { charterTypeAccountCodes } from '@/data/income/types';
 import type { Currency, Company } from '@/data/company/types';
 import type { Project } from '@/data/project/types';
 import type { BankAccount } from '@/data/banking/types';
 import type { Contact } from '@/data/contact/types';
+import { createClient } from '@/lib/supabase/client';
 import { companiesApi } from '@/lib/supabase/api/companies';
 import { projectsApi } from '@/lib/supabase/api/projects';
 import { bankAccountsApi } from '@/lib/supabase/api/bankAccounts';
@@ -40,6 +44,13 @@ export default function QuotationForm({ quotation, onCancel }: QuotationFormProp
   const [companyBankAccounts, setCompanyBankAccounts] = useState<BankAccount[]>([]);
   const [clientContact, setClientContact] = useState<Contact | undefined>(undefined);
   const [isLoading, setIsLoading] = useState(true);
+
+  // Booking modal state
+  const [showBookingModal, setShowBookingModal] = useState(false);
+  const [prefilledBooking, setPrefilledBooking] = useState<Partial<Booking> | null>(null);
+
+  // Auto-draft ref
+  const autoDraftTriggeredRef = useRef(false);
 
   // Form state
   const [companyId, setCompanyId] = useState(quotation?.companyId || '');
@@ -253,9 +264,27 @@ export default function QuotationForm({ quotation, onCancel }: QuotationFormProp
     fetchRate();
   }, [currency, dateCreated]);
 
+  // Auto-save as draft when creating a new quotation and companyId is set
+  useEffect(() => {
+    if (isEditing || autoDraftTriggeredRef.current || !companyId) return;
+    autoDraftTriggeredRef.current = true;
+    const timer = setTimeout(() => {
+      handleSave('draft');
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [companyId]);
+
   // Calculate totals
   const totals = calculateDocumentTotals(lineItems, effectivePricingType);
   const whtAmount = calculateTotalWhtAmount(lineItems, effectivePricingType);
+
+  // Auto-prefill project in line items when boat is selected
+  useEffect(() => {
+    if (!boatId) return;
+    setLineItems(prev => prev.map(item =>
+      !item.projectId ? { ...item, projectId: boatId } : item
+    ));
+  }, [boatId]);
 
   // Agency project codes (when selected, external boat name is used)
   const AGENCY_PROJECT_CODES = ['FA'];
@@ -290,37 +319,23 @@ export default function QuotationForm({ quotation, onCancel }: QuotationFormProp
     };
     const bookingType = charterType ? bookingTypeMap[charterType] || 'day_charter' : 'day_charter';
 
-    // Build URL parameters for booking calendar
-    const params = new URLSearchParams();
-    params.set('status', 'enquiry'); // Quotation -> Enquiry
-    params.set('type', bookingType);
-    params.set('title', clientName || '');
-    params.set('customerName', clientName || '');
-
-    if (charterDateFrom) params.set('dateFrom', charterDateFrom);
-    if (charterDateTo) params.set('dateTo', charterDateTo);
-    if (charterTime) params.set('time', charterTime);
-
-    // Set boat info
-    if (isAgencyBooking && externalBoatName) {
-      params.set('externalBoatName', externalBoatName);
-    } else if (selectedBoat) {
-      params.set('projectId', selectedBoat.id);
-    }
-
-    // Set financial info
-    if (totals.totalAmount > 0) {
-      params.set('totalPrice', totals.totalAmount.toString());
-    }
-    params.set('currency', currency);
-
-    // Set source document reference
-    if (quotationNumber) {
-      params.set('sourceDoc', `Quotation: ${quotationNumber}`);
-    }
-
-    // Navigate to booking calendar with new booking form
-    router.push(`/bookings/manager/calendar?newBooking=true&${params.toString()}`);
+    // Build prefilled booking object
+    const prefilled: Partial<Booking> = {
+      status: 'enquiry' as BookingStatus,
+      type: bookingType as BookingType,
+      title: clientName || '',
+      customerName: clientName || '',
+      dateFrom: charterDateFrom || undefined,
+      dateTo: charterDateTo || undefined,
+      time: charterTime || undefined,
+      projectId: (isAgencyBooking ? undefined : selectedBoat?.id) || undefined,
+      externalBoatName: isAgencyBooking ? externalBoatName : undefined,
+      totalPrice: totals.totalAmount > 0 ? totals.totalAmount : undefined,
+      currency: currency as Currency,
+      internalNotes: quotationNumber ? `Source: Quotation ${quotationNumber}` : undefined,
+    };
+    setPrefilledBooking(prefilled);
+    setShowBookingModal(true);
   };
 
   // Handle Update Description - update first line item with charter info
@@ -1270,6 +1285,35 @@ Destination: `;
         isOpen={showPrintPreview}
         onClose={() => setShowPrintPreview(false)}
       />
+
+      {/* Inline Booking Modal */}
+      {showBookingModal && (
+        <BookingFormContainer
+          prefilled={prefilledBooking}
+          projects={companyProjects}
+          onSave={async (bookingData) => {
+            const now = new Date();
+            const yr = now.getFullYear();
+            const mo = String(now.getMonth() + 1).padStart(2, '0');
+            const seq = String(Math.floor(Math.random() * 1000)).padStart(3, '0');
+            const bookingNumber = `FA-${yr}${mo}${seq}`;
+            const supabase = createClient();
+            const { data: { user } } = await supabase.auth.getUser();
+            const dataWithDefaults = {
+              ...bookingData,
+              bookingNumber,
+              bookingOwner: bookingData.bookingOwner || user?.id || undefined,
+            };
+            await bookingsApi.create(dataWithDefaults);
+            setShowBookingModal(false);
+            setPrefilledBooking(null);
+          }}
+          onClose={() => {
+            setShowBookingModal(false);
+            setPrefilledBooking(null);
+          }}
+        />
+      )}
     </div>
   );
 }

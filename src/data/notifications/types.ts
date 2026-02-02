@@ -4,7 +4,8 @@ export type NotificationType =
   | 'reimbursement_created'
   | 'reimbursement_approved'
   | 'reimbursement_paid'
-  | 'reimbursement_rejected';
+  | 'reimbursement_rejected'
+  | 'booking_payment_needs_action';
 
 export type NotificationTargetRole = 'accountant' | 'manager' | 'petty_cash_holder' | 'all';
 
@@ -19,6 +20,7 @@ export interface Notification {
   createdAt: string;
   read: boolean;
   targetRole: NotificationTargetRole;
+  targetUserId?: string; // Specific user to notify (optional)
 }
 
 export interface NotificationInput {
@@ -29,4 +31,5 @@ export interface NotificationInput {
   referenceId: string;
   referenceNumber: string;
   targetRole: NotificationTargetRole;
+  targetUserId?: string; // Specific user to notify (optional)
 }

@@ -22,6 +22,8 @@ import {
 } from '@/data/revenueRecognition/types';
 import { charterTypeAccountCodes, type CharterType } from '@/data/income/types';
 import type { Currency } from '@/data/company/types';
+import { accountingEventsApi } from '@/lib/supabase/api/accountingEvents';
+import type { ManagementFeeEventData } from '@/lib/accounting/eventTypes';
 
 /**
  * Create a deferred revenue record when a receipt is paid
@@ -152,6 +154,152 @@ export async function getItemsNeedingReview(
   }));
 }
 
+// ============================================================================
+// Management Fee Auto-Trigger
+// ============================================================================
+
+/**
+ * Get the management company (Faraway Yachting)
+ * The management company is always Faraway Yachting for all projects
+ */
+async function getManagementCompany(): Promise<{ id: string; name: string } | null> {
+  const supabase = createClient();
+
+  const { data, error } = await supabase
+    .from('companies')
+    .select('id, name')
+    .ilike('name', '%Faraway Yachting%')
+    .limit(1)
+    .single();
+
+  if (error || !data) {
+    console.warn('Management company (Faraway Yachting) not found:', error);
+    return null;
+  }
+
+  return { id: data.id, name: data.name };
+}
+
+/**
+ * Get project details including management fee percentage
+ */
+async function getProjectWithFee(projectId: string): Promise<{
+  id: string;
+  name: string;
+  company_id: string;
+  management_fee_percentage: number | null;
+} | null> {
+  const supabase = createClient();
+
+  const { data, error } = await supabase
+    .from('projects')
+    .select('id, name, company_id, management_fee_percentage')
+    .eq('id', projectId)
+    .single();
+
+  if (error || !data) {
+    return null;
+  }
+
+  return data;
+}
+
+/**
+ * Get company name by ID
+ */
+async function getCompanyName(companyId: string): Promise<string> {
+  const supabase = createClient();
+
+  const { data } = await supabase
+    .from('companies')
+    .select('name')
+    .eq('id', companyId)
+    .single();
+
+  return data?.name || 'Unknown Company';
+}
+
+/**
+ * Auto-trigger management fee when revenue is recognized
+ * Called after revenue recognition is completed
+ */
+async function triggerManagementFee(
+  revenueRecord: RevenueRecognition,
+  recognitionDate: string
+): Promise<void> {
+  // Skip if no project - can't calculate management fee without project
+  if (!revenueRecord.projectId) {
+    return;
+  }
+
+  // Get project details with management fee percentage
+  const project = await getProjectWithFee(revenueRecord.projectId);
+  if (!project) {
+    console.warn(`Project ${revenueRecord.projectId} not found for management fee calculation`);
+    return;
+  }
+
+  // Skip if no management fee configured
+  const feePercentage = project.management_fee_percentage;
+  if (!feePercentage || feePercentage <= 0) {
+    return;
+  }
+
+  // Get management company (Faraway Yachting)
+  const managementCompany = await getManagementCompany();
+  if (!managementCompany) {
+    console.warn('Management company not found - skipping management fee');
+    return;
+  }
+
+  // Skip if project company is same as management company (no intercompany fee needed)
+  if (project.company_id === managementCompany.id) {
+    return;
+  }
+
+  // Calculate management fee
+  const grossIncome = revenueRecord.thbAmount;
+  const feeAmount = grossIncome * (feePercentage / 100);
+
+  // Get project company name
+  const projectCompanyName = await getCompanyName(project.company_id);
+
+  // Prepare event data
+  const eventData: ManagementFeeEventData = {
+    periodFrom: revenueRecord.charterDateFrom || recognitionDate,
+    periodTo: revenueRecord.charterDateTo || recognitionDate,
+    projectId: project.id,
+    projectName: project.name,
+    projectCompanyId: project.company_id,
+    managementCompanyId: managementCompany.id,
+    feePercentage: feePercentage,
+    grossIncome: grossIncome,
+    feeAmount: feeAmount,
+    currency: 'THB',
+  };
+
+  // Create and process management fee event
+  try {
+    const result = await accountingEventsApi.createAndProcess(
+      'MANAGEMENT_FEE_RECOGNIZED',
+      recognitionDate,
+      [project.company_id, managementCompany.id], // Both companies affected
+      eventData as unknown as Record<string, unknown>,
+      'revenue_recognition',
+      revenueRecord.id,
+      revenueRecord.recognizedBy || undefined
+    );
+
+    if (result.success) {
+      console.log(`Management fee event created: ${feeAmount} THB (${feePercentage}% of ${grossIncome} THB) for ${project.name}`);
+    } else {
+      console.error(`Failed to create management fee event: ${result.error}`);
+    }
+  } catch (error) {
+    console.error('Error creating management fee event:', error);
+  }
+}
+
 /**
  * Get records ready for automatic recognition (charter date has passed)
  */
@@ -184,11 +332,13 @@ export async function recognizeRevenueManually(
   const finalStatus: RevenueRecognitionStatus =
     trigger === 'immediate' ? 'manual_recognized' : 'recognized';
 
+  const finalRecognitionDate = recognitionDate || new Date().toISOString().split('T')[0];
+
   const { data, error } = await supabase
     .from('revenue_recognition' as any)
     .update({
       recognition_status: finalStatus,
-      recognition_date: recognitionDate || new Date().toISOString().split('T')[0],
+      recognition_date: finalRecognitionDate,
       recognition_trigger: trigger,
       recognized_by: recognizedBy,
       updated_at: new Date().toISOString(),
@@ -201,11 +351,17 @@ export async function recognizeRevenueManually(
     throw new Error(error.message || error.details || error.hint || 'Failed to recognize revenue');
   }
 
+  const revenueRecord = mapDbRowToRevenueRecognition(data as unknown as Record<string, unknown>);
+
   // TODO: Create the recognition journal entry here
   // Dr: Charter Deposits Received (2300)
   // Cr: Revenue (4010-4070)
 
-  return mapDbRowToRevenueRecognition(data as unknown as Record<string, unknown>);
+  // Auto-trigger management fee based on project's management_fee_percentage
+  // This creates intercompany journal entries between project company and Faraway Yachting
+  await triggerManagementFee(revenueRecord, finalRecognitionDate);
+
+  return revenueRecord;
 }
 
 /**

@@ -136,7 +136,7 @@ export type Database = {
         Row: {
           id: string
           name: string
-          type: 'customer' | 'vendor' | 'both'
+          type: string[]
           contact_person: string | null
           email: string | null
           phone: string | null
@@ -152,7 +152,7 @@ export type Database = {
         Insert: {
           id?: string
           name: string
-          type: 'customer' | 'vendor' | 'both'
+          type: string[]
           contact_person?: string | null
           email?: string | null
           phone?: string | null
@@ -168,7 +168,7 @@ export type Database = {
         Update: {
           id?: string
           name?: string
-          type?: 'customer' | 'vendor' | 'both'
+          type?: string[]
           contact_person?: string | null
           email?: string | null
           phone?: string | null
@@ -194,6 +194,11 @@ export type Database = {
           participants: Json
           status: 'active' | 'inactive' | 'completed'
           management_fee_percentage: number
+          intercompany_owner_company_id: string | null
+          intercompany_fee_day_charter: number | null
+          intercompany_fee_overnight: number | null
+          intercompany_fee_cabin: number | null
+          intercompany_fee_other: number | null
           created_by: string | null
           created_at: string
           updated_at: string
@@ -208,6 +213,11 @@ export type Database = {
           participants?: Json
           status?: 'active' | 'inactive' | 'completed'
           management_fee_percentage?: number
+          intercompany_owner_company_id?: string | null
+          intercompany_fee_day_charter?: number | null
+          intercompany_fee_overnight?: number | null
+          intercompany_fee_cabin?: number | null
+          intercompany_fee_other?: number | null
           created_by?: string | null
           created_at?: string
           updated_at?: string
@@ -222,6 +232,11 @@ export type Database = {
           participants?: Json
           status?: 'active' | 'inactive' | 'completed'
           management_fee_percentage?: number
+          intercompany_owner_company_id?: string | null
+          intercompany_fee_day_charter?: number | null
+          intercompany_fee_overnight?: number | null
+          intercompany_fee_cabin?: number | null
+          intercompany_fee_other?: number | null
           created_by?: string | null
           created_at?: string
           updated_at?: string
@@ -234,6 +249,981 @@ export type Database = {
             referencedColumns: ["id"]
           }
         ]
+      }
+      employees: {
+        Row: {
+          id: string
+          employee_id: string
+          user_profile_id: string | null
+          picture_url: string | null
+          full_name_en: string
+          full_name_th: string | null
+          nickname: string | null
+          email: string | null
+          phone: string | null
+          line_id: string | null
+          employment_type: string
+          company_id: string | null
+          position: string | null
+          status: 'active' | 'on_leave' | 'resigned' | 'terminated'
+          start_date: string | null
+          probation_end_date: string | null
+          contract_end_date: string | null
+          resignation_date: string | null
+          base_salary: number
+          currency: string
+          notes: string | null
+          created_by: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          employee_id?: string
+          user_profile_id?: string | null
+          picture_url?: string | null
+          full_name_en: string
+          full_name_th?: string | null
+          nickname?: string | null
+          email?: string | null
+          phone?: string | null
+          line_id?: string | null
+          employment_type?: string
+          company_id?: string | null
+          position?: string | null
+          status?: 'active' | 'on_leave' | 'resigned' | 'terminated'
+          start_date?: string | null
+          probation_end_date?: string | null
+          contract_end_date?: string | null
+          resignation_date?: string | null
+          base_salary?: number
+          currency?: string
+          notes?: string | null
+          created_by?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          employee_id?: string
+          user_profile_id?: string | null
+          picture_url?: string | null
+          full_name_en?: string
+          full_name_th?: string | null
+          nickname?: string | null
+          email?: string | null
+          phone?: string | null
+          line_id?: string | null
+          employment_type?: string
+          company_id?: string | null
+          position?: string | null
+          status?: 'active' | 'on_leave' | 'resigned' | 'terminated'
+          start_date?: string | null
+          probation_end_date?: string | null
+          contract_end_date?: string | null
+          resignation_date?: string | null
+          base_salary?: number
+          currency?: string
+          notes?: string | null
+          created_by?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      hr_positions: {
+        Row: {
+          id: string
+          name: string
+          is_active: boolean
+          sort_order: number
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          name: string
+          is_active?: boolean
+          sort_order?: number
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          name?: string
+          is_active?: boolean
+          sort_order?: number
+          created_at?: string
+        }
+        Relationships: []
+      }
+      hr_employment_types: {
+        Row: {
+          id: string
+          name: string
+          label: string
+          is_active: boolean
+          sort_order: number
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          name: string
+          label: string
+          is_active?: boolean
+          sort_order?: number
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          name?: string
+          label?: string
+          is_active?: boolean
+          sort_order?: number
+          created_at?: string
+        }
+        Relationships: []
+      }
+      employee_boat_assignments: {
+        Row: {
+          id: string
+          employee_id: string
+          boat_id: string
+          role_on_boat: string | null
+          is_primary: boolean
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          employee_id: string
+          boat_id: string
+          role_on_boat?: string | null
+          is_primary?: boolean
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          employee_id?: string
+          boat_id?: string
+          role_on_boat?: string | null
+          is_primary?: boolean
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      employee_charter_rates: {
+        Row: {
+          id: string
+          employee_id: string
+          charter_rate_type: 'half_day' | 'full_day' | 'overnight' | 'sleep_on_boat' | 'other'
+          season: 'high' | 'low'
+          rate_amount: number
+          currency: string
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          employee_id: string
+          charter_rate_type: 'half_day' | 'full_day' | 'overnight' | 'sleep_on_boat' | 'other'
+          season: 'high' | 'low'
+          rate_amount?: number
+          currency?: string
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          employee_id?: string
+          charter_rate_type?: 'half_day' | 'full_day' | 'overnight' | 'sleep_on_boat' | 'other'
+          season?: 'high' | 'low'
+          rate_amount?: number
+          currency?: string
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      employee_documents: {
+        Row: {
+          id: string
+          employee_id: string
+          document_type: string
+          document_name: string
+          file_url: string | null
+          file_name: string | null
+          issue_date: string | null
+          expiry_date: string | null
+          alert_days_before: number
+          notes: string | null
+          uploaded_by: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          employee_id: string
+          document_type?: string
+          document_name: string
+          file_url?: string | null
+          file_name?: string | null
+          issue_date?: string | null
+          expiry_date?: string | null
+          alert_days_before?: number
+          notes?: string | null
+          uploaded_by?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          employee_id?: string
+          document_type?: string
+          document_name?: string
+          file_url?: string | null
+          file_name?: string | null
+          issue_date?: string | null
+          expiry_date?: string | null
+          alert_days_before?: number
+          notes?: string | null
+          uploaded_by?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      hr_document_types: {
+        Row: {
+          id: string
+          name: string
+          is_active: boolean
+          sort_order: number
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          name: string
+          is_active?: boolean
+          sort_order?: number
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          name?: string
+          is_active?: boolean
+          sort_order?: number
+          created_at?: string
+        }
+        Relationships: []
+      }
+      commission_records: {
+        Row: {
+          id: string
+          boat_id: string | null
+          charter_date_from: string | null
+          charter_date_to: string | null
+          charter_type: string | null
+          booking_type: string
+          charter_fee: number
+          management_fee: number
+          net_income: number
+          commission_rate: number
+          total_commission: number
+          booking_owner_id: string | null
+          currency: string
+          notes: string | null
+          created_by: string | null
+          booking_id: string | null
+          source: string
+          management_fee_overridden: boolean
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          boat_id?: string | null
+          charter_date_from?: string | null
+          charter_date_to?: string | null
+          charter_type?: string | null
+          booking_type: string
+          charter_fee?: number
+          management_fee?: number
+          net_income?: number
+          commission_rate?: number
+          total_commission?: number
+          booking_owner_id?: string | null
+          currency?: string
+          notes?: string | null
+          created_by?: string | null
+          booking_id?: string | null
+          source?: string
+          management_fee_overridden?: boolean
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          boat_id?: string | null
+          charter_date_from?: string | null
+          charter_date_to?: string | null
+          charter_type?: string | null
+          booking_type?: string
+          charter_fee?: number
+          management_fee?: number
+          net_income?: number
+          commission_rate?: number
+          total_commission?: number
+          booking_owner_id?: string | null
+          currency?: string
+          notes?: string | null
+          created_by?: string | null
+          booking_id?: string | null
+          source?: string
+          management_fee_overridden?: boolean
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      intercompany_charter_fees: {
+        Row: {
+          id: string
+          receipt_id: string | null
+          receipt_number: string | null
+          agency_company_id: string | null
+          owner_company_id: string | null
+          project_id: string | null
+          charter_type: string | null
+          charter_date: string | null
+          charter_fee_amount: number
+          currency: string | null
+          status: string
+          settled_date: string | null
+          settlement_reference: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          receipt_id?: string | null
+          receipt_number?: string | null
+          agency_company_id?: string | null
+          owner_company_id?: string | null
+          project_id?: string | null
+          charter_type?: string | null
+          charter_date?: string | null
+          charter_fee_amount: number
+          currency?: string | null
+          status?: string
+          settled_date?: string | null
+          settlement_reference?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          receipt_id?: string | null
+          receipt_number?: string | null
+          agency_company_id?: string | null
+          owner_company_id?: string | null
+          project_id?: string | null
+          charter_type?: string | null
+          charter_date?: string | null
+          charter_fee_amount?: number
+          currency?: string | null
+          status?: string
+          settled_date?: string | null
+          settlement_reference?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      bookings: {
+        Row: {
+          id: string
+          booking_number: string
+          type: string
+          status: string
+          title: string
+          date_from: string
+          date_to: string
+          time: string | null
+          hold_until: string | null
+          project_id: string | null
+          external_boat_name: string | null
+          customer_name: string
+          customer_email: string | null
+          customer_phone: string | null
+          number_of_guests: number | null
+          booking_owner: string
+          agent_name: string | null
+          agent_platform: string | null
+          meet_and_greeter: string | null
+          destination: string | null
+          pickup_location: string | null
+          currency: string
+          total_price: number | null
+          deposit_amount: number | null
+          deposit_due_date: string | null
+          deposit_paid_date: string | null
+          balance_amount: number | null
+          balance_due_date: string | null
+          balance_paid_date: string | null
+          deposit_receipt_id: string | null
+          final_receipt_id: string | null
+          invoice_id: string | null
+          expense_ids: string[] | null
+          internal_notes: string | null
+          customer_notes: string | null
+          created_by: string | null
+          created_at: string
+          updated_at: string
+          contact_channel: string | null
+          payment_status: string | null
+          charter_fee: number | null
+          extra_charges: number | null
+          admin_fee: number | null
+          beam_charge_id: string | null
+          departure_from: string | null
+          arrival_to: string | null
+          charter_time: string | null
+          commission_rate: number | null
+          total_commission: number | null
+          commission_deduction: number | null
+          commission_received: number | null
+          finance_note: string | null
+          finance_attachments: unknown
+          internal_note_attachments: unknown
+          updated_by: string | null
+          updated_by_name: string | null
+        }
+        Insert: {
+          id?: string
+          booking_number: string
+          type?: string
+          status?: string
+          title: string
+          date_from: string
+          date_to: string
+          time?: string | null
+          hold_until?: string | null
+          project_id?: string | null
+          external_boat_name?: string | null
+          customer_name: string
+          customer_email?: string | null
+          customer_phone?: string | null
+          number_of_guests?: number | null
+          booking_owner: string
+          agent_name?: string | null
+          agent_platform?: string | null
+          meet_and_greeter?: string | null
+          destination?: string | null
+          pickup_location?: string | null
+          currency?: string
+          total_price?: number | null
+          deposit_amount?: number | null
+          deposit_due_date?: string | null
+          deposit_paid_date?: string | null
+          balance_amount?: number | null
+          balance_due_date?: string | null
+          balance_paid_date?: string | null
+          deposit_receipt_id?: string | null
+          final_receipt_id?: string | null
+          invoice_id?: string | null
+          expense_ids?: string[] | null
+          internal_notes?: string | null
+          customer_notes?: string | null
+          created_by?: string | null
+          contact_channel?: string | null
+          payment_status?: string | null
+          charter_fee?: number | null
+          extra_charges?: number | null
+          admin_fee?: number | null
+          beam_charge_id?: string | null
+          departure_from?: string | null
+          arrival_to?: string | null
+          charter_time?: string | null
+          commission_rate?: number | null
+          total_commission?: number | null
+          commission_deduction?: number | null
+          commission_received?: number | null
+          finance_note?: string | null
+          finance_attachments?: unknown
+          internal_note_attachments?: unknown
+          updated_by?: string | null
+          updated_by_name?: string | null
+        }
+        Update: {
+          id?: string
+          booking_number?: string
+          type?: string
+          status?: string
+          title?: string
+          date_from?: string
+          date_to?: string
+          time?: string | null
+          hold_until?: string | null
+          project_id?: string | null
+          external_boat_name?: string | null
+          customer_name?: string
+          customer_email?: string | null
+          customer_phone?: string | null
+          number_of_guests?: number | null
+          booking_owner?: string
+          agent_name?: string | null
+          agent_platform?: string | null
+          meet_and_greeter?: string | null
+          destination?: string | null
+          pickup_location?: string | null
+          currency?: string
+          total_price?: number | null
+          deposit_amount?: number | null
+          deposit_due_date?: string | null
+          deposit_paid_date?: string | null
+          balance_amount?: number | null
+          balance_due_date?: string | null
+          balance_paid_date?: string | null
+          deposit_receipt_id?: string | null
+          final_receipt_id?: string | null
+          invoice_id?: string | null
+          expense_ids?: string[] | null
+          internal_notes?: string | null
+          customer_notes?: string | null
+          created_by?: string | null
+          contact_channel?: string | null
+          payment_status?: string | null
+          charter_fee?: number | null
+          extra_charges?: number | null
+          admin_fee?: number | null
+          beam_charge_id?: string | null
+          departure_from?: string | null
+          arrival_to?: string | null
+          charter_time?: string | null
+          commission_rate?: number | null
+          total_commission?: number | null
+          commission_deduction?: number | null
+          commission_received?: number | null
+          finance_note?: string | null
+          finance_attachments?: unknown
+          internal_note_attachments?: unknown
+          updated_by?: string | null
+          updated_by_name?: string | null
+        }
+        Relationships: []
+      }
+      booking_guests: {
+        Row: {
+          id: string
+          booking_id: string
+          guest_name: string
+          guest_email: string | null
+          guest_phone: string | null
+          nationality: string | null
+          passport_number: string | null
+          cabin_number: string | null
+          dietary_requirements: string | null
+          notes: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          booking_id: string
+          guest_name: string
+          guest_email?: string | null
+          guest_phone?: string | null
+          nationality?: string | null
+          passport_number?: string | null
+          cabin_number?: string | null
+          dietary_requirements?: string | null
+          notes?: string | null
+        }
+        Update: {
+          id?: string
+          booking_id?: string
+          guest_name?: string
+          guest_email?: string | null
+          guest_phone?: string | null
+          nationality?: string | null
+          passport_number?: string | null
+          cabin_number?: string | null
+          dietary_requirements?: string | null
+          notes?: string | null
+        }
+        Relationships: []
+      }
+      booking_payments: {
+        Row: {
+          id: string
+          booking_id: string
+          payment_type: string
+          amount: number
+          currency: string
+          due_date: string | null
+          paid_date: string | null
+          note: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          booking_id: string
+          payment_type?: string
+          amount: number
+          currency?: string
+          due_date?: string | null
+          paid_date?: string | null
+          note?: string | null
+        }
+        Update: {
+          id?: string
+          booking_id?: string
+          payment_type?: string
+          amount?: number
+          currency?: string
+          due_date?: string | null
+          paid_date?: string | null
+          note?: string | null
+        }
+        Relationships: []
+      }
+      booking_crew: {
+        Row: {
+          id: string
+          booking_id: string
+          employee_id: string
+          role: string | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          booking_id: string
+          employee_id: string
+          role?: string | null
+        }
+        Update: {
+          id?: string
+          booking_id?: string
+          employee_id?: string
+          role?: string | null
+        }
+        Relationships: []
+      }
+      booking_agencies: {
+        Row: {
+          id: string
+          contact_id: string
+          platform: string | null
+          commission_rate: number | null
+          default_currency: string
+          contract_url: string | null
+          contract_filename: string | null
+          is_active: boolean
+          notes: string | null
+          created_by: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          contact_id: string
+          platform?: string | null
+          commission_rate?: number | null
+          default_currency?: string
+          contract_url?: string | null
+          contract_filename?: string | null
+          is_active?: boolean
+          notes?: string | null
+          created_by?: string | null
+        }
+        Update: {
+          id?: string
+          contact_id?: string
+          platform?: string | null
+          commission_rate?: number | null
+          default_currency?: string
+          contract_url?: string | null
+          contract_filename?: string | null
+          is_active?: boolean
+          notes?: string | null
+          created_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "booking_agencies_contact_id_fkey"
+            columns: ["contact_id"]
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
+      beam_merchant_accounts: {
+        Row: {
+          id: string
+          company_id: string
+          merchant_id: string
+          merchant_name: string
+          settlement_bank_account_id: string | null
+          is_active: boolean
+          notes: string | null
+          created_by: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          company_id: string
+          merchant_id: string
+          merchant_name: string
+          settlement_bank_account_id?: string | null
+          is_active?: boolean
+          notes?: string | null
+          created_by?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          company_id?: string
+          merchant_id?: string
+          merchant_name?: string
+          settlement_bank_account_id?: string | null
+          is_active?: boolean
+          notes?: string | null
+          created_by?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "beam_merchant_accounts_company_id_fkey"
+            columns: ["company_id"]
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "beam_merchant_accounts_settlement_bank_account_id_fkey"
+            columns: ["settlement_bank_account_id"]
+            referencedRelation: "bank_accounts"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
+      beam_transactions: {
+        Row: {
+          id: string
+          merchant_account_id: string
+          charge_id: string
+          source_id: string | null
+          transaction_date: string
+          transaction_time: string | null
+          settlement_date: string | null
+          settlement_status: string | null
+          invoice_no: string | null
+          invoice_date: string | null
+          currency: string
+          gross_amount: number
+          fee_rate: number | null
+          fee_amount: number
+          vat_amount: number
+          net_amount: number
+          payment_method: string | null
+          card_brand: string | null
+          card_country: string | null
+          card_holder_name: string | null
+          booking_id: string | null
+          receipt_id: string | null
+          match_status: string
+          match_confidence: number | null
+          payment_link_description: string | null
+          reference_id: string | null
+          imported_at: string
+          imported_by: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          merchant_account_id: string
+          charge_id: string
+          source_id?: string | null
+          transaction_date: string
+          transaction_time?: string | null
+          settlement_date?: string | null
+          settlement_status?: string | null
+          invoice_no?: string | null
+          invoice_date?: string | null
+          currency?: string
+          gross_amount: number
+          fee_rate?: number | null
+          fee_amount?: number
+          vat_amount?: number
+          net_amount: number
+          payment_method?: string | null
+          card_brand?: string | null
+          card_country?: string | null
+          card_holder_name?: string | null
+          booking_id?: string | null
+          receipt_id?: string | null
+          match_status?: string
+          match_confidence?: number | null
+          payment_link_description?: string | null
+          reference_id?: string | null
+          imported_at?: string
+          imported_by?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          merchant_account_id?: string
+          charge_id?: string
+          source_id?: string | null
+          transaction_date?: string
+          transaction_time?: string | null
+          settlement_date?: string | null
+          settlement_status?: string | null
+          invoice_no?: string | null
+          invoice_date?: string | null
+          currency?: string
+          gross_amount?: number
+          fee_rate?: number | null
+          fee_amount?: number
+          vat_amount?: number
+          net_amount?: number
+          payment_method?: string | null
+          card_brand?: string | null
+          card_country?: string | null
+          card_holder_name?: string | null
+          booking_id?: string | null
+          receipt_id?: string | null
+          match_status?: string
+          match_confidence?: number | null
+          payment_link_description?: string | null
+          reference_id?: string | null
+          imported_at?: string
+          imported_by?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "beam_transactions_merchant_account_id_fkey"
+            columns: ["merchant_account_id"]
+            referencedRelation: "beam_merchant_accounts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "beam_transactions_booking_id_fkey"
+            columns: ["booking_id"]
+            referencedRelation: "bookings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "beam_transactions_receipt_id_fkey"
+            columns: ["receipt_id"]
+            referencedRelation: "receipts"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
+      external_boats: {
+        Row: {
+          id: string
+          name: string
+          display_name: string
+          operator_name: string | null
+          contact_id: string | null
+          depart_from: string | null
+          picture_url: string | null
+          contract_url: string | null
+          contract_filename: string | null
+          contact_person: string | null
+          contact_channel: string | null
+          contact_value: string | null
+          is_active: boolean
+          notes: string | null
+          created_by: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          name: string
+          display_name: string
+          operator_name?: string | null
+          contact_id?: string | null
+          depart_from?: string | null
+          picture_url?: string | null
+          contract_url?: string | null
+          contract_filename?: string | null
+          contact_person?: string | null
+          contact_channel?: string | null
+          contact_value?: string | null
+          is_active?: boolean
+          notes?: string | null
+          created_by?: string | null
+        }
+        Update: {
+          id?: string
+          name?: string
+          display_name?: string
+          operator_name?: string | null
+          contact_id?: string | null
+          depart_from?: string | null
+          picture_url?: string | null
+          contract_url?: string | null
+          contract_filename?: string | null
+          contact_person?: string | null
+          contact_channel?: string | null
+          contact_value?: string | null
+          is_active?: boolean
+          notes?: string | null
+          created_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "external_boats_contact_id_fkey"
+            columns: ["contact_id"]
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
+      booking_lookups: {
+        Row: {
+          id: string
+          category: string
+          value: string
+          label: string
+          sort_order: number
+          is_active: boolean
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          category: string
+          value: string
+          label: string
+          sort_order?: number
+          is_active?: boolean
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          category?: string
+          value?: string
+          label?: string
+          sort_order?: number
+          is_active?: boolean
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
       }
       bank_accounts: {
         Row: {
@@ -315,6 +1305,7 @@ export type Database = {
           fx_rate: number | null
           status: string
           notes: string | null
+          booking_id: string | null
           created_by: string | null
           created_at: string
           updated_at: string
@@ -326,6 +1317,7 @@ export type Database = {
           client_id?: string | null
           client_name: string
           quotation_id?: string | null
+          booking_id?: string | null
           charter_period_from?: string | null
           charter_period_to?: string | null
           boat_id?: string | null
@@ -357,6 +1349,7 @@ export type Database = {
           client_id?: string | null
           client_name?: string
           quotation_id?: string | null
+          booking_id?: string | null
           charter_period_from?: string | null
           charter_period_to?: string | null
           boat_id?: string | null
@@ -630,6 +1623,7 @@ export type Database = {
           original_receipt_number: string | null
           is_using_recycled_number: boolean
           revenue_recognition_status: string | null
+          booking_id: string | null
           created_by: string | null
           created_at: string
           updated_at: string
@@ -639,6 +1633,7 @@ export type Database = {
           company_id: string
           receipt_number: string
           invoice_id?: string | null
+          booking_id?: string | null
           client_id?: string | null
           client_name: string
           receipt_date: string
@@ -675,6 +1670,7 @@ export type Database = {
           company_id?: string
           receipt_number?: string
           invoice_id?: string | null
+          booking_id?: string | null
           client_id?: string | null
           client_name?: string
           receipt_date?: string

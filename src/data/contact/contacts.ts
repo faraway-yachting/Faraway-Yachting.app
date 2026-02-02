@@ -15,7 +15,7 @@ export let contacts: Contact[] = [
   {
     id: 'contact-001',
     name: 'ABC Marina Services',
-    type: 'vendor',
+    type: ['vendor'],
     contactPerson: 'Tom Wilson',
     email: 'tom@abcmarina.com',
     phone: '+66 81 234 5678',
@@ -37,7 +37,7 @@ export let contacts: Contact[] = [
   {
     id: 'contact-002',
     name: 'Blue Ocean Fuel Co.',
-    type: 'vendor',
+    type: ['vendor'],
     contactPerson: 'Mike Chen',
     email: 'mike@blueoceanfuel.com',
     phone: '+66 82 345 6789',
@@ -59,7 +59,7 @@ export let contacts: Contact[] = [
   {
     id: 'contact-003',
     name: 'Luxury Charter Group',
-    type: 'customer',
+    type: ['customer'],
     contactPerson: 'Sarah Miller',
     email: 'sarah@luxurycharter.com',
     phone: '+44 20 7123 4567',
@@ -82,7 +82,7 @@ export let contacts: Contact[] = [
   {
     id: 'contact-004',
     name: 'Siam Yacht Supplies',
-    type: 'both',
+    type: ['customer', 'vendor'],
     contactPerson: 'Nat Pongpanich',
     email: 'nat@siamyacht.co.th',
     phone: '+66 83 456 7890',
@@ -104,7 +104,7 @@ export let contacts: Contact[] = [
   {
     id: 'contact-005',
     name: 'Mediterranean Charters Ltd',
-    type: 'customer',
+    type: ['customer'],
     contactPerson: 'Marco Rossi',
     email: 'marco@medcharters.eu',
     phone: '+39 06 1234 5678',
@@ -126,7 +126,7 @@ export let contacts: Contact[] = [
   {
     id: 'contact-006',
     name: 'Old Supplier Co.',
-    type: 'vendor',
+    type: ['vendor'],
     contactPerson: 'John Doe',
     email: 'john@oldsupplier.com',
     phone: '+66 84 567 8901',
@@ -156,10 +156,7 @@ export function getContactById(id: string): Contact | undefined {
  * Get contacts by type
  */
 export function getContactsByType(type: ContactType): Contact[] {
-  if (type === 'both') {
-    return contacts;
-  }
-  return contacts.filter((c) => c.type === type || c.type === 'both');
+  return contacts.filter((c) => c.type.includes(type));
 }
 
 /**
@@ -173,7 +170,7 @@ export function getActiveContacts(): Contact[] {
  * Get active contacts by type (for selectors)
  */
 export function getActiveContactsByType(type: ContactType): Contact[] {
-  return contacts.filter((c) => c.isActive && (c.type === type || c.type === 'both'));
+  return contacts.filter((c) => c.isActive && c.type.includes(type));
 }
 
 /**

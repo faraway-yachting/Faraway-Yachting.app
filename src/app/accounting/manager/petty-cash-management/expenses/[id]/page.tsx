@@ -104,6 +104,9 @@ export default function PettyCashExpenseDetailsPage() {
           // We need to get wallet info to show holder name
           const wallet = await pettyCashApi.getWalletById(dbExpense.wallet_id);
 
+          // Cast to extended type that includes expense_account_code (added in migration 037)
+          const extendedExpense = dbExpense as typeof dbExpense & { expense_account_code?: string | null };
+
           const frontendExpense: FrontendExpense = {
             id: dbExpense.id,
             expenseNumber: dbExpense.expense_number,
@@ -118,12 +121,14 @@ export default function PettyCashExpenseDetailsPage() {
             amount: dbExpense.amount || 0,
             status: dbExpense.status,
             receiptStatus: 'pending', // Not in current schema
+            expenseAccountCode: extendedExpense.expense_account_code || undefined,
             attachments: [], // Not in current schema
           };
           setExpense(frontendExpense);
 
           // Initialize form fields
           setCompanyId(frontendExpense.companyId);
+          setExpenseAccountCode(extendedExpense.expense_account_code || '');
         }
       } catch (error) {
         console.error('Failed to load expense:', error);
@@ -212,16 +217,19 @@ export default function PettyCashExpenseDetailsPage() {
     setSaveError('');
 
     try {
-      // Update expense in Supabase
+      // Update expense in Supabase (including expense_account_code)
+      // Note: expense_account_code column added in migration 037
       await pettyCashApi.updateExpense(expense.id, {
         company_id: companyId,
-      });
+        expense_account_code: expenseAccountCode || null,
+      } as Parameters<typeof pettyCashApi.updateExpense>[1] & { expense_account_code?: string | null });
 
       // Update local state
       setExpense((prev) => prev ? {
         ...prev,
         companyId,
         companyName: companies.find(c => c.id === companyId)?.name || '',
+        expenseAccountCode: expenseAccountCode || undefined,
       } : null);
 
       setSaveSuccess(true);
@@ -232,7 +240,7 @@ export default function PettyCashExpenseDetailsPage() {
     } finally {
       setIsSaving(false);
     }
-  }, [expense, companyId, companies]);
+  }, [expense, companyId, expenseAccountCode, companies]);
 
   // Loading state
   if (isLoadingExpense || isLoadingData) {

@@ -1,6 +1,6 @@
 import { createClient } from '../client';
 import type { Database } from '../database.types';
-import type { EventProcessResult, ReceiptReceivedEventData } from '@/lib/accounting/eventTypes';
+import type { EventProcessResult, ReceiptReceivedEventData, ReceiptReceivedIntercompanyEventData } from '@/lib/accounting/eventTypes';
 import { bankAccountsApi } from './bankAccounts';
 import { journalEntriesApi } from './journalEntries';
 
@@ -139,6 +139,18 @@ export const receiptsApi = {
     return data ?? [];
   },
 
+  async getByBookingId(bookingId: string) {
+    const supabase = createClient();
+    const { data, error } = await supabase
+      .from('receipts')
+      .select('id, receipt_number, status, total_amount, currency, receipt_date, created_at, company_id')
+      .eq('booking_id', bookingId)
+      .neq('status', 'void')
+      .order('created_at', { ascending: true });
+    if (error) throw error;
+    return data ?? [];
+  },
+
   async getByCompany(companyId: string): Promise<Receipt[]> {
     const supabase = createClient();
     const { data, error } = await supabase
@@ -146,6 +158,19 @@ export const receiptsApi = {
       .select('*')
       .eq('company_id', companyId)
       .order('receipt_date', { ascending: false });
+    if (error) throw error;
+    return data ?? [];
+  },
+
+  /** Get all paid receipts that have a boat_id set (for intercompany charter tracking) */
+  async getPaidWithBoat(): Promise<Receipt[]> {
+    const supabase = createClient();
+    const { data, error } = await supabase
+      .from('receipts')
+      .select('*')
+      .eq('status', 'paid')
+      .not('boat_id', 'is', null)
+      .order('charter_date_from', { ascending: false });
     if (error) throw error;
     return data ?? [];
   },
@@ -216,7 +241,10 @@ export const receiptsApi = {
       .insert([paymentRecord])
       .select()
       .single();
-    if (error) throw error;
+    if (error) {
+      console.error('Supabase addPaymentRecord error:', error.message, error.code, error.details);
+      throw new Error(`Failed to add payment record: ${error.message}`);
+    }
     return data;
   },
 
@@ -278,6 +306,26 @@ export const receiptsApi = {
 
     if (receipt.status === 'paid') {
       try {
+        // Calculate sums for debugging
+        const lineItemTotal = lineItems.reduce((sum, li) => sum + (li.amount || 0), 0);
+        const paymentTotal = paymentRecords.reduce((sum, p) => sum + p.amount, 0);
+
+        console.log('[receiptsApi.createWithJournalEntry] Creating journal entry:', {
+          receiptId: createdReceipt.id,
+          receiptNumber: receipt.receipt_number,
+          lineItemsCount: lineItems.length,
+          lineItemTotal,
+          subtotal: receipt.subtotal,
+          taxAmount: receipt.tax_amount,
+          totalAmount: receipt.total_amount,
+          paymentsCount: paymentRecords.length,
+          paymentTotal,
+          createdBy: createdBy || '(empty)',
+          expectedCredits: lineItemTotal + (receipt.tax_amount || 0),
+          expectedDebits: paymentTotal,
+          balanced: Math.abs((lineItemTotal + (receipt.tax_amount || 0)) - paymentTotal) < 0.01,
+        });
+
         journalResult = await createReceiptJournalEntry(
           {
             receiptId: createdReceipt.id,
@@ -293,21 +341,50 @@ export const receiptsApi = {
             totalSubtotal: receipt.subtotal || 0,
             totalVatAmount: receipt.tax_amount || 0,
             totalAmount: receipt.total_amount || 0,
-            payments: paymentRecords.map(p => ({
-              amount: p.amount,
-              bankAccountId: p.received_at !== 'cash' ? p.received_at : null,
-              paymentMethod: p.received_at === 'cash' ? 'cash' : 'bank_transfer',
-            })),
+            payments: paymentRecords.map(p => {
+              const isBeam = typeof p.received_at === 'string' && p.received_at.startsWith('beam:');
+              return {
+                amount: p.amount,
+                bankAccountId: p.received_at === 'cash' ? null : isBeam ? null : p.received_at,
+                paymentMethod: p.received_at === 'cash' ? 'cash' : isBeam ? 'beam' : 'bank_transfer',
+              };
+            }),
             currency: receipt.currency || 'THB',
           },
           createdBy
         );
+
+        console.log('[receiptsApi.createWithJournalEntry] Journal result:', journalResult);
       } catch (error) {
         console.error('Failed to create receipt journal entry:', error);
         journalResult = {
           success: false,
           error: error instanceof Error ? error.message : 'Unknown error',
         };
+      }
+
+      // Generate intercompany charter fee records (no P&L impact, just tracking)
+      try {
+        const { generateCharterFees } = await import('@/lib/accounting/eventHandlers/charterFeeHandler');
+        const projectIds = lineItems
+          .map((li) => li.project_id)
+          .filter((id): id is string => !!id);
+        if (projectIds.length > 0) {
+          const feeResult = await generateCharterFees({
+            receiptId: createdReceipt.id,
+            receiptNumber: receipt.receipt_number,
+            receiptCompanyId: receipt.company_id,
+            charterType: receipt.charter_type || null,
+            charterDate: receipt.receipt_date,
+            currency: receipt.currency || 'THB',
+            projectIds,
+          });
+          if (feeResult.created > 0) {
+            console.log(`[receiptsApi] Created ${feeResult.created} intercompany charter fee(s)`);
+          }
+        }
+      } catch (error) {
+        console.error('Failed to generate intercompany charter fees:', error);
       }
     }
 
@@ -368,6 +445,30 @@ export const receiptsApi = {
       };
     }
 
+    // Generate intercompany charter fee records (no P&L impact, just tracking)
+    try {
+      const { generateCharterFees } = await import('@/lib/accounting/eventHandlers/charterFeeHandler');
+      const projectIds = (receipt.line_items || [])
+        .map((li: { project_id?: string }) => li.project_id)
+        .filter((id: string | undefined): id is string => !!id);
+      if (projectIds.length > 0) {
+        const feeResult = await generateCharterFees({
+          receiptId: receipt.id,
+          receiptNumber: receipt.receipt_number,
+          receiptCompanyId: receipt.company_id,
+          charterType: receipt.charter_type || null,
+          charterDate: receipt.receipt_date,
+          currency: receipt.currency || 'THB',
+          projectIds,
+        });
+        if (feeResult.created > 0) {
+          console.log(`[receiptsApi.markAsPaid] Created ${feeResult.created} intercompany charter fee(s)`);
+        }
+      }
+    } catch (error) {
+      console.error('Failed to generate intercompany charter fees:', error);
+    }
+
     return { receipt: updatedReceipt, journalResult };
   },
 
@@ -377,7 +478,7 @@ export const receiptsApi = {
 
   /**
    * Create receipt with event-driven journal generation
-   * Creates RECEIPT_RECEIVED event which generates journal entry (if status is 'paid')
+   * Creates RECEIPT_RECEIVED or RECEIPT_RECEIVED_INTERCOMPANY event which generates journal entry (if status is 'paid')
    */
   async createWithEvent(
     receipt: ReceiptInsert,
@@ -387,6 +488,8 @@ export const receiptsApi = {
   ): Promise<{ receipt: Receipt; eventResult: EventProcessResult | null }> {
     // Import dynamically to avoid circular dependencies
     const { accountingEventsApi } = await import('./accountingEvents');
+    const { companiesApi } = await import('./companies');
+    const { projectsApi } = await import('./projects');
 
     // Create receipt
     const createdReceipt = await this.create(receipt);
@@ -410,56 +513,146 @@ export const receiptsApi = {
     let eventResult: EventProcessResult | null = null;
 
     if (receipt.status === 'paid' && createdPayments.length > 0) {
-      // Build payment data with GL codes
-      const paymentsWithGlCodes = await Promise.all(
-        createdPayments.map(async (p) => {
-          let bankGlCode: string | null = null;
-          const bankAccountId = p.received_at !== 'cash' ? p.received_at : null;
-          if (bankAccountId) {
-            try {
-              const bankAccount = await bankAccountsApi.getById(bankAccountId);
-              bankGlCode = bankAccount?.gl_account_code || null;
-            } catch {
-              console.warn('Could not fetch bank account GL code');
-            }
+      // Get the first payment's bank account to check for cross-company
+      const firstPayment = createdPayments[0];
+      const bankAccountId = firstPayment.received_at !== 'cash' ? firstPayment.received_at : null;
+
+      let bankCompanyId: string | null = null;
+      let bankCompanyName = '';
+      let bankAccountGlCode = '1010';
+
+      if (bankAccountId) {
+        try {
+          const bankAccount = await bankAccountsApi.getById(bankAccountId);
+          bankCompanyId = bankAccount?.company_id || null;
+          bankAccountGlCode = bankAccount?.gl_account_code || '1010';
+
+          if (bankCompanyId && bankCompanyId !== receipt.company_id) {
+            const bankCompany = await companiesApi.getById(bankCompanyId);
+            bankCompanyName = bankCompany?.name || 'Unknown Company';
           }
-          return {
-            amount: p.amount,
-            bankAccountId,
-            bankAccountGlCode: bankGlCode,
-            paymentMethod: p.received_at === 'cash' ? 'cash' : 'bank_transfer',
-          };
-        })
-      );
+        } catch {
+          console.warn('Could not fetch bank account info');
+        }
+      }
 
-      // Build event data
-      const eventData: ReceiptReceivedEventData = {
-        receiptId: createdReceipt.id,
-        receiptNumber: receipt.receipt_number,
-        clientName: receipt.client_name,
-        receiptDate: receipt.receipt_date,
-        lineItems: lineItems.map((li) => ({
-          description: li.description || '',
-          accountCode: null,
-          amount: li.amount || 0,
-        })),
-        payments: paymentsWithGlCodes,
-        totalSubtotal: receipt.subtotal || 0,
-        totalVatAmount: receipt.tax_amount || 0,
-        totalAmount: receipt.total_amount || 0,
-        currency: receipt.currency || 'THB',
-      };
+      // Check if this is a cross-company receipt
+      const isCrossCompanyReceipt = bankCompanyId && bankCompanyId !== receipt.company_id;
 
-      // Create and process event
-      eventResult = await accountingEventsApi.createAndProcess(
-        'RECEIPT_RECEIVED',
-        receipt.receipt_date,
-        [receipt.company_id],
-        eventData as unknown as Record<string, unknown>,
-        'receipt',
-        createdReceipt.id,
-        createdBy
-      );
+      if (isCrossCompanyReceipt) {
+        // Get receipt company name
+        const receiptCompany = await companiesApi.getById(receipt.company_id);
+        const receiptCompanyName = receiptCompany?.name || 'Unknown Company';
+
+        // Get project from line items (project_id is on line items, not receipt directly)
+        let projectId: string | undefined;
+        let projectName: string | undefined;
+        const firstLineItem = lineItems?.[0];
+        if (firstLineItem?.project_id) {
+          projectId = firstLineItem.project_id;
+          try {
+            const project = await projectsApi.getById(projectId);
+            projectName = project?.name || undefined;
+          } catch {
+            // Project lookup failed, continue without it
+          }
+        }
+
+        // Determine if this uses deferred revenue (charter payment before charter date)
+        // For now, assume charter payments are always deferred until charter date
+        const usesDeferredRevenue = receipt.charter_type !== undefined || receipt.charter_date_from !== undefined;
+
+        // Build intercompany event data
+        const intercompanyEventData: ReceiptReceivedIntercompanyEventData = {
+          receiptId: createdReceipt.id,
+          receiptNumber: receipt.receipt_number,
+          clientName: receipt.client_name,
+          receiptDate: receipt.receipt_date,
+          // Bank receiving company
+          bankCompanyId: bankCompanyId!,
+          bankCompanyName,
+          bankAccountId: bankAccountId!,
+          bankAccountGlCode,
+          // Charter owner company
+          charterCompanyId: receipt.company_id,
+          charterCompanyName: receiptCompanyName,
+          projectId,
+          projectName,
+          // Charter dates
+          charterDateFrom: receipt.charter_date_from || undefined,
+          charterDateTo: receipt.charter_date_to || undefined,
+          charterType: receipt.charter_type || undefined,
+          // Amounts
+          totalAmount: receipt.total_amount || 0,
+          currency: receipt.currency || 'THB',
+          usesDeferredRevenue,
+        };
+
+        // Create intercompany event (affects BOTH companies)
+        eventResult = await accountingEventsApi.createAndProcess(
+          'RECEIPT_RECEIVED_INTERCOMPANY',
+          receipt.receipt_date,
+          [receipt.company_id, bankCompanyId!], // Both companies affected
+          intercompanyEventData as unknown as Record<string, unknown>,
+          'receipt',
+          createdReceipt.id,
+          createdBy
+        );
+
+        console.log(`Created intercompany receipt: ${receipt.receipt_number} - received by ${bankCompanyName} for ${receiptCompanyName}`);
+      } else {
+        // Standard single-company receipt
+        // Build payment data with GL codes
+        const paymentsWithGlCodes = await Promise.all(
+          createdPayments.map(async (p) => {
+            let bankGlCode: string | null = null;
+            const paymentBankAccountId = p.received_at !== 'cash' ? p.received_at : null;
+            if (paymentBankAccountId) {
+              try {
+                const bankAccount = await bankAccountsApi.getById(paymentBankAccountId);
+                bankGlCode = bankAccount?.gl_account_code || null;
+              } catch {
+                console.warn('Could not fetch bank account GL code');
+              }
+            }
+            return {
+              amount: p.amount,
+              bankAccountId: paymentBankAccountId,
+              bankAccountGlCode: bankGlCode,
+              paymentMethod: p.received_at === 'cash' ? 'cash' : 'bank_transfer',
+            };
+          })
+        );
+
+        // Build event data
+        const eventData: ReceiptReceivedEventData = {
+          receiptId: createdReceipt.id,
+          receiptNumber: receipt.receipt_number,
+          clientName: receipt.client_name,
+          receiptDate: receipt.receipt_date,
+          lineItems: lineItems.map((li) => ({
+            description: li.description || '',
+            accountCode: null,
+            amount: li.amount || 0,
+          })),
+          payments: paymentsWithGlCodes,
+          totalSubtotal: receipt.subtotal || 0,
+          totalVatAmount: receipt.tax_amount || 0,
+          totalAmount: receipt.total_amount || 0,
+          currency: receipt.currency || 'THB',
+        };
+
+        // Create and process event
+        eventResult = await accountingEventsApi.createAndProcess(
+          'RECEIPT_RECEIVED',
+          receipt.receipt_date,
+          [receipt.company_id],
+          eventData as unknown as Record<string, unknown>,
+          'receipt',
+          createdReceipt.id,
+          createdBy
+        );
+      }
     }
 
     return { receipt: createdReceipt, eventResult };

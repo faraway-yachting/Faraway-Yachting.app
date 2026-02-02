@@ -1,6 +1,6 @@
 import { createClient } from '../client';
 import type { Database } from '../database.types';
-import type { EventProcessResult, ExpenseApprovedEventData, ExpensePaidEventData } from '@/lib/accounting/eventTypes';
+import type { EventProcessResult, ExpenseApprovedEventData, ExpensePaidEventData, ExpensePaidIntercompanyEventData } from '@/lib/accounting/eventTypes';
 import { bankAccountsApi } from './bankAccounts';
 import { journalEntriesApi } from './journalEntries';
 
@@ -592,7 +592,7 @@ export const expensesApi = {
 
   /**
    * Add payment using event-driven journal generation
-   * Creates EXPENSE_PAID event which generates journal entry
+   * Creates EXPENSE_PAID or EXPENSE_PAID_INTERCOMPANY event which generates journal entry
    * Also creates WHT certificate if expense has WHT amount
    */
   async addPaymentWithEvent(
@@ -604,6 +604,7 @@ export const expensesApi = {
     const { whtCertificatesApi } = await import('./whtCertificates');
     const { companiesApi } = await import('./companies');
     const { contactsApi } = await import('./contacts');
+    const { projectsApi } = await import('./projects');
 
     // Get expense with details
     const expense = await this.getByIdWithDetails(payment.expense_id);
@@ -612,42 +613,111 @@ export const expensesApi = {
     // Add payment record
     const paymentRecord = await this.addPayment(payment);
 
-    // Get bank account GL code
+    // Get bank account info including company
     let bankAccountGlCode = '1010'; // default
+    let bankCompanyId: string | null = null;
+    let bankCompanyName = '';
+
     if (payment.paid_from !== 'cash') {
       try {
         const bankAccount = await bankAccountsApi.getById(payment.paid_from);
         bankAccountGlCode = bankAccount?.gl_account_code || '1010';
+        bankCompanyId = bankAccount?.company_id || null;
+
+        // Get bank company name if different from expense company
+        if (bankCompanyId && bankCompanyId !== expense.company_id) {
+          const bankCompany = await companiesApi.getById(bankCompanyId);
+          bankCompanyName = bankCompany?.name || 'Unknown Company';
+        }
       } catch {
-        console.warn('Could not fetch bank account GL code, using default');
+        console.warn('Could not fetch bank account info, using default');
       }
     } else {
       bankAccountGlCode = '1000'; // cash account
     }
 
-    // Build event data
-    const eventData: ExpensePaidEventData = {
-      expenseId: expense.id,
-      paymentId: paymentRecord.id,
-      expenseNumber: expense.expense_number,
-      vendorName: expense.vendor_name || 'Unknown Vendor',
-      paymentDate: payment.payment_date,
-      paymentAmount: payment.amount,
-      bankAccountId: payment.paid_from,
-      bankAccountGlCode,
-      currency: expense.currency,
-    };
+    // Check if this is a cross-company payment
+    const isCrossCompanyPayment = bankCompanyId && bankCompanyId !== expense.company_id;
 
-    // Create and process event
-    const eventResult = await accountingEventsApi.createAndProcess(
-      'EXPENSE_PAID',
-      payment.payment_date,
-      [expense.company_id],
-      eventData as unknown as Record<string, unknown>,
-      'expense_payment',
-      paymentRecord.id,
-      createdBy
-    );
+    let eventResult: EventProcessResult;
+
+    if (isCrossCompanyPayment) {
+      // Get expense company name
+      const expenseCompany = await companiesApi.getById(expense.company_id);
+      const expenseCompanyName = expenseCompany?.name || 'Unknown Company';
+
+      // Get project from line items (project_id is on line items, not expense directly)
+      let projectId: string | undefined;
+      let projectName: string | undefined;
+      const firstLineItem = expense.line_items?.[0];
+      if (firstLineItem?.project_id) {
+        projectId = firstLineItem.project_id;
+        try {
+          const project = await projectsApi.getById(projectId);
+          projectName = project?.name || undefined;
+        } catch {
+          // Project lookup failed, continue without it
+        }
+      }
+
+      // Build intercompany event data
+      const intercompanyEventData: ExpensePaidIntercompanyEventData = {
+        expenseId: expense.id,
+        paymentId: paymentRecord.id,
+        expenseNumber: expense.expense_number,
+        vendorName: expense.vendor_name || 'Unknown Vendor',
+        paymentDate: payment.payment_date,
+        paymentAmount: payment.amount,
+        // Paying company (bank owner)
+        payingCompanyId: bankCompanyId!,
+        payingCompanyName: bankCompanyName,
+        bankAccountId: payment.paid_from,
+        bankAccountGlCode,
+        // Receiving company (expense owner)
+        receivingCompanyId: expense.company_id,
+        receivingCompanyName: expenseCompanyName,
+        projectId,
+        projectName,
+        currency: expense.currency,
+      };
+
+      // Create intercompany event (affects BOTH companies)
+      eventResult = await accountingEventsApi.createAndProcess(
+        'EXPENSE_PAID_INTERCOMPANY',
+        payment.payment_date,
+        [expense.company_id, bankCompanyId!], // Both companies affected
+        intercompanyEventData as unknown as Record<string, unknown>,
+        'expense_payment',
+        paymentRecord.id,
+        createdBy
+      );
+
+      console.log(`Created intercompany expense payment: ${expense.expense_number} - paid by ${bankCompanyName} for ${expenseCompanyName}`);
+    } else {
+      // Standard single-company payment
+      const eventData: ExpensePaidEventData = {
+        expenseId: expense.id,
+        paymentId: paymentRecord.id,
+        expenseNumber: expense.expense_number,
+        vendorName: expense.vendor_name || 'Unknown Vendor',
+        paymentDate: payment.payment_date,
+        paymentAmount: payment.amount,
+        bankAccountId: payment.paid_from,
+        bankAccountGlCode,
+        currency: expense.currency,
+      };
+
+      // Create standard event
+      eventResult = await accountingEventsApi.createAndProcess(
+        'EXPENSE_PAID',
+        payment.payment_date,
+        [expense.company_id],
+        eventData as unknown as Record<string, unknown>,
+        'expense_payment',
+        paymentRecord.id,
+        createdBy
+      );
+    }
 
     // Create WHT certificate if expense has WHT amount
     let whtCertificateId: string | undefined;

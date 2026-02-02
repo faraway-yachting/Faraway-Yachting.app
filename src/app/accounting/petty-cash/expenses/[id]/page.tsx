@@ -18,6 +18,11 @@ import {
   CheckCircle,
   Clock,
   XCircle,
+  Send,
+  Upload,
+  X,
+  Pencil,
+  Trash2,
 } from 'lucide-react';
 
 // Supabase API imports
@@ -61,25 +66,37 @@ interface FrontendExpense {
   attachments: Array<{ id: string; name: string; url: string; size: number; type: string }>;
 }
 
-// Reimbursement status display config
+// Claim status display config
 const statusConfig = {
+  draft: {
+    label: 'Draft',
+    color: 'bg-gray-100 text-gray-800',
+    icon: FileText,
+    editable: true,
+  },
+  submitted: {
+    label: 'Submitted',
+    color: 'bg-blue-100 text-blue-800',
+    icon: Clock,
+    editable: true,
+  },
   pending: {
-    label: 'Pending Reimbursement',
+    label: 'Pending Review',
     color: 'bg-yellow-100 text-yellow-800',
     icon: Clock,
     editable: true,
   },
   approved: {
     label: 'Approved',
-    color: 'bg-blue-100 text-blue-800',
-    icon: CheckCircle,
-    editable: true,
-  },
-  paid: {
-    label: 'Reimbursed',
     color: 'bg-green-100 text-green-800',
     icon: CheckCircle,
     editable: false,
+  },
+  paid: {
+    label: 'Paid',
+    color: 'bg-purple-100 text-purple-800',
+    icon: CheckCircle,
+    editable: true, // Petty cash holder can edit details but not amount
   },
   rejected: {
     label: 'Rejected',
@@ -99,9 +116,14 @@ export default function PettyCashExpenseDetailsPage() {
   const [isLoadingExpense, setIsLoadingExpense] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  // For now, reimbursement tracking is not in Supabase yet
-  // Set isEditable to true for all expenses
-  const isEditable = true;
+  // Edit mode state - starts as false for submitted expenses
+  const [isEditMode, setIsEditMode] = useState(false);
+
+  // Determine if the expense can be edited (draft = always editable, submitted/paid = need to click edit)
+  const isEditable = expense?.status === 'draft' || isEditMode;
+
+  // Amount can only be edited for draft/submitted expenses, not paid
+  const canEditAmount = isEditable && expense?.status !== 'paid';
 
   // Form state for editable fields
   const [expenseDate, setExpenseDate] = useState('');
@@ -109,7 +131,10 @@ export default function PettyCashExpenseDetailsPage() {
   const [projectId, setProjectId] = useState('');
   const [amount, setAmount] = useState(expense?.amount || 0);
   const [description, setDescription] = useState(expense?.description || '');
+  const [attachments, setAttachments] = useState<Array<{ id: string; name: string; url: string; size: number; type: string }>>([]);
   const [isSaving, setIsSaving] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [saveError, setSaveError] = useState('');
 
@@ -129,6 +154,28 @@ export default function PettyCashExpenseDetailsPage() {
           setLoadError('Expense not found');
           setExpense(null);
         } else {
+          // Parse attachments from JSONB column (added in migration 032)
+          const extendedExpense = dbExpense as typeof dbExpense & { attachments?: unknown };
+          let parsedAttachments: Array<{ id: string; name: string; url: string; size: number; type: string }> = [];
+          if (extendedExpense.attachments) {
+            try {
+              const parsed = typeof extendedExpense.attachments === 'string'
+                ? JSON.parse(extendedExpense.attachments)
+                : extendedExpense.attachments;
+              if (Array.isArray(parsed)) {
+                parsedAttachments = parsed.map((a: { id?: string; name?: string; url?: string; size?: number; type?: string }) => ({
+                  id: a.id || '',
+                  name: a.name || '',
+                  url: a.url || '',
+                  size: a.size || 0,
+                  type: a.type || '',
+                }));
+              }
+            } catch (err) {
+              console.error('Error parsing attachments:', err);
+            }
+          }
+
           // Transform to frontend format
           const frontendExpense: FrontendExpense = {
             id: dbExpense.id,
@@ -143,7 +190,7 @@ export default function PettyCashExpenseDetailsPage() {
             amount: dbExpense.amount || 0,
             status: dbExpense.status,
             createdAt: dbExpense.created_at,
-            attachments: [], // Attachments not stored in current schema
+            attachments: parsedAttachments,
           };
           setExpense(frontendExpense);
           // Initialize form fields
@@ -152,6 +199,7 @@ export default function PettyCashExpenseDetailsPage() {
           setProjectId(frontendExpense.projectId);
           setAmount(frontendExpense.amount);
           setDescription(frontendExpense.description);
+          setAttachments(parsedAttachments);
         }
       } catch (error) {
         console.error('Failed to load expense:', error);
@@ -204,6 +252,53 @@ export default function PettyCashExpenseDetailsPage() {
     return allProjects.filter((p) => p.companyId === companyId);
   }, [companyId, allProjects]);
 
+  // Handle file upload
+  const handleFileUpload = useCallback(
+    (event: React.ChangeEvent<HTMLInputElement>) => {
+      const files = event.target.files;
+      if (!files) return;
+
+      Array.from(files).forEach((file) => {
+        // Validate file type
+        const validTypes = ['image/jpeg', 'image/png', 'image/gif', 'application/pdf'];
+        if (!validTypes.includes(file.type)) {
+          setSaveError('Only JPEG, PNG, GIF, and PDF files are allowed');
+          return;
+        }
+
+        // Validate file size (10MB max)
+        if (file.size > 10 * 1024 * 1024) {
+          setSaveError('File size must be less than 10MB');
+          return;
+        }
+
+        // Read file as base64
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          const newAttachment = {
+            id: `att-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+            name: file.name,
+            url: e.target?.result as string,
+            size: file.size,
+            type: file.type,
+          };
+          setAttachments((prev) => [...prev, newAttachment]);
+          setSaveError('');
+        };
+        reader.readAsDataURL(file);
+      });
+
+      // Reset input
+      event.target.value = '';
+    },
+    []
+  );
+
+  // Handle remove attachment
+  const handleRemoveAttachment = useCallback((attachmentId: string) => {
+    setAttachments((prev) => prev.filter((a) => a.id !== attachmentId));
+  }, []);
+
   // Handle save
   const handleSave = useCallback(async () => {
     if (!expense || !isEditable) return;
@@ -213,14 +308,15 @@ export default function PettyCashExpenseDetailsPage() {
     setSaveError('');
 
     try {
-      // Update expense in Supabase
+      // Update expense in Supabase (including attachments)
       await pettyCashApi.updateExpense(expense.id, {
         expense_date: expenseDate,
         company_id: companyId,
         project_id: projectId,
         amount,
         description,
-      });
+        attachments: JSON.stringify(attachments),
+      } as Parameters<typeof pettyCashApi.updateExpense>[1] & { attachments?: string });
 
       // Update local state
       setExpense((prev) => prev ? {
@@ -230,6 +326,7 @@ export default function PettyCashExpenseDetailsPage() {
         projectId,
         amount,
         description,
+        attachments,
       } : null);
 
       setSaveSuccess(true);
@@ -248,7 +345,96 @@ export default function PettyCashExpenseDetailsPage() {
     projectId,
     amount,
     description,
+    attachments,
   ]);
+
+  // Handle submit (change status from draft to submitted)
+  const handleSubmit = useCallback(async () => {
+    if (!expense) return;
+
+    setIsSubmitting(true);
+    setSaveError('');
+
+    try {
+      // Require at least one attachment for submission (Thai accounting law)
+      if (!attachments || attachments.length === 0) {
+        setSaveError('Please attach at least one receipt/document before submitting the claim.');
+        setIsSubmitting(false);
+        return;
+      }
+
+      // Update expense status to submitted
+      await pettyCashApi.updateExpense(expense.id, {
+        status: 'submitted',
+      });
+
+      // Create a reimbursement record for this expense
+      // company_id and final_amount are required fields
+      const effectiveCompanyId = companyId || expense.companyId;
+      if (!effectiveCompanyId) {
+        setSaveError('Please select a company before submitting the claim.');
+        setIsSubmitting(false);
+        return;
+      }
+
+      const reimbursementPayload = {
+        wallet_id: expense.walletId,
+        expense_id: expense.id,
+        amount: expense.amount,
+        final_amount: expense.amount, // Initial final_amount equals amount
+        company_id: effectiveCompanyId,
+        status: 'pending' as const,
+        // Optional fields - set to null for new reimbursements
+        bank_account_id: null,
+        payment_date: null,
+        payment_reference: null,
+        adjustment_amount: null,
+        adjustment_reason: null,
+        approved_by: null,
+        rejected_by: null,
+        rejection_reason: null,
+        bank_feed_line_id: null,
+        created_by: null,
+      };
+      await pettyCashApi.createReimbursementWithNumber(reimbursementPayload);
+
+      // Update local state
+      setExpense((prev) => prev ? {
+        ...prev,
+        status: 'submitted',
+      } : null);
+
+      setSaveSuccess(true);
+      setTimeout(() => setSaveSuccess(false), 3000);
+    } catch (error: unknown) {
+      const err = error as { message?: string; code?: string; details?: string };
+      console.error('Failed to submit expense:', err);
+      const errorMessage = err.message || err.details || 'Unknown error';
+      setSaveError(`Failed to submit claim: ${errorMessage}`);
+    } finally {
+      setIsSubmitting(false);
+    }
+  }, [expense, companyId]);
+
+  // Handle delete (only for draft expenses)
+  const handleDelete = useCallback(async () => {
+    if (!expense || expense.status !== 'draft') return;
+
+    const confirmed = window.confirm('Are you sure you want to delete this draft expense? This action cannot be undone.');
+    if (!confirmed) return;
+
+    setIsDeleting(true);
+    setSaveError('');
+
+    try {
+      await pettyCashApi.deleteExpense(expense.id);
+      router.back();
+    } catch (err) {
+      console.error('Failed to delete expense:', err);
+      setSaveError('Failed to delete expense. Please try again.');
+      setIsDeleting(false);
+    }
+  }, [expense, router]);
 
   // Handle loading state
   if (isLoadingExpense || isLoadingData) {
@@ -303,10 +489,20 @@ export default function PettyCashExpenseDetailsPage() {
         </button>
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">Expense Details</h1>
+            <h1 className="text-2xl font-bold text-gray-900">Expense Claim Details</h1>
             <p className="mt-1 text-sm text-gray-500">{expense.expenseNumber}</p>
           </div>
           <div className="flex items-center gap-3">
+            {/* Edit button - show for submitted expenses when not in edit mode */}
+            {expense.status !== 'draft' && statusConfig[displayStatus]?.editable && !isEditMode && (
+              <button
+                onClick={() => setIsEditMode(true)}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50"
+              >
+                <Pencil className="h-4 w-4" />
+                Edit
+              </button>
+            )}
             {/* Status badge */}
             <span
               className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-sm font-semibold ${statusConfig[displayStatus]?.color || 'bg-gray-100 text-gray-800'}`}
@@ -325,7 +521,7 @@ export default function PettyCashExpenseDetailsPage() {
           <div className="bg-white border border-gray-200 rounded-lg shadow-sm">
             <div className="px-4 py-3 border-b border-gray-200">
               <h3 className="text-sm font-semibold text-gray-900">
-                Expense Details
+                Claim Details
               </h3>
             </div>
             <div className="p-4 space-y-4">
@@ -401,7 +597,7 @@ export default function PettyCashExpenseDetailsPage() {
                   type="number"
                   value={amount}
                   onChange={(e) => setAmount(parseFloat(e.target.value) || 0)}
-                  disabled={!isEditable}
+                  disabled={!canEditAmount}
                   min={0}
                   step={0.01}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#5A7A8F]/20 focus:border-[#5A7A8F] disabled:bg-gray-100 disabled:text-gray-500"
@@ -430,22 +626,51 @@ export default function PettyCashExpenseDetailsPage() {
             <div className="px-4 py-3 border-b border-gray-200">
               <h3 className="text-sm font-semibold text-gray-900">Attachments</h3>
             </div>
-            <div className="p-4">
-              {expense.attachments.length === 0 ? (
-                <p className="text-sm text-gray-500 text-center py-4">
-                  No attachments
+            <div className="p-4 space-y-4">
+              {/* Upload Area */}
+              {isEditable && (
+                <div className="border-2 border-dashed border-gray-300 rounded-lg p-4 text-center hover:border-[#5A7A8F] transition-colors">
+                  <input
+                    type="file"
+                    onChange={handleFileUpload}
+                    multiple
+                    accept="image/jpeg,image/png,image/gif,application/pdf"
+                    className="hidden"
+                    id="attachment-upload"
+                  />
+                  <label
+                    htmlFor="attachment-upload"
+                    className="cursor-pointer flex flex-col items-center gap-2"
+                  >
+                    <Upload className="h-8 w-8 text-gray-400" />
+                    <span className="text-sm text-gray-600">
+                      Click to upload receipt
+                    </span>
+                    <span className="text-xs text-gray-400">
+                      JPEG, PNG, GIF, PDF up to 10MB
+                    </span>
+                  </label>
+                </div>
+              )}
+
+              {/* Attachment List */}
+              {attachments.length === 0 ? (
+                <p className="text-sm text-gray-500 text-center py-2">
+                  No attachments yet
                 </p>
               ) : (
                 <div className="space-y-2">
-                  {expense.attachments.map((att) => (
-                    <a
+                  {attachments.map((att) => (
+                    <div
                       key={att.id}
-                      href={att.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100"
+                      className="flex items-center justify-between p-3 bg-gray-50 rounded-lg"
                     >
-                      <div className="flex items-center gap-3">
+                      <a
+                        href={att.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-3 flex-1 hover:text-[#5A7A8F]"
+                      >
                         <FileText className="h-5 w-5 text-gray-400" />
                         <div>
                           <p className="text-sm font-medium text-gray-900">
@@ -455,9 +680,26 @@ export default function PettyCashExpenseDetailsPage() {
                             {(att.size / 1024).toFixed(1)} KB
                           </p>
                         </div>
+                      </a>
+                      <div className="flex items-center gap-2">
+                        <a
+                          href={att.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="p-1 text-gray-400 hover:text-[#5A7A8F]"
+                        >
+                          <ExternalLink className="h-4 w-4" />
+                        </a>
+                        {isEditable && (
+                          <button
+                            onClick={() => handleRemoveAttachment(att.id)}
+                            className="p-1 text-gray-400 hover:text-red-500"
+                          >
+                            <X className="h-4 w-4" />
+                          </button>
+                        )}
                       </div>
-                      <ExternalLink className="h-4 w-4 text-gray-400" />
-                    </a>
+                    </div>
                   ))}
                 </div>
               )}
@@ -470,7 +712,7 @@ export default function PettyCashExpenseDetailsPage() {
           <div className="bg-white border border-gray-200 rounded-lg shadow-sm">
             <div className="px-4 py-3 border-b border-gray-200">
               <h3 className="text-sm font-semibold text-gray-900">
-                Expense Summary
+                Claim Summary
               </h3>
             </div>
             <div className="p-4 space-y-4">
@@ -479,7 +721,7 @@ export default function PettyCashExpenseDetailsPage() {
                   <Receipt className="h-4 w-4 text-gray-600" />
                 </div>
                 <div>
-                  <p className="text-xs text-gray-500">Expense Number</p>
+                  <p className="text-xs text-gray-500">Claim Number</p>
                   <p className="text-sm font-medium text-gray-900">
                     {expense.expenseNumber}
                   </p>
@@ -506,7 +748,7 @@ export default function PettyCashExpenseDetailsPage() {
                 <div className="space-y-2">
                   <div className="flex justify-between text-sm pt-2 border-t border-gray-200">
                     <span className="font-semibold text-gray-700">
-                      Expense Amount:
+                      Claim Amount:
                     </span>
                     <span className="font-bold text-gray-900">
                       {formatCurrency(expense.amount)}
@@ -520,33 +762,47 @@ export default function PettyCashExpenseDetailsPage() {
           {/* Expense Status Card */}
           <div className="bg-white border border-gray-200 rounded-lg shadow-sm">
             <div className="px-4 py-3 border-b border-gray-200">
-              <h3 className="text-sm font-semibold text-gray-900">Expense Status</h3>
+              <h3 className="text-sm font-semibold text-gray-900">Claim Status</h3>
             </div>
             <div className="p-4">
               <div className="flex items-center gap-3">
-                <div
-                  className={`p-2 rounded-lg ${
-                    expense.status === 'submitted'
-                      ? 'bg-green-100'
-                      : 'bg-yellow-100'
-                  }`}
-                >
-                  {expense.status === 'submitted' ? (
-                    <CheckCircle className="h-5 w-5 text-green-600" />
-                  ) : (
-                    <Clock className="h-5 w-5 text-yellow-600" />
-                  )}
-                </div>
+                {(() => {
+                  const config = statusConfig[expense.status as keyof typeof statusConfig];
+                  const IconComponent = config?.icon || Clock;
+                  const bgColor = expense.status === 'submitted' ? 'bg-blue-100'
+                    : expense.status === 'approved' ? 'bg-green-100'
+                    : expense.status === 'paid' ? 'bg-purple-100'
+                    : expense.status === 'rejected' ? 'bg-red-100'
+                    : expense.status === 'draft' ? 'bg-gray-100'
+                    : 'bg-yellow-100';
+                  const iconColor = expense.status === 'submitted' ? 'text-blue-600'
+                    : expense.status === 'approved' ? 'text-green-600'
+                    : expense.status === 'paid' ? 'text-purple-600'
+                    : expense.status === 'rejected' ? 'text-red-600'
+                    : expense.status === 'draft' ? 'text-gray-600'
+                    : 'text-yellow-600';
+                  return (
+                    <div className={`p-2 rounded-lg ${bgColor}`}>
+                      <IconComponent className={`h-5 w-5 ${iconColor}`} />
+                    </div>
+                  );
+                })()}
                 <div>
                   <p className="text-sm font-medium text-gray-900">
-                    {expense.status === 'submitted'
-                      ? 'Submitted'
-                      : 'Draft'}
+                    {statusConfig[expense.status as keyof typeof statusConfig]?.label || expense.status}
                   </p>
                   <p className="text-xs text-gray-500">
-                    {expense.status === 'submitted'
-                      ? 'Expense has been submitted for processing'
-                      : 'Expense is in draft status'}
+                    {expense.status === 'draft'
+                      ? 'Claim is in draft. Click "Submit Claim" to send for review.'
+                      : expense.status === 'submitted'
+                      ? 'Claim has been submitted for review'
+                      : expense.status === 'approved'
+                      ? 'Claim approved, awaiting payment'
+                      : expense.status === 'paid'
+                      ? 'Claim processed, wallet replenished'
+                      : expense.status === 'rejected'
+                      ? 'Claim was rejected'
+                      : 'Claim is pending'}
                   </p>
                 </div>
               </div>
@@ -569,6 +825,20 @@ export default function PettyCashExpenseDetailsPage() {
           {/* Action Buttons */}
           {isEditable && (
             <div className="flex justify-end gap-3 pt-4">
+              {expense?.status === 'draft' && (
+                <button
+                  onClick={handleDelete}
+                  disabled={isDeleting || isSaving || isSubmitting}
+                  className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-red-700 bg-white border border-red-300 rounded-lg hover:bg-red-50 disabled:opacity-50 mr-auto"
+                >
+                  {isDeleting ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Trash2 className="h-4 w-4" />
+                  )}
+                  Delete
+                </button>
+              )}
               <button
                 onClick={() => router.back()}
                 className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50"
@@ -577,7 +847,7 @@ export default function PettyCashExpenseDetailsPage() {
               </button>
               <button
                 onClick={handleSave}
-                disabled={isSaving}
+                disabled={isSaving || isSubmitting}
                 className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-[#5A7A8F] rounded-lg hover:bg-[#4a6a7f] disabled:opacity-50"
               >
                 {isSaving ? (
@@ -587,6 +857,21 @@ export default function PettyCashExpenseDetailsPage() {
                 )}
                 Save Changes
               </button>
+              {/* Show Submit button only for draft expenses */}
+              {expense?.status === 'draft' && (
+                <button
+                  onClick={handleSubmit}
+                  disabled={isSubmitting || isSaving}
+                  className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-green-600 rounded-lg hover:bg-green-700 disabled:opacity-50"
+                >
+                  {isSubmitting ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Send className="h-4 w-4" />
+                  )}
+                  Submit Claim
+                </button>
+              )}
             </div>
           )}
         </div>

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useMemo, useEffect, useCallback } from 'react';
-import { FileDown, RefreshCw, Pencil, Plus, Trash2, Check, CheckSquare, Square, X, HelpCircle } from 'lucide-react';
+import { FileDown, RefreshCw, Pencil, Plus, Trash2, Check, CheckSquare, Square, X, HelpCircle, RotateCcw } from 'lucide-react';
 import { AppShell } from '@/components/accounting/AppShell';
 import { DataTable } from '@/components/accounting/DataTable';
 import { KPICard } from '@/components/accounting/KPICard';
@@ -132,7 +132,7 @@ function JournalEntryModal({
   };
 
   const handleDelete = async () => {
-    if (!confirm('Are you sure you want to delete this journal entry? This action cannot be undone.')) {
+    if (!confirm('Delete this journal entry? It will be moved to the Deleted tab.')) {
       return;
     }
     setIsDeleting(true);
@@ -722,6 +722,13 @@ export default function JournalEntriesPage() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isBulkPosting, setIsBulkPosting] = useState(false);
 
+  // Tab state
+  const [activeTab, setActiveTab] = useState<'entries' | 'deleted'>('entries');
+
+  // Deleted tab state
+  const [deletedEntries, setDeletedEntries] = useState<JournalEntryWithLines[]>([]);
+  const [loadingDeleted, setLoadingDeleted] = useState(false);
+
   // Help modal state
   const [showHelpModal, setShowHelpModal] = useState(false);
 
@@ -755,9 +762,40 @@ export default function JournalEntriesPage() {
     loadData();
   }, [loadData]);
 
+  // Load deleted entries when tab is active
+  useEffect(() => {
+    if (activeTab !== 'deleted') return;
+    const loadDeleted = async () => {
+      setLoadingDeleted(true);
+      try {
+        const data = await journalEntriesApi.getDeleted();
+        setDeletedEntries(data);
+      } catch (error) {
+        console.error('Failed to load deleted entries:', error);
+      } finally {
+        setLoadingDeleted(false);
+      }
+    };
+    loadDeleted();
+  }, [activeTab]);
+
+  // Restore handler
+  const handleRestoreEntry = async (entryId: string) => {
+    try {
+      await journalEntriesApi.restore(entryId);
+      setDeletedEntries((prev) => prev.filter((e) => e.id !== entryId));
+      await loadData();
+    } catch (error) {
+      console.error('Failed to restore entry:', error);
+      alert('Failed to restore journal entry');
+    }
+  };
+
   // Filtered entries
   const filteredEntries = useMemo(() => {
     return entries.filter((entry) => {
+      // Safety net: never show deleted entries in normal view
+      if (entry.status === 'deleted') return false;
       if (filterStatus !== 'all' && entry.status !== filterStatus) {
         return false;
       }
@@ -1120,6 +1158,106 @@ export default function JournalEntriesPage() {
           />
         </div>
 
+        {/* Tabs */}
+        <div className="flex items-center gap-2 border-b border-gray-200">
+          <button
+            onClick={() => setActiveTab('entries')}
+            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+              activeTab === 'entries'
+                ? 'border-[#5A7A8F] text-[#5A7A8F]'
+                : 'border-transparent text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            Journal Entries
+          </button>
+          <button
+            onClick={() => setActiveTab('deleted')}
+            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors flex items-center gap-2 ${
+              activeTab === 'deleted'
+                ? 'border-red-500 text-red-600'
+                : 'border-transparent text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+            Deleted
+            {deletedEntries.length > 0 && (
+              <span className="px-1.5 py-0.5 text-xs bg-red-100 text-red-600 rounded-full">
+                {deletedEntries.length}
+              </span>
+            )}
+          </button>
+        </div>
+
+        {activeTab === 'deleted' ? (
+          /* Deleted Tab Content */
+          <div className="bg-white rounded-lg shadow">
+            {loadingDeleted ? (
+              <div className="flex items-center justify-center py-12">
+                <RefreshCw className="h-6 w-6 animate-spin text-gray-400" />
+                <span className="ml-2 text-gray-500">Loading deleted entries...</span>
+              </div>
+            ) : deletedEntries.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-12">
+                <Trash2 className="h-12 w-12 text-gray-300 mb-3" />
+                <p className="text-sm text-gray-500">No deleted journal entries</p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Reference</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Company</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Description</th>
+                      <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Amount</th>
+                      <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {deletedEntries.map((entry) => {
+                      const company = companies.find((c) => c.id === entry.company_id);
+                      return (
+                        <tr key={entry.id} className="hover:bg-gray-50">
+                          <td className="px-4 py-3 text-sm font-medium text-gray-900">
+                            {entry.reference_number || '-'}
+                          </td>
+                          <td className="px-4 py-3 text-sm text-gray-900">
+                            {new Date(entry.entry_date).toLocaleDateString('en-US', {
+                              year: 'numeric', month: 'short', day: 'numeric',
+                            })}
+                          </td>
+                          <td className="px-4 py-3 text-sm text-gray-900">
+                            {company?.name || 'Unknown'}
+                          </td>
+                          <td className="px-4 py-3 text-sm text-gray-900 max-w-xs truncate">
+                            {entry.description || '-'}
+                          </td>
+                          <td className="px-4 py-3 text-sm text-gray-900 text-right font-medium">
+                            {(entry.total_debit || 0).toLocaleString('en-US', {
+                              minimumFractionDigits: 2, maximumFractionDigits: 2,
+                            })}
+                          </td>
+                          <td className="px-4 py-3 text-center">
+                            <button
+                              onClick={() => handleRestoreEntry(entry.id)}
+                              className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-blue-700 bg-blue-50 hover:bg-blue-100 rounded transition-colors"
+                            >
+                              <RotateCcw className="h-3 w-3" />
+                              Restore
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        ) : (
+        /* Normal Entries Tab */
+        <>
         {/* Filters & Actions */}
         <div className="space-y-4">
           {/* Top row: Search and Action Buttons */}
@@ -1274,6 +1412,8 @@ export default function JournalEntriesPage() {
             onPost={handlePostEntry}
             onDelete={handleDeleteEntry}
           />
+        )}
+        </>
         )}
 
         {/* Help Modal */}

@@ -1,18 +1,22 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { X, Save, FileText, Printer, XCircle, Building2, AlertCircle, Share2, ChevronDown, Receipt, Pencil, Loader2 } from 'lucide-react';
+import { X, Save, FileText, Printer, XCircle, Building2, AlertCircle, Share2, ChevronDown, Receipt, Pencil, Loader2, CheckCircle2 } from 'lucide-react';
 import ClientSelector from './ClientSelector';
 import LineItemEditor from './LineItemEditor';
 import InvoicePrintView from './InvoicePrintView';
 import { CharterInfoBox } from './CharterInfoBox';
 import type { Invoice, LineItem, PricingType, CharterType } from '@/data/income/types';
+import type { Booking, BookingType, BookingStatus } from '@/data/booking/types';
+import { BookingFormContainer } from '@/components/bookings/form/BookingFormContainer';
+import { bookingsApi } from '@/lib/supabase/api/bookings';
 import { charterTypeAccountCodes } from '@/data/income/types';
 import type { Currency, Company } from '@/data/company/types';
 import type { Project } from '@/data/project/types';
 import type { BankAccount } from '@/data/banking/types';
 import type { Contact } from '@/data/contact/types';
+import { createClient } from '@/lib/supabase/client';
 import { companiesApi } from '@/lib/supabase/api/companies';
 import { projectsApi } from '@/lib/supabase/api/projects';
 import { bankAccountsApi } from '@/lib/supabase/api/bankAccounts';
@@ -26,13 +30,26 @@ import { calculateDocumentTotals, calculateLineItemTotal, calculateTotalWhtAmoun
 import { getExchangeRate } from '@/lib/exchangeRate/service';
 import type { FxRateSource } from '@/data/exchangeRate/types';
 
+interface CharterPrefill {
+  boatId?: string;
+  charterType?: string;
+  charterDateFrom?: string;
+  charterDateTo?: string;
+  charterTime?: string;
+  customerName?: string;
+  currency?: string;
+  totalPrice?: number;
+  bookingId?: string;
+}
+
 interface InvoiceFormProps {
   invoice?: Invoice;
   quotationId?: string; // For pre-filling from quotation
+  charterPrefill?: CharterPrefill;
   onCancel?: () => void;
 }
 
-export default function InvoiceForm({ invoice, quotationId, onCancel }: InvoiceFormProps) {
+export default function InvoiceForm({ invoice, quotationId, charterPrefill, onCancel }: InvoiceFormProps) {
   const router = useRouter();
   const isEditing = !!invoice;
 
@@ -44,20 +61,27 @@ export default function InvoiceForm({ invoice, quotationId, onCancel }: InvoiceF
   const [sourceQuotation, setSourceQuotation] = useState<{ companyId: string; clientId: string; clientName: string; currency: Currency; pricingType: PricingType; quotationNumber: string; lineItems: LineItem[]; id: string } | undefined>(undefined);
   const [isLoading, setIsLoading] = useState(true);
 
+  // Booking modal state
+  const [showBookingModal, setShowBookingModal] = useState(false);
+  const [prefilledBooking, setPrefilledBooking] = useState<Partial<Booking> | null>(null);
+
+  // Auto-draft ref
+  const autoDraftTriggeredRef = useRef(false);
+
   // Form state - initialized from invoice or defaults (quotation data loaded async)
   const [companyId, setCompanyId] = useState(invoice?.companyId || '');
   const [clientId, setClientId] = useState(invoice?.clientId || '');
-  const [clientName, setClientName] = useState(invoice?.clientName || '');
+  const [clientName, setClientName] = useState(invoice?.clientName || charterPrefill?.customerName || '');
   // Charter information
-  const [boatId, setBoatId] = useState(invoice?.boatId || '');
-  const [charterType, setCharterType] = useState<CharterType | ''>(invoice?.charterType || '');
-  const [charterDateFrom, setCharterDateFrom] = useState(invoice?.charterDateFrom || invoice?.charterPeriodFrom || '');
-  const [charterDateTo, setCharterDateTo] = useState(invoice?.charterDateTo || invoice?.charterPeriodTo || '');
-  const [charterTime, setCharterTime] = useState(invoice?.charterTime || '');
+  const [boatId, setBoatId] = useState(invoice?.boatId || charterPrefill?.boatId || '');
+  const [charterType, setCharterType] = useState<CharterType | ''>(invoice?.charterType || (charterPrefill?.charterType as CharterType) || '');
+  const [charterDateFrom, setCharterDateFrom] = useState(invoice?.charterDateFrom || invoice?.charterPeriodFrom || charterPrefill?.charterDateFrom || '');
+  const [charterDateTo, setCharterDateTo] = useState(invoice?.charterDateTo || invoice?.charterPeriodTo || charterPrefill?.charterDateTo || '');
+  const [charterTime, setCharterTime] = useState(invoice?.charterTime || charterPrefill?.charterTime || '');
   const [externalBoatName, setExternalBoatName] = useState('');
   const [invoiceDate, setInvoiceDate] = useState(invoice?.invoiceDate || getTodayISO());
   const [dueDate, setDueDate] = useState(invoice?.dueDate || addDays(getTodayISO(), getDefaultValidityDays('invoice')));
-  const [currency, setCurrency] = useState<Currency>(invoice?.currency || 'USD');
+  const [currency, setCurrency] = useState<Currency>(invoice?.currency || (charterPrefill?.currency as Currency) || 'USD');
   const [pricingType, setPricingType] = useState<PricingType>(invoice?.pricingType || 'exclude_vat');
   const [lineItems, setLineItems] = useState<LineItem[]>(
     invoice?.lineItems || [
@@ -65,13 +89,13 @@ export default function InvoiceForm({ invoice, quotationId, onCancel }: InvoiceF
         id: generateId(),
         description: '',
         quantity: 1,
-        unitPrice: 0,
+        unitPrice: charterPrefill?.totalPrice || 0,
         taxRate: 7,
         whtRate: 0,
         customWhtAmount: undefined,
         amount: 0,
         accountCode: '',
-        projectId: '',
+        projectId: charterPrefill?.boatId || '',
       },
     ]
   );
@@ -289,9 +313,27 @@ export default function InvoiceForm({ invoice, quotationId, onCancel }: InvoiceF
     fetchRate();
   }, [currency, invoiceDate]);
 
+  // Auto-save as draft when creating a new invoice and companyId is set
+  useEffect(() => {
+    if (isEditing || autoDraftTriggeredRef.current || !companyId) return;
+    autoDraftTriggeredRef.current = true;
+    const timer = setTimeout(() => {
+      handleSave('draft');
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [companyId]);
+
   // Calculate totals
   const totals = calculateDocumentTotals(lineItems, effectivePricingType);
   const whtAmount = calculateTotalWhtAmount(lineItems, effectivePricingType);
+
+  // Auto-prefill project in line items when boat is selected
+  useEffect(() => {
+    if (!boatId) return;
+    setLineItems(prev => prev.map(item =>
+      !item.projectId ? { ...item, projectId: boatId } : item
+    ));
+  }, [boatId]);
 
   // Agency project codes (when selected, external boat name is used)
   const AGENCY_PROJECT_CODES = ['FA'];
@@ -326,37 +368,23 @@ export default function InvoiceForm({ invoice, quotationId, onCancel }: InvoiceF
     };
     const bookingType = charterType ? bookingTypeMap[charterType] || 'day_charter' : 'day_charter';
 
-    // Build URL parameters for booking calendar
-    const params = new URLSearchParams();
-    params.set('status', 'hold'); // Invoice -> Hold
-    params.set('type', bookingType);
-    params.set('title', clientName || '');
-    params.set('customerName', clientName || '');
-
-    if (charterDateFrom) params.set('dateFrom', charterDateFrom);
-    if (charterDateTo) params.set('dateTo', charterDateTo);
-    if (charterTime) params.set('time', charterTime);
-
-    // Set boat info
-    if (isAgencyBooking && externalBoatName) {
-      params.set('externalBoatName', externalBoatName);
-    } else if (selectedBoat) {
-      params.set('projectId', selectedBoat.id);
-    }
-
-    // Set financial info
-    if (totals.totalAmount > 0) {
-      params.set('totalPrice', totals.totalAmount.toString());
-    }
-    params.set('currency', currency);
-
-    // Set source document reference
-    if (invoiceNumber) {
-      params.set('sourceDoc', `Invoice: ${invoiceNumber}`);
-    }
-
-    // Navigate to booking calendar with new booking form
-    router.push(`/bookings/manager/calendar?newBooking=true&${params.toString()}`);
+    // Build prefilled booking object
+    const prefilled: Partial<Booking> = {
+      status: 'hold' as BookingStatus,
+      type: bookingType as BookingType,
+      title: clientName || '',
+      customerName: clientName || '',
+      dateFrom: charterDateFrom || undefined,
+      dateTo: charterDateTo || undefined,
+      time: charterTime || undefined,
+      projectId: (isAgencyBooking ? undefined : selectedBoat?.id) || undefined,
+      externalBoatName: isAgencyBooking ? externalBoatName : undefined,
+      totalPrice: totals.totalAmount > 0 ? totals.totalAmount : undefined,
+      currency: currency as Currency,
+      internalNotes: invoiceNumber ? `Source: Invoice ${invoiceNumber}` : undefined,
+    };
+    setPrefilledBooking(prefilled);
+    setShowBookingModal(true);
   };
 
   // Handle Update Description - update first line item with charter info
@@ -535,6 +563,9 @@ Destination: `;
 
       // Convert to DB format
       const dbInvoice = frontendInvoiceToDb(invoiceData);
+      if (charterPrefill?.bookingId) {
+        (dbInvoice as Record<string, unknown>).booking_id = charterPrefill.bookingId;
+      }
       const dbLineItems = finalLineItems.map(item => frontendLineItemToDbInvoice(item, ''));
 
       // Create or update invoice
@@ -547,6 +578,17 @@ Destination: `;
       } else {
         const newInvoice = await invoicesApi.create(dbInvoice, dbLineItems);
         console.log('Created invoice:', newInvoice);
+        // Link invoice to booking if created from booking form
+        if (newInvoice && charterPrefill?.bookingId) {
+          try {
+            await bookingsApi.update(charterPrefill.bookingId, {
+              invoiceId: newInvoice.id,
+              paymentStatus: 'awaiting_payment',
+            });
+          } catch (linkErr) {
+            console.error('Failed to link invoice to booking:', linkErr);
+          }
+        }
         // Navigate to edit page for the newly created invoice
         if (newInvoice) {
           router.push(`/accounting/manager/income/invoices/${newInvoice.id}`);
@@ -599,6 +641,51 @@ Destination: `;
     } catch (error) {
       console.error('Error voiding invoice:', error);
       alert('Failed to void invoice. Please try again.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  // Handle approve (draft → issued)
+  const handleApprove = async () => {
+    if (!invoice) return;
+
+    // Validate before approving
+    const newErrors: Record<string, string> = {};
+    if (!companyId) newErrors.companyId = 'Company is required';
+    if (!clientId) newErrors.clientId = 'Customer is required';
+    if (!invoiceDate) newErrors.invoiceDate = 'Invoice date is required';
+
+    const nonEmptyLineItems = lineItems.filter(
+      item => item.description.trim() !== '' || item.unitPrice > 0
+    );
+    if (nonEmptyLineItems.length === 0) {
+      newErrors.lineItems = 'At least one line item with description or price is required';
+    }
+    const lineItemsMissingProject = nonEmptyLineItems.some(item => !item.projectId);
+    if (lineItemsMissingProject) {
+      newErrors.lineItems = 'Project is required for each line item';
+    }
+    if (dueDate && invoiceDate && dueDate < invoiceDate) {
+      newErrors.dueDate = 'Due date must be on or after invoice date';
+    }
+
+    if (Object.keys(newErrors).length > 0) {
+      setErrors(newErrors);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      await invoicesApi.update(invoice.id, {
+        status: 'issued',
+      } as any);
+      setCurrentStatus('issued');
+      setIsEditMode(false);
+    } catch (error) {
+      console.error('Error approving invoice:', error);
+      alert('Failed to approve invoice. Please try again.');
     } finally {
       setIsSaving(false);
     }
@@ -728,6 +815,19 @@ Destination: `;
                     <span>Edit</span>
                   </button>
                 )
+              )}
+
+              {/* Approve button - only for draft invoices when not in edit mode */}
+              {currentStatus === 'draft' && !isEditMode && (
+                <button
+                  type="button"
+                  onClick={handleApprove}
+                  disabled={isSaving}
+                  className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-green-600 rounded-lg hover:bg-green-700 transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <CheckCircle2 className="h-4 w-4" />
+                  <span>{isSaving ? 'Approving...' : 'Approve'}</span>
+                </button>
               )}
 
               {/* Voided badge - show instead of Options when voided */}
@@ -1277,6 +1377,35 @@ Destination: `;
         isOpen={showPrintPreview}
         onClose={() => setShowPrintPreview(false)}
       />
+
+      {/* Inline Booking Modal */}
+      {showBookingModal && (
+        <BookingFormContainer
+          prefilled={prefilledBooking}
+          projects={companyProjects}
+          onSave={async (bookingData) => {
+            const now = new Date();
+            const yr = now.getFullYear();
+            const mo = String(now.getMonth() + 1).padStart(2, '0');
+            const seq = String(Math.floor(Math.random() * 1000)).padStart(3, '0');
+            const bookingNumber = `FA-${yr}${mo}${seq}`;
+            const supabase = createClient();
+            const { data: { user } } = await supabase.auth.getUser();
+            const dataWithDefaults = {
+              ...bookingData,
+              bookingNumber,
+              bookingOwner: bookingData.bookingOwner || user?.id || undefined,
+            };
+            await bookingsApi.create(dataWithDefaults);
+            setShowBookingModal(false);
+            setPrefilledBooking(null);
+          }}
+          onClose={() => {
+            setShowBookingModal(false);
+            setPrefilledBooking(null);
+          }}
+        />
+      )}
     </div>
   );
 }

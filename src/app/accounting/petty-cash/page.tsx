@@ -316,6 +316,7 @@ export default function PettyCashDashboard() {
       try {
         // Create expense in Supabase with auto-generated number
         // Use wallet's company_id if expense doesn't have one (accountant will update later)
+        // Include attachments from the form (JSONB column added in migration 032)
         await pettyCashApi.createExpenseWithNumber({
           wallet_id: wallet.id,
           company_id: expenseData.companyId || wallet.company_id,
@@ -325,7 +326,8 @@ export default function PettyCashDashboard() {
           amount: expenseData.amount,
           status: 'draft',
           created_by: user?.id || null,
-        });
+          attachments: JSON.stringify(expenseData.attachments || []),
+        } as Parameters<typeof pettyCashApi.createExpenseWithNumber>[0] & { attachments?: string });
 
         // Update wallet balance (deduct the expense amount)
         const newBalance = wallet.balance - expenseData.amount;

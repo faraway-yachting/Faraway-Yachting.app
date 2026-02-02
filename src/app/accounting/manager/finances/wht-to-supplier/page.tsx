@@ -11,7 +11,7 @@ import { contactsApi } from '@/lib/supabase/api/contacts';
 import type { Database } from '@/lib/supabase/database.types';
 import type { WhtToSupplier, WhtToSupplierSummary } from '@/data/finances/types';
 import type { Company } from '@/data/company/types';
-import type { Contact } from '@/data/contact/types';
+import type { Contact, ContactType } from '@/data/contact/types';
 
 type DbCompany = Database['public']['Tables']['companies']['Row'];
 type DbContact = Database['public']['Tables']['contacts']['Row'];
@@ -108,7 +108,7 @@ function convertDbContactToUiContact(contact: DbContact | undefined): Contact | 
   return {
     id: contact.id,
     name: contact.name,
-    type: contact.type as 'customer' | 'vendor' | 'both',
+    type: contact.type as ContactType[],
     contactPerson: contact.contact_person || undefined,
     email: contact.email || undefined,
     phone: contact.phone || undefined,

@@ -23,6 +23,7 @@ export const journalEntriesApi = {
     const { data, error } = await supabase
       .from('journal_entries')
       .select('*')
+      .neq('status', 'deleted')
       .order('entry_date', { ascending: false });
     if (error) throw error;
     return data ?? [];
@@ -36,6 +37,7 @@ export const journalEntriesApi = {
         *,
         lines:journal_entry_lines(*)
       `)
+      .neq('status', 'deleted')
       .order('entry_date', { ascending: false });
     if (error) throw error;
     return (data ?? []) as JournalEntryWithLines[];
@@ -75,12 +77,32 @@ export const journalEntriesApi = {
   async create(entry: JournalEntryInsert, lines?: JournalEntryLineCreate[]): Promise<JournalEntry> {
     const supabase = createClient();
 
+    console.log('[journalEntriesApi.create] Attempting to insert journal entry:', {
+      reference_number: entry.reference_number,
+      entry_date: entry.entry_date,
+      company_id: entry.company_id,
+      created_by: entry.created_by || '(empty)',
+      total_debit: entry.total_debit,
+      total_credit: entry.total_credit,
+      linesCount: lines?.length || 0,
+    });
+
     const { data: entryData, error: entryError } = await supabase
       .from('journal_entries')
       .insert([entry])
       .select()
       .single();
-    if (entryError) throw entryError;
+    if (entryError) {
+      console.error('[journalEntriesApi.create] Supabase error:', {
+        message: entryError.message,
+        code: entryError.code,
+        details: entryError.details,
+        hint: entryError.hint,
+      });
+      throw new Error(`Failed to create journal entry: ${entryError.message} (code: ${entryError.code})`);
+    }
+
+    console.log('[journalEntriesApi.create] Journal entry created:', entryData.id);
 
     if (lines && lines.length > 0) {
       const linesWithEntryId = lines.map((line, index) => ({
@@ -89,10 +111,22 @@ export const journalEntriesApi = {
         line_order: index + 1
       }));
 
+      console.log('[journalEntriesApi.create] Inserting', linesWithEntryId.length, 'journal lines');
+
       const { error: linesError } = await supabase
         .from('journal_entry_lines')
         .insert(linesWithEntryId);
-      if (linesError) throw linesError;
+      if (linesError) {
+        console.error('[journalEntriesApi.create] Supabase lines error:', {
+          message: linesError.message,
+          code: linesError.code,
+          details: linesError.details,
+          hint: linesError.hint,
+        });
+        throw new Error(`Failed to create journal entry lines: ${linesError.message} (code: ${linesError.code})`);
+      }
+
+      console.log('[journalEntriesApi.create] Journal lines created successfully');
     }
 
     return entryData;
@@ -114,7 +148,34 @@ export const journalEntriesApi = {
     const supabase = createClient();
     const { error } = await supabase
       .from('journal_entries')
-      .delete()
+      .update({ status: 'deleted' })
+      .eq('id', id);
+    if (error) throw error;
+  },
+
+  async getDeleted(companyId?: string): Promise<JournalEntryWithLines[]> {
+    const supabase = createClient();
+    let query = supabase
+      .from('journal_entries')
+      .select(`
+        *,
+        lines:journal_entry_lines(*)
+      `)
+      .eq('status', 'deleted')
+      .order('updated_at', { ascending: false });
+    if (companyId) {
+      query = query.eq('company_id', companyId);
+    }
+    const { data, error } = await query;
+    if (error) throw error;
+    return (data ?? []) as JournalEntryWithLines[];
+  },
+
+  async restore(id: string): Promise<void> {
+    const supabase = createClient();
+    const { error } = await supabase
+      .from('journal_entries')
+      .update({ status: 'draft' })
       .eq('id', id);
     if (error) throw error;
   },
@@ -142,10 +203,10 @@ export const journalEntriesApi = {
       return 0;
     }
 
-    // Delete the entries (lines will cascade delete)
+    // Soft-delete the entries (set status to 'deleted')
     const { error: deleteError } = await supabase
       .from('journal_entries')
-      .delete()
+      .update({ status: 'deleted' })
       .eq('source_document_type', sourceDocumentType)
       .eq('source_document_id', sourceDocumentId);
 
@@ -171,6 +232,7 @@ export const journalEntriesApi = {
       .from('journal_entries')
       .select('*')
       .eq('company_id', companyId)
+      .neq('status', 'deleted')
       .order('entry_date', { ascending: false });
     if (error) throw error;
     return data ?? [];
@@ -183,6 +245,7 @@ export const journalEntriesApi = {
       .select('*')
       .gte('entry_date', startDate)
       .lte('entry_date', endDate)
+      .neq('status', 'deleted')
       .order('entry_date', { ascending: false });
     if (error) throw error;
     return data ?? [];
@@ -266,6 +329,66 @@ export const journalEntriesApi = {
       .order('entry_date', { ascending: false });
     if (error) throw error;
     return data ?? [];
+  },
+
+  /**
+   * Get posted journal entries with lines up to a specific date
+   * Used by Balance Sheet and other financial reports
+   */
+  async getPostedEntriesWithLinesUpToDate(
+    asOfDate: string,
+    companyId?: string
+  ): Promise<JournalEntryWithLines[]> {
+    const supabase = createClient();
+
+    let query = supabase
+      .from('journal_entries')
+      .select(`
+        *,
+        lines:journal_entry_lines(*)
+      `)
+      .eq('status', 'posted')
+      .lte('entry_date', asOfDate)
+      .order('entry_date', { ascending: true });
+
+    if (companyId) {
+      query = query.eq('company_id', companyId);
+    }
+
+    const { data, error } = await query;
+    if (error) throw error;
+    return (data ?? []) as JournalEntryWithLines[];
+  },
+
+  /**
+   * Get posted journal entries with lines within a date range
+   * Used by P&L Report calculation
+   */
+  async getPostedEntriesWithLinesInDateRange(
+    dateFrom: string,
+    dateTo: string,
+    companyId?: string
+  ): Promise<JournalEntryWithLines[]> {
+    const supabase = createClient();
+
+    let query = supabase
+      .from('journal_entries')
+      .select(`
+        *,
+        lines:journal_entry_lines(*)
+      `)
+      .eq('status', 'posted')
+      .gte('entry_date', dateFrom)
+      .lte('entry_date', dateTo)
+      .order('entry_date', { ascending: true });
+
+    if (companyId) {
+      query = query.eq('company_id', companyId);
+    }
+
+    const { data, error } = await query;
+    if (error) throw error;
+    return (data ?? []) as JournalEntryWithLines[];
   }
 };
 

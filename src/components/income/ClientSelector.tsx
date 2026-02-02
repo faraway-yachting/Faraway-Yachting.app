@@ -85,7 +85,7 @@ export default function ClientSelector({
 
   const handleSaveContact = async (contactData: Partial<Contact>) => {
     // Force customer type
-    const dbData = frontendContactToDb({ ...contactData, type: 'customer' });
+    const dbData = frontendContactToDb({ ...contactData, type: ['customer'] });
     await contactsApi.create(dbData);
     setIsContactModalOpen(false);
     await fetchCustomers();

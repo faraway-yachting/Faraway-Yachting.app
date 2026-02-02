@@ -6,22 +6,21 @@ import { PLReportFilters } from "./PLReportFilters";
 import { PLReportSummary } from "./PLReportSummary";
 import { PLReportTable } from "./PLReportTable";
 import { generatePLReport, PLReport as PLReportData } from "@/lib/reports/plCalculation";
+import { companiesApi } from "@/lib/supabase/api/companies";
+import { projectsApi } from "@/lib/supabase/api/projects";
+import type { Database } from "@/lib/supabase/database.types";
 
-// Mock data for companies and projects
-const mockCompanies = [
-  { id: "company-001", name: "Faraway Yachting Co., Ltd." },
-  { id: "company-002", name: "Faraway Marine Services" },
-];
-
-const mockProjects = [
-  { id: "project-001", name: "Ocean Star" },
-  { id: "project-002", name: "Sea Breeze" },
-  { id: "project-003", name: "Wind Dancer" },
-];
+type Company = Database['public']['Tables']['companies']['Row'];
+type Project = Database['public']['Tables']['projects']['Row'];
 
 export function PLReport() {
   const [isLoading, setIsLoading] = useState(false);
   const [report, setReport] = useState<PLReportData | null>(null);
+
+  // Filter data from Supabase
+  const [companies, setCompanies] = useState<Company[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [isLoadingFilters, setIsLoadingFilters] = useState(true);
 
   // Filter state
   const currentYear = new Date().getFullYear();
@@ -31,10 +30,31 @@ export function PLReport() {
   const [projectId, setProjectId] = useState("");
   const [showInTHB, setShowInTHB] = useState(true);
 
+  // Load companies and projects on mount
+  useEffect(() => {
+    async function loadFilters() {
+      try {
+        const [companiesData, projectsData] = await Promise.all([
+          companiesApi.getAll(),
+          projectsApi.getAll(),
+        ]);
+        setCompanies(companiesData);
+        setProjects(projectsData);
+      } catch (error) {
+        console.error("Error loading filter data:", error);
+      } finally {
+        setIsLoadingFilters(false);
+      }
+    }
+    loadFilters();
+  }, []);
+
   // Load report on filter change
   useEffect(() => {
-    loadReport();
-  }, [dateFrom, dateTo, companyId, projectId]);
+    if (!isLoadingFilters) {
+      loadReport();
+    }
+  }, [dateFrom, dateTo, companyId, projectId, isLoadingFilters]);
 
   const loadReport = async () => {
     setIsLoading(true);
@@ -99,13 +119,14 @@ export function PLReport() {
         companyId={companyId}
         projectId={projectId}
         showInTHB={showInTHB}
-        companies={mockCompanies}
-        projects={mockProjects}
+        companies={companies}
+        projects={projects}
         onDateFromChange={setDateFrom}
         onDateToChange={setDateTo}
         onCompanyChange={setCompanyId}
         onProjectChange={setProjectId}
         onShowInTHBChange={setShowInTHB}
+        isLoadingFilters={isLoadingFilters}
       />
 
       {/* Loading State */}

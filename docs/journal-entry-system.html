@@ -1,0 +1,563 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Journal Entry System Documentation - Faraway Yachting</title>
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      line-height: 1.6;
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 40px 20px;
+      color: #333;
+      background: #fff;
+    }
+    h1 {
+      color: #1a365d;
+      border-bottom: 3px solid #3182ce;
+      padding-bottom: 10px;
+      margin-top: 0;
+    }
+    h2 {
+      color: #2c5282;
+      border-bottom: 1px solid #e2e8f0;
+      padding-bottom: 8px;
+      margin-top: 40px;
+    }
+    h3 {
+      color: #2d3748;
+      margin-top: 30px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 20px 0;
+      font-size: 14px;
+    }
+    th, td {
+      border: 1px solid #e2e8f0;
+      padding: 12px;
+      text-align: left;
+    }
+    th {
+      background: #edf2f7;
+      font-weight: 600;
+      color: #2d3748;
+    }
+    tr:nth-child(even) {
+      background: #f7fafc;
+    }
+    code {
+      background: #edf2f7;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+      font-size: 13px;
+    }
+    pre {
+      background: #1a202c;
+      color: #e2e8f0;
+      padding: 20px;
+      border-radius: 8px;
+      overflow-x: auto;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+    pre code {
+      background: none;
+      padding: 0;
+      color: inherit;
+    }
+    .flow-diagram {
+      background: #f7fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      padding: 20px;
+      font-family: 'Monaco', 'Menlo', monospace;
+      font-size: 12px;
+      white-space: pre;
+      overflow-x: auto;
+      line-height: 1.4;
+    }
+    .highlight {
+      background: #ebf8ff;
+      border-left: 4px solid #3182ce;
+      padding: 15px 20px;
+      margin: 20px 0;
+      border-radius: 0 8px 8px 0;
+    }
+    .highlight strong {
+      color: #2c5282;
+    }
+    .journal-entry {
+      background: #f0fff4;
+      border: 1px solid #9ae6b4;
+      border-radius: 8px;
+      padding: 15px 20px;
+      margin: 15px 0;
+      font-family: monospace;
+    }
+    .journal-entry .debit {
+      color: #276749;
+    }
+    .journal-entry .credit {
+      color: #9c4221;
+      padding-left: 20px;
+    }
+    hr {
+      border: none;
+      border-top: 1px solid #e2e8f0;
+      margin: 40px 0;
+    }
+    .page-break {
+      page-break-after: always;
+    }
+    @media print {
+      body {
+        padding: 20px;
+        font-size: 11pt;
+      }
+      pre {
+        font-size: 9pt;
+        padding: 10px;
+      }
+      h1 {
+        font-size: 24pt;
+      }
+      h2 {
+        font-size: 16pt;
+        page-break-after: avoid;
+      }
+      h3 {
+        font-size: 13pt;
+        page-break-after: avoid;
+      }
+      table {
+        font-size: 10pt;
+      }
+      .flow-diagram {
+        font-size: 9pt;
+      }
+    }
+  </style>
+</head>
+<body>
+
+<h1>Journal Entry System Documentation</h1>
+<p><strong>Faraway Yachting Accounting System</strong></p>
+
+<h2>Overview</h2>
+
+<p>The Faraway Yachting accounting system uses an <strong>event-driven architecture</strong> for journal entry generation. Instead of manually creating journal entries, the system automatically generates them when financial events occur (expenses saved, receipts recorded, etc.).</p>
+
+<h2>Core Principle: Event-Driven Journal Generation</h2>
+
+<div class="flow-diagram">
+┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
+│  Source Document │ ──▶ │ Accounting Event │ ──▶ │  Journal Entry   │
+│  (Expense/Receipt)│     │    (Trigger)     │     │   (Auto-Created) │
+└─────────────────┘     └─────────────────┘     └─────────────────┘
+</div>
+
+<div class="highlight">
+<strong>Why this approach?</strong>
+<ul>
+  <li>Ensures journal entries are always in sync with source documents</li>
+  <li>Prevents manual entry errors</li>
+  <li>Creates an audit trail linking events to journals</li>
+  <li>Supports automatic reversal when events are corrected</li>
+</ul>
+</div>
+
+<hr>
+
+<h2>Source Documents &amp; Triggers</h2>
+
+<h3>1. Expenses</h3>
+<p>When an expense is saved/updated, it triggers journal entries:</p>
+
+<table>
+  <tr>
+    <th>Expense Type</th>
+    <th>Debit Account</th>
+    <th>Credit Account</th>
+  </tr>
+  <tr>
+    <td>Operating expense</td>
+    <td>Expense account (based on category)</td>
+    <td>Accounts Payable / Cash</td>
+  </tr>
+  <tr>
+    <td>Prepaid expense</td>
+    <td>Prepaid Asset</td>
+    <td>Cash</td>
+  </tr>
+</table>
+
+<p><strong>Trigger Point:</strong> <code>src/lib/accounting/eventHandlers/expenseHandler.ts</code></p>
+
+<h3>2. Receipts (Income)</h3>
+<p>When income is recorded:</p>
+
+<table>
+  <tr>
+    <th>Receipt Type</th>
+    <th>Debit Account</th>
+    <th>Credit Account</th>
+  </tr>
+  <tr>
+    <td>Cash receipt</td>
+    <td>Cash/Bank</td>
+    <td>Revenue account</td>
+  </tr>
+  <tr>
+    <td>Charter advance</td>
+    <td>Cash</td>
+    <td>Deferred Revenue</td>
+  </tr>
+</table>
+
+<p><strong>Trigger Point:</strong> <code>src/lib/accounting/eventHandlers/receiptHandler.ts</code></p>
+
+<h3>3. Revenue Recognition</h3>
+<p>For charter bookings with deferred revenue:</p>
+
+<table>
+  <tr>
+    <th>Recognition Event</th>
+    <th>Debit Account</th>
+    <th>Credit Account</th>
+  </tr>
+  <tr>
+    <td>Recognize revenue</td>
+    <td>Deferred Revenue</td>
+    <td>Charter Revenue</td>
+  </tr>
+</table>
+
+<p><strong>Trigger Point:</strong> <code>src/lib/accounting/eventHandlers/revenueRecognitionHandler.ts</code></p>
+
+<hr>
+
+<h2>Database Schema</h2>
+
+<h3><code>accounting_events</code> Table</h3>
+<p>Stores all financial events that trigger journal entries:</p>
+
+<pre><code>CREATE TABLE accounting_events (
+  id UUID PRIMARY KEY,
+  company_id UUID NOT NULL,
+  project_id UUID,
+  event_type TEXT NOT NULL,      -- 'expense_created', 'receipt_created', etc.
+  event_data JSONB NOT NULL,     -- Full event payload
+  status TEXT DEFAULT 'pending', -- 'pending', 'processed', 'failed'
+  error_message TEXT,
+  processed_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);</code></pre>
+
+<h3><code>journal_entries</code> Table</h3>
+<p>The actual double-entry bookkeeping records:</p>
+
+<pre><code>CREATE TABLE journal_entries (
+  id UUID PRIMARY KEY,
+  company_id UUID NOT NULL,
+  project_id UUID,
+  entry_number TEXT NOT NULL,
+  entry_date DATE NOT NULL,
+  description TEXT,
+  reference_type TEXT,           -- 'expense', 'receipt', 'revenue_recognition'
+  reference_id UUID,             -- Links back to source document
+  status TEXT DEFAULT 'draft',
+  total_debit DECIMAL(15,2),
+  total_credit DECIMAL(15,2),
+  currency TEXT DEFAULT 'THB',
+  created_by UUID,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);</code></pre>
+
+<h3><code>journal_entry_lines</code> Table</h3>
+<p>Individual debit/credit lines:</p>
+
+<pre><code>CREATE TABLE journal_entry_lines (
+  id UUID PRIMARY KEY,
+  journal_entry_id UUID NOT NULL,
+  account_code TEXT NOT NULL,
+  account_name TEXT NOT NULL,
+  debit_amount DECIMAL(15,2) DEFAULT 0,
+  credit_amount DECIMAL(15,2) DEFAULT 0,
+  description TEXT
+);</code></pre>
+
+<h3><code>event_journal_entries</code> Table</h3>
+<p>Links events to their generated journals (for audit trail):</p>
+
+<pre><code>CREATE TABLE event_journal_entries (
+  id UUID PRIMARY KEY,
+  event_id UUID NOT NULL,
+  journal_entry_id UUID NOT NULL,
+  UNIQUE(event_id, journal_entry_id)
+);</code></pre>
+
+<div class="page-break"></div>
+
+<h2>Event Processing Flow</h2>
+
+<h3>Step 1: Event Creation</h3>
+<p>When a source document is saved, an event is created:</p>
+
+<pre><code>// From src/lib/supabase/api/accountingEvents.ts
+async createEvent(event: AccountingEventInsert): Promise&lt;AccountingEvent&gt; {
+  const { data, error } = await supabase
+    .from('accounting_events')
+    .insert([{ ...event, status: 'pending' }])
+    .select()
+    .single();
+  return data;
+}</code></pre>
+
+<h3>Step 2: Event Processing</h3>
+<p>The event processor picks up pending events and generates journals:</p>
+
+<pre><code>// From src/lib/accounting/eventProcessor.ts
+async processEvent(event: AccountingEvent): Promise&lt;void&gt; {
+  // 1. Determine handler based on event type
+  const handler = this.getHandler(event.event_type);
+
+  // 2. Generate journal entry data
+  const journalData = await handler.generateJournal(event);
+
+  // 3. Create journal atomically (using database RPC)
+  await this.createJournalsAtomic(journalData);
+
+  // 4. Mark event as processed
+  await this.markEventProcessed(event.id);
+}</code></pre>
+
+<h3>Step 3: Atomic Journal Creation</h3>
+<p>Journals are created atomically via a PostgreSQL function:</p>
+
+<pre><code>-- From supabase/migrations/012_atomic_journals.sql
+CREATE FUNCTION create_journals_atomic(p_entries JSONB)
+RETURNS JSONB AS $$
+BEGIN
+  -- Insert journal header
+  INSERT INTO journal_entries (...) VALUES (...) RETURNING id;
+
+  -- Insert all lines
+  FOR v_line IN SELECT * FROM jsonb_array_elements(v_entry->'lines')
+  LOOP
+    INSERT INTO journal_entry_lines (...) VALUES (...);
+  END LOOP;
+
+  -- Link to event
+  INSERT INTO event_journal_entries (event_id, journal_entry_id) VALUES (...);
+
+  RETURN v_result;
+END;
+$$ LANGUAGE plpgsql;</code></pre>
+
+<hr>
+
+<h2>Event Types</h2>
+
+<table>
+  <tr>
+    <th>Event Type</th>
+    <th>Trigger</th>
+    <th>Description</th>
+  </tr>
+  <tr>
+    <td><code>expense_created</code></td>
+    <td>New expense saved</td>
+    <td>Creates expense journal</td>
+  </tr>
+  <tr>
+    <td><code>expense_updated</code></td>
+    <td>Expense modified</td>
+    <td>Reverses old, creates new journal</td>
+  </tr>
+  <tr>
+    <td><code>expense_deleted</code></td>
+    <td>Expense deleted</td>
+    <td>Creates reversal journal</td>
+  </tr>
+  <tr>
+    <td><code>receipt_created</code></td>
+    <td>New receipt saved</td>
+    <td>Creates income journal</td>
+  </tr>
+  <tr>
+    <td><code>receipt_updated</code></td>
+    <td>Receipt modified</td>
+    <td>Reverses old, creates new journal</td>
+  </tr>
+  <tr>
+    <td><code>revenue_recognized</code></td>
+    <td>Charter completed</td>
+    <td>Moves from deferred to recognized revenue</td>
+  </tr>
+</table>
+
+<hr>
+
+<h2>Revenue Recognition (Deferred Revenue)</h2>
+
+<p>For charter bookings, revenue is often received in advance. The system handles this with a two-step process:</p>
+
+<h3>Step 1: Advance Payment Received</h3>
+<div class="journal-entry">
+  <div class="debit">Debit:  Cash/Bank Account            ฿100,000</div>
+  <div class="credit">Credit: Deferred Revenue (Liability)  ฿100,000</div>
+</div>
+
+<h3>Step 2: Charter Completed (Revenue Recognition)</h3>
+<div class="journal-entry">
+  <div class="debit">Debit:  Deferred Revenue             ฿100,000</div>
+  <div class="credit">Credit: Charter Revenue (Income)     ฿100,000</div>
+</div>
+
+<h3>Revenue Recognition Table</h3>
+<pre><code>CREATE TABLE revenue_recognition (
+  id UUID PRIMARY KEY,
+  company_id UUID NOT NULL,
+  project_id UUID,
+  booking_id UUID,
+  receipt_id UUID,
+  thb_amount DECIMAL(15,2) NOT NULL,
+  recognition_date DATE,
+  recognition_status TEXT,      -- 'pending', 'recognized', 'needs_review'
+  journal_entry_id UUID,
+  notes TEXT
+);</code></pre>
+
+<hr>
+
+<h2>Summary Flow Diagram</h2>
+
+<div class="flow-diagram">
+┌────────────────────────────────────────────────────────────────────────┐
+│                         USER ACTIONS                                    │
+├────────────────────────────────────────────────────────────────────────┤
+│                                                                        │
+│  ┌─────────────┐    ┌─────────────┐    ┌─────────────────────┐        │
+│  │ Save Expense│    │ Save Receipt│    │ Complete Charter    │        │
+│  └──────┬──────┘    └──────┬──────┘    └──────────┬──────────┘        │
+│         │                  │                       │                   │
+├─────────┼──────────────────┼───────────────────────┼───────────────────┤
+│         ▼                  ▼                       ▼                   │
+│  ┌─────────────────────────────────────────────────────────────────┐  │
+│  │                    ACCOUNTING EVENTS TABLE                       │  │
+│  │  event_type: expense_created | receipt_created | revenue_recognized │
+│  │  status: pending                                                 │  │
+│  └─────────────────────────────────┬───────────────────────────────┘  │
+│                                    │                                   │
+├────────────────────────────────────┼───────────────────────────────────┤
+│                                    ▼                                   │
+│  ┌─────────────────────────────────────────────────────────────────┐  │
+│  │                      EVENT PROCESSOR                             │  │
+│  │  1. Read pending events                                          │  │
+│  │  2. Match to handler (expense/receipt/revenue)                   │  │
+│  │  3. Generate journal entry data                                  │  │
+│  │  4. Call create_journals_atomic() RPC                            │  │
+│  └─────────────────────────────────┬───────────────────────────────┘  │
+│                                    │                                   │
+├────────────────────────────────────┼───────────────────────────────────┤
+│                                    ▼                                   │
+│  ┌─────────────────────────────────────────────────────────────────┐  │
+│  │                    JOURNAL ENTRIES TABLE                         │  │
+│  │  entry_number, entry_date, description, reference_type/id        │  │
+│  │                                                                   │  │
+│  │  Lines:                                                          │  │
+│  │  - Debit: Expense Account    ฿10,000                             │  │
+│  │  - Credit: Cash Account      ฿10,000                             │  │
+│  └─────────────────────────────────────────────────────────────────┘  │
+│                                                                        │
+└────────────────────────────────────────────────────────────────────────┘
+</div>
+
+<hr>
+
+<h2>Key Files Reference</h2>
+
+<table>
+  <tr>
+    <th>File</th>
+    <th>Purpose</th>
+  </tr>
+  <tr>
+    <td><code>src/lib/accounting/eventProcessor.ts</code></td>
+    <td>Core event processing engine</td>
+  </tr>
+  <tr>
+    <td><code>src/lib/accounting/eventHandlers/expenseHandler.ts</code></td>
+    <td>Expense → Journal mapping</td>
+  </tr>
+  <tr>
+    <td><code>src/lib/accounting/eventHandlers/receiptHandler.ts</code></td>
+    <td>Receipt → Journal mapping</td>
+  </tr>
+  <tr>
+    <td><code>src/lib/accounting/eventHandlers/revenueRecognitionHandler.ts</code></td>
+    <td>Revenue recognition</td>
+  </tr>
+  <tr>
+    <td><code>src/lib/supabase/api/accountingEvents.ts</code></td>
+    <td>Events CRUD API</td>
+  </tr>
+  <tr>
+    <td><code>src/lib/supabase/api/journals.ts</code></td>
+    <td>Journals CRUD API</td>
+  </tr>
+  <tr>
+    <td><code>supabase/migrations/010_accounting_events.sql</code></td>
+    <td>Events table schema</td>
+  </tr>
+  <tr>
+    <td><code>supabase/migrations/012_atomic_journals.sql</code></td>
+    <td>Atomic journal creation RPC</td>
+  </tr>
+  <tr>
+    <td><code>supabase/migrations/024_revenue_recognition.sql</code></td>
+    <td>Revenue recognition schema</td>
+  </tr>
+</table>
+
+<hr>
+
+<h2>Security &amp; RLS</h2>
+
+<p>Journal entries are protected by Row Level Security:</p>
+
+<pre><code>-- Users can only see journals for companies they have access to
+CREATE POLICY "journals_select" ON journal_entries
+  FOR SELECT USING (
+    company_id IN (
+      SELECT company_id FROM user_company_access
+      WHERE user_id = auth.uid()
+    )
+  );</code></pre>
+
+<h2>Multi-Company Support</h2>
+
+<p>All journal entries are scoped to a company:</p>
+<ul>
+  <li><code>company_id</code> is required on all events and journals</li>
+  <li>RLS policies enforce company access</li>
+  <li>Users only see journals for companies they have access to</li>
+</ul>
+
+<hr>
+
+<p style="text-align: center; color: #718096; margin-top: 40px;">
+  <em>Faraway Yachting - Journal Entry System Documentation</em><br>
+  Generated: January 2026
+</p>
+
+</body>
+</html>

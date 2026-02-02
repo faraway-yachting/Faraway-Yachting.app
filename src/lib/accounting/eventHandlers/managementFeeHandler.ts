@@ -10,7 +10,7 @@
  *
  * Entry pattern in Management Company (receiving the fee):
  *   Debit: Intercompany Receivable (1180)
- *   Credit: Management Fee Income (4800)
+ *   Credit: Management Fee Income (4300 - Yacht Management Fees)
  */
 
 import type {

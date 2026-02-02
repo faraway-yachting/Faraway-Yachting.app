@@ -56,6 +56,13 @@ export interface Project {
   // Management fee for Faraway Yachting (optional)
   managementFeePercentage?: number; // 0-100, used in P&L calculations
 
+  // Intercompany charter fee configuration (for money distribution between entities)
+  intercompanyOwnerCompanyId?: string; // Company that owns the boat (if different from companyId)
+  intercompanyFeeDayCharter?: number;  // Fixed fee for day charter
+  intercompanyFeeOvernight?: number;   // Fixed fee for overnight charter
+  intercompanyFeeCabin?: number;       // Fixed fee for cabin charter
+  intercompanyFeeOther?: number;       // Fixed fee for other charter types
+
   // Metadata
   createdAt: string;
   updatedAt: string;

@@ -14,14 +14,19 @@ import type { Database } from '@/lib/supabase/database.types';
 export type AccountingEventType =
   | 'OPENING_BALANCE'
   | 'RECEIPT_RECEIVED'
+  | 'RECEIPT_RECEIVED_INTERCOMPANY'
   | 'PROJECT_SERVICE_COMPLETED'
   | 'EXPENSE_APPROVED'
   | 'EXPENSE_PAID'
+  | 'EXPENSE_PAID_INTERCOMPANY'
   | 'CAPEX_INCURRED'
   | 'MANAGEMENT_FEE_RECOGNIZED'
   | 'INTERCOMPANY_SETTLEMENT'
   | 'PARTNER_PROFIT_ALLOCATION'
-  | 'PARTNER_PAYMENT';
+  | 'PARTNER_PAYMENT'
+  | 'PETTYCASH_EXPENSE_CREATED'
+  | 'PETTYCASH_TOPUP_COMPLETED'
+  | 'PETTYCASH_REIMBURSEMENT_PAID';
 
 export type EventStatus = 'pending' | 'processed' | 'failed' | 'cancelled';
 
@@ -190,18 +195,114 @@ export interface ProjectServiceCompletedEventData {
   currency: string;
 }
 
+// Petty Cash Event Data Interfaces
+export interface PettyCashExpenseEventData {
+  expenseId: string;
+  expenseNumber: string;
+  walletId: string;
+  walletName: string;
+  companyId: string;
+  projectId?: string;
+  expenseDate: string;
+  description: string;
+  amount: number;
+  category?: string;
+  currency: string;
+}
+
+export interface PettyCashTopupEventData {
+  topupId: string;
+  walletId: string;
+  walletName: string;
+  companyId: string;
+  topupDate: string;
+  amount: number;
+  bankAccountId?: string;
+  bankAccountCode?: string;
+  bankAccountName?: string;
+  reference?: string;
+  currency: string;
+}
+
+export interface PettyCashReimbursementEventData {
+  reimbursementId: string;
+  reimbursementNumber: string;
+  walletId: string;
+  walletName: string;
+  companyId: string;
+  paymentDate: string;
+  finalAmount: number;
+  bankAccountId?: string;
+  bankAccountCode?: string;
+  bankAccountName?: string;
+  paymentReference?: string;
+  currency: string;
+}
+
+// Intercompany Event Data Interfaces
+export interface ExpensePaidIntercompanyEventData {
+  expenseId: string;
+  paymentId: string;
+  expenseNumber: string;
+  vendorName: string;
+  paymentDate: string;
+  paymentAmount: number;
+  // Paying company info (bank account owner)
+  payingCompanyId: string;
+  payingCompanyName: string;
+  bankAccountId: string;
+  bankAccountGlCode: string;
+  // Receiving company info (expense owner)
+  receivingCompanyId: string;
+  receivingCompanyName: string;
+  projectId?: string;
+  projectName?: string;
+  currency: string;
+}
+
+export interface ReceiptReceivedIntercompanyEventData {
+  receiptId: string;
+  receiptNumber: string;
+  clientName: string;
+  receiptDate: string;
+  // Bank receiving company info (where money goes)
+  bankCompanyId: string;
+  bankCompanyName: string;
+  bankAccountId: string;
+  bankAccountGlCode: string;
+  // Charter/Receipt owner company info
+  charterCompanyId: string;
+  charterCompanyName: string;
+  projectId?: string;
+  projectName?: string;
+  // Charter dates for revenue recognition
+  charterDateFrom?: string;
+  charterDateTo?: string;
+  charterType?: string;
+  // Amounts
+  totalAmount: number;
+  currency: string;
+  // Whether to use deferred revenue or direct income
+  usesDeferredRevenue: boolean;
+}
+
 // Union type for all event data
 export type EventData =
   | ExpenseApprovedEventData
   | ExpensePaidEventData
+  | ExpensePaidIntercompanyEventData
   | ReceiptReceivedEventData
+  | ReceiptReceivedIntercompanyEventData
   | ManagementFeeEventData
   | PartnerProfitAllocationEventData
   | PartnerPaymentEventData
   | OpeningBalanceEventData
   | IntercompanySettlementEventData
   | CapexIncurredEventData
-  | ProjectServiceCompletedEventData;
+  | ProjectServiceCompletedEventData
+  | PettyCashExpenseEventData
+  | PettyCashTopupEventData
+  | PettyCashReimbursementEventData;
 
 // ============================================================================
 // Processing Types
@@ -257,7 +358,7 @@ export const DEFAULT_ACCOUNTS = {
 
   // Revenue
   DEFAULT_REVENUE: '4490',
-  MANAGEMENT_FEE_INCOME: '4800',
+  MANAGEMENT_FEE_INCOME: '4300',  // Yacht Management Fees
 
   // Expenses
   DEFAULT_EXPENSE: '6790',
@@ -289,6 +390,12 @@ export const EVENT_TYPE_METADATA: Record<
     sourceDocumentTypes: ['receipt'],
     isMultiCompany: false,
   },
+  RECEIPT_RECEIVED_INTERCOMPANY: {
+    label: 'Intercompany Receipt',
+    description: 'Payment received by different company than charter owner',
+    sourceDocumentTypes: ['receipt'],
+    isMultiCompany: true,
+  },
   PROJECT_SERVICE_COMPLETED: {
     label: 'Service Completed',
     description: 'Revenue recognition when service is delivered',
@@ -306,6 +413,12 @@ export const EVENT_TYPE_METADATA: Record<
     description: 'Cash outflow when expense is paid',
     sourceDocumentTypes: ['expense_payment'],
     isMultiCompany: false,
+  },
+  EXPENSE_PAID_INTERCOMPANY: {
+    label: 'Intercompany Expense Payment',
+    description: 'Expense paid by different company than expense owner',
+    sourceDocumentTypes: ['expense_payment'],
+    isMultiCompany: true,
   },
   CAPEX_INCURRED: {
     label: 'Capital Expenditure',
@@ -335,6 +448,24 @@ export const EVENT_TYPE_METADATA: Record<
     label: 'Partner Payment',
     description: 'Distribution of allocated profits to partners',
     sourceDocumentTypes: [],
+    isMultiCompany: false,
+  },
+  PETTYCASH_EXPENSE_CREATED: {
+    label: 'Petty Cash Expense',
+    description: 'Expense recorded from petty cash wallet',
+    sourceDocumentTypes: ['petty_cash_expense'],
+    isMultiCompany: false,
+  },
+  PETTYCASH_TOPUP_COMPLETED: {
+    label: 'Petty Cash Top-up',
+    description: 'Wallet replenished from bank account',
+    sourceDocumentTypes: ['petty_cash_topup'],
+    isMultiCompany: false,
+  },
+  PETTYCASH_REIMBURSEMENT_PAID: {
+    label: 'Petty Cash Reimbursement',
+    description: 'Wallet holder reimbursed from bank account',
+    sourceDocumentTypes: ['petty_cash_reimbursement'],
     isMultiCompany: false,
   },
 };

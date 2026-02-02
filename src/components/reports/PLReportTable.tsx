@@ -119,8 +119,8 @@ export function PLReportTable({
 
               {/* Category Items */}
               {expandedCategories.has(category.code) &&
-                category.items.map((item) => (
-                  <tr key={item.id} className="hover:bg-gray-50">
+                category.items.map((item, index) => (
+                  <tr key={`${item.id}-${item.documentNumber}-${index}`} className="hover:bg-gray-50">
                     <td className="px-4 py-2 text-sm text-gray-600">
                       {new Date(item.date).toLocaleDateString("en-GB", {
                         day: "2-digit",

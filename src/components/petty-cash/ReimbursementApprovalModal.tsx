@@ -1,13 +1,16 @@
 'use client';
 
-import { useState, useMemo, useCallback } from 'react';
-import { X, Check, XCircle, Loader2, FileText, ExternalLink, Edit3 } from 'lucide-react';
+import { useState, useMemo, useCallback, useEffect } from 'react';
+import { X, Check, XCircle, Loader2, FileText, ExternalLink, Edit3, Download, Eye, Image as ImageIcon } from 'lucide-react';
 import type { PettyCashReimbursement, PettyCashExpense, VatType } from '@/data/petty-cash/types';
-import { getAllBankAccounts } from '@/data/banking/bankAccounts';
-import { getActiveCompanies } from '@/data/company/companies';
+import { companiesApi, bankAccountsApi } from '@/lib/supabase/api';
+import type { Database } from '@/lib/supabase/database.types';
 import { getAccountsByType } from '@/data/accounting/chartOfAccounts';
 import { updateExpense } from '@/data/petty-cash/expenses';
 import { VAT_TYPE_OPTIONS } from '@/lib/petty-cash/utils';
+
+type Company = Database['public']['Tables']['companies']['Row'];
+type BankAccount = Database['public']['Tables']['bank_accounts']['Row'];
 import {
   formatCurrency,
   formatDate,
@@ -24,12 +27,27 @@ interface ReimbursementApprovalModalProps {
     bankAccountId: string,
     bankAccountName: string,
     paymentDate: string,
+    expenseAccountCode: string,
+    companyId: string,
+    vatType: VatType,
+    vatRate: number,
     adjustmentAmount?: number,
     adjustmentReason?: string
   ) => void;
   onReject: (reimbursementId: string, reason: string) => void;
   onClose: () => void;
   onExpenseUpdated?: (expense: PettyCashExpense) => void;
+  onSaveEdit?: (
+    reimbursementId: string,
+    data: {
+      companyId: string;
+      expenseAccountCode: string;
+      vatType: VatType;
+      vatRate: number;
+      bankAccountId: string;
+      paymentDate: string;
+    }
+  ) => Promise<void>;
 }
 
 export default function ReimbursementApprovalModal({
@@ -39,8 +57,9 @@ export default function ReimbursementApprovalModal({
   onReject,
   onClose,
   onExpenseUpdated,
+  onSaveEdit,
 }: ReimbursementApprovalModalProps) {
-  const [mode, setMode] = useState<'view' | 'approve' | 'reject' | 'edit'>('view');
+  const [mode, setMode] = useState<'view' | 'reject' | 'edit'>('view');
   const [bankAccountId, setBankAccountId] = useState('');
   const [paymentDate, setPaymentDate] = useState(getTodayISO());
   const [adjustmentAmount, setAdjustmentAmount] = useState<string>('');
@@ -55,14 +74,43 @@ export default function ReimbursementApprovalModal({
   const [editVatType, setEditVatType] = useState<VatType>(expense.accountingVatType || 'no_vat');
   const [editVatRate, setEditVatRate] = useState(expense.accountingVatRate || 7);
 
-  // Get ALL active bank accounts (not filtered by company since simplified expenses may not have company)
-  const bankAccounts = useMemo(
-    () => getAllBankAccounts().filter(acc => acc.isActive),
-    []
-  );
+  // Attachment preview state
+  const [previewAttachment, setPreviewAttachment] = useState<{ url: string; name: string; type: string } | null>(null);
 
-  // Get companies and expense accounts from CoA for editing
-  const companies = useMemo(() => getActiveCompanies(), []);
+  // Companies and bank accounts from Supabase
+  const [companies, setCompanies] = useState<Company[]>([]);
+  const [allBankAccounts, setAllBankAccounts] = useState<BankAccount[]>([]);
+  const [isLoadingData, setIsLoadingData] = useState(true);
+
+  // Load companies and bank accounts from Supabase
+  useEffect(() => {
+    const loadData = async () => {
+      setIsLoadingData(true);
+      try {
+        const [companiesData, bankAccountsData] = await Promise.all([
+          companiesApi.getActive(),
+          bankAccountsApi.getActive(),
+        ]);
+        setCompanies(companiesData);
+        setAllBankAccounts(bankAccountsData);
+      } catch (error) {
+        console.error('Error loading data:', error);
+      } finally {
+        setIsLoadingData(false);
+      }
+    };
+    loadData();
+  }, []);
+
+  // Filter bank accounts by selected company (use editCompanyId for filtering)
+  const bankAccounts = useMemo(() => {
+    if (!editCompanyId) {
+      return allBankAccounts; // Show all if no company selected
+    }
+    return allBankAccounts.filter(acc => acc.company_id === editCompanyId);
+  }, [allBankAccounts, editCompanyId]);
+
+  // Get expense accounts from CoA for editing
   const expenseAccounts = useMemo(() => getAccountsByType('Expense'), []);
 
   // Calculate final amount
@@ -102,10 +150,17 @@ export default function ReimbursementApprovalModal({
     }
   }, [expense.amount, editVatType, editVatRate]);
 
-  // Handle approve
+  // Handle approve (single-step approval)
   const handleApprove = async () => {
     const newErrors: Record<string, string> = {};
 
+    // Validate all required fields in single form
+    if (!editCompanyId) {
+      newErrors.editCompany = 'Please select a company';
+    }
+    if (!editExpenseAccountCode) {
+      newErrors.editExpenseAccount = 'Please select an expense account';
+    }
     if (!bankAccountId) {
       newErrors.bankAccountId = 'Please select a bank account';
     }
@@ -127,11 +182,56 @@ export default function ReimbursementApprovalModal({
       onApprove(
         reimbursement.id,
         bankAccountId,
-        selectedAccount?.accountName || '',
+        selectedAccount?.account_name || '',
         paymentDate,
+        editExpenseAccountCode,
+        editCompanyId,
+        editVatType,
+        editVatRate,
         adjustmentAmount ? parseFloat(adjustmentAmount) : undefined,
         adjustmentReason || undefined
       );
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  // Handle save edit for approved/paid claims
+  const handleSaveEdit = async () => {
+    if (!onSaveEdit) return;
+
+    const newErrors: Record<string, string> = {};
+    if (!editCompanyId) {
+      newErrors.editCompany = 'Please select a company';
+    }
+    if (!editExpenseAccountCode) {
+      newErrors.editExpenseAccount = 'Please select an expense account';
+    }
+    if (!bankAccountId) {
+      newErrors.bankAccountId = 'Please select a bank account';
+    }
+    if (!paymentDate) {
+      newErrors.paymentDate = 'Payment date is required';
+    }
+
+    if (Object.keys(newErrors).length > 0) {
+      setErrors(newErrors);
+      return;
+    }
+
+    setIsProcessing(true);
+    try {
+      await onSaveEdit(reimbursement.id, {
+        companyId: editCompanyId,
+        expenseAccountCode: editExpenseAccountCode,
+        vatType: editVatType,
+        vatRate: editVatRate,
+        bankAccountId,
+        paymentDate,
+      });
+      setMode('view');
+    } catch (error) {
+      setErrors({ save: 'Failed to save changes' });
     } finally {
       setIsProcessing(false);
     }
@@ -200,7 +300,7 @@ export default function ReimbursementApprovalModal({
           <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
             <div>
               <h2 className="text-lg font-semibold text-gray-900">
-                Reimbursement Request
+                Expense Claim Review
               </h2>
               <p className="text-sm text-gray-500">
                 {reimbursement.reimbursementNumber}
@@ -260,15 +360,6 @@ export default function ReimbursementApprovalModal({
                   <FileText className="h-4 w-4" />
                   Related Expense: {expense.expenseNumber}
                 </h3>
-                {reimbursement.status === 'pending' && mode !== 'edit' && (
-                  <button
-                    onClick={() => setMode('edit')}
-                    className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-[#5A7A8F] bg-[#5A7A8F]/10 rounded hover:bg-[#5A7A8F]/20"
-                  >
-                    <Edit3 className="h-3 w-3" />
-                    Edit Details
-                  </button>
-                )}
               </div>
               <div className="border border-gray-200 rounded-lg overflow-hidden">
                 <div className="p-4 bg-white">
@@ -309,9 +400,6 @@ export default function ReimbursementApprovalModal({
                             Project
                           </th>
                           <th className="px-3 py-2 text-left text-xs font-medium text-gray-500">
-                            Account
-                          </th>
-                          <th className="px-3 py-2 text-left text-xs font-medium text-gray-500">
                             Description
                           </th>
                           <th className="px-3 py-2 text-right text-xs font-medium text-gray-500">
@@ -325,9 +413,6 @@ export default function ReimbursementApprovalModal({
                             {expense.projectName || '-'}
                           </td>
                           <td className="px-3 py-2 text-gray-600">
-                            {expense.expenseAccountName || <span className="text-yellow-600 italic">Not assigned</span>}
-                          </td>
-                          <td className="px-3 py-2 text-gray-600">
                             {expense.description || '-'}
                           </td>
                           <td className="px-3 py-2 text-right text-gray-900">
@@ -338,7 +423,7 @@ export default function ReimbursementApprovalModal({
                       <tfoot className="bg-gray-50">
                         <tr>
                           <td
-                            colSpan={3}
+                            colSpan={2}
                             className="px-3 py-2 text-right font-medium text-gray-700"
                           >
                             Net Amount:
@@ -413,32 +498,101 @@ export default function ReimbursementApprovalModal({
                 {/* Attachments */}
                 {expense.attachments.length > 0 && (
                   <div className="px-4 py-3 bg-gray-50 border-t border-gray-200">
-                    <p className="text-xs text-gray-500 mb-2">Attachments:</p>
-                    <div className="flex flex-wrap gap-2">
-                      {expense.attachments.map((att) => (
-                        <a
-                          key={att.id}
-                          href={att.url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1 px-2 py-1 text-xs text-[#5A7A8F] bg-white border border-gray-200 rounded hover:bg-gray-50"
-                        >
-                          <FileText className="h-3 w-3" />
-                          {att.name}
-                          <ExternalLink className="h-3 w-3" />
-                        </a>
-                      ))}
+                    <p className="text-xs font-medium text-gray-700 mb-3">
+                      Attachments ({expense.attachments.length})
+                    </p>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                      {expense.attachments.map((att) => {
+                        const isImage = att.type?.startsWith('image/') ||
+                          att.name?.toLowerCase().match(/\.(jpg|jpeg|png|gif|webp|bmp)$/);
+
+                        return (
+                          <div
+                            key={att.id}
+                            className="border border-gray-200 rounded-lg overflow-hidden bg-white"
+                          >
+                            {/* Thumbnail preview */}
+                            <div
+                              className="relative h-24 bg-gray-100 cursor-pointer group"
+                              onClick={() => setPreviewAttachment({ url: att.url, name: att.name, type: att.type })}
+                            >
+                              {isImage ? (
+                                <>
+                                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                                  <img
+                                    src={att.url}
+                                    alt={att.name}
+                                    className="w-full h-full object-cover"
+                                    onError={(e) => {
+                                      // If image fails to load, show placeholder
+                                      const target = e.target as HTMLImageElement;
+                                      target.style.display = 'none';
+                                      target.parentElement?.querySelector('.placeholder')?.classList.remove('hidden');
+                                    }}
+                                  />
+                                  <div className="placeholder hidden absolute inset-0 flex items-center justify-center">
+                                    <ImageIcon className="h-8 w-8 text-gray-400" />
+                                  </div>
+                                </>
+                              ) : (
+                                <div className="absolute inset-0 flex items-center justify-center">
+                                  <FileText className="h-8 w-8 text-gray-400" />
+                                </div>
+                              )}
+                              {/* Hover overlay */}
+                              <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                                <Eye className="h-6 w-6 text-white" />
+                              </div>
+                            </div>
+                            {/* File info and actions */}
+                            <div className="p-2">
+                              <p className="text-xs text-gray-700 truncate mb-2" title={att.name}>
+                                {att.name}
+                              </p>
+                              <div className="flex gap-1">
+                                <button
+                                  onClick={() => setPreviewAttachment({ url: att.url, name: att.name, type: att.type })}
+                                  className="flex-1 inline-flex items-center justify-center gap-1 px-2 py-1 text-xs text-[#5A7A8F] bg-[#5A7A8F]/10 rounded hover:bg-[#5A7A8F]/20"
+                                >
+                                  <Eye className="h-3 w-3" />
+                                  View
+                                </button>
+                                <a
+                                  href={att.url}
+                                  download={att.name}
+                                  className="flex-1 inline-flex items-center justify-center gap-1 px-2 py-1 text-xs text-gray-600 bg-gray-100 rounded hover:bg-gray-200"
+                                  onClick={(e) => {
+                                    // For base64 URLs, we need to handle download differently
+                                    if (att.url.startsWith('data:')) {
+                                      e.preventDefault();
+                                      const link = document.createElement('a');
+                                      link.href = att.url;
+                                      link.download = att.name;
+                                      document.body.appendChild(link);
+                                      link.click();
+                                      document.body.removeChild(link);
+                                    }
+                                  }}
+                                >
+                                  <Download className="h-3 w-3" />
+                                  Save
+                                </a>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
                 )}
               </div>
             </div>
 
-            {/* Edit Expense Details Form */}
-            {reimbursement.status === 'pending' && mode === 'edit' && (
-              <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg space-y-4 mb-6">
-                <h4 className="text-sm font-semibold text-blue-800">
-                  Edit Expense Details
+            {/* Approval Details - Single combined form for pending claims */}
+            {reimbursement.status === 'pending' && (
+              <div className="p-4 bg-green-50 border border-green-200 rounded-lg space-y-4 mb-6">
+                <h4 className="text-sm font-semibold text-green-800">
+                  Approval Details
                 </h4>
 
                 {errors.save && (
@@ -447,228 +601,468 @@ export default function ReimbursementApprovalModal({
                   </div>
                 )}
 
-                {/* Company */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Company
-                  </label>
-                  <select
-                    value={editCompanyId}
-                    onChange={(e) => setEditCompanyId(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-                  >
-                    <option value="">Select Company</option>
-                    {companies.map((company) => (
-                      <option key={company.id} value={company.id}>
-                        {company.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* Expense Account (from CoA) */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Expense Account
-                  </label>
-                  <select
-                    value={editExpenseAccountCode}
-                    onChange={(e) => setEditExpenseAccountCode(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-                  >
-                    <option value="">Select Expense Account</option>
-                    {expenseAccounts.map((account) => (
-                      <option key={account.code} value={account.code}>
-                        {account.code} - {account.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* VAT Settings */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      VAT Type
-                    </label>
-                    <select
-                      value={editVatType}
-                      onChange={(e) => setEditVatType(e.target.value as VatType)}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-                    >
-                      {VAT_TYPE_OPTIONS.map((opt) => (
-                        <option key={opt.value} value={opt.value}>
-                          {opt.label}
-                        </option>
-                      ))}
-                    </select>
+                {isLoadingData ? (
+                  <div className="flex items-center justify-center py-4">
+                    <Loader2 className="h-5 w-5 animate-spin text-gray-400" />
+                    <span className="ml-2 text-sm text-gray-500">Loading...</span>
                   </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      VAT Rate (%)
-                    </label>
-                    <input
-                      type="number"
-                      value={editVatRate}
-                      onChange={(e) => setEditVatRate(parseFloat(e.target.value) || 0)}
-                      disabled={editVatType === 'no_vat'}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 disabled:bg-gray-100"
-                    />
-                  </div>
-                </div>
+                ) : (
+                  <>
+                    {/* Section: Expense Classification */}
+                    <div className="border-b border-green-200 pb-4">
+                      <h5 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">
+                        Expense Classification
+                      </h5>
 
-                {/* Payment Summary */}
-                <div className="bg-white border border-blue-200 rounded-lg p-4">
-                  <h5 className="text-sm font-semibold text-gray-700 mb-3">Payment Summary</h5>
-                  <div className="space-y-2">
-                    <div className="flex justify-between text-sm">
-                      <span className="text-gray-600">Pre-VAT Amount:</span>
-                      <span className="font-medium text-gray-900">
-                        {formatCurrency(vatBreakdown.preVatAmount)}
-                      </span>
-                    </div>
-                    <div className="flex justify-between text-sm">
-                      <span className="text-gray-600">
-                        VAT {editVatType !== 'no_vat' ? `(${editVatRate}%)` : ''}:
-                      </span>
-                      <span className="font-medium text-gray-900">
-                        {formatCurrency(vatBreakdown.vatAmount)}
-                      </span>
-                    </div>
-                    <div className="flex justify-between text-sm pt-2 border-t border-gray-200">
-                      <span className="font-semibold text-gray-700">Total Amount:</span>
-                      <span className="font-bold text-gray-900">
-                        {formatCurrency(vatBreakdown.totalAmount)}
-                      </span>
-                    </div>
-                  </div>
-                </div>
+                      {/* Company */}
+                      <div className="mb-4">
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Company <span className="text-red-500">*</span>
+                        </label>
+                        <select
+                          value={editCompanyId}
+                          onChange={(e) => {
+                            setEditCompanyId(e.target.value);
+                            setBankAccountId(''); // Reset bank account when company changes
+                          }}
+                          className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-green-500/20 focus:border-green-500 ${
+                            errors.editCompany ? 'border-red-300' : 'border-gray-300'
+                          }`}
+                        >
+                          <option value="">Select Company</option>
+                          {companies.map((company) => (
+                            <option key={company.id} value={company.id}>
+                              {company.name}
+                            </option>
+                          ))}
+                        </select>
+                        {errors.editCompany && (
+                          <p className="mt-1 text-sm text-red-600">{errors.editCompany}</p>
+                        )}
+                      </div>
 
-                {/* Save/Cancel buttons for edit mode */}
-                <div className="flex justify-end gap-3 pt-4 border-t border-blue-200">
-                  <button
-                    onClick={() => setMode('view')}
-                    className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={handleSaveExpenseDetails}
-                    disabled={isProcessing}
-                    className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50"
-                  >
-                    {isProcessing && <Loader2 className="h-4 w-4 animate-spin" />}
-                    Save Changes
-                  </button>
-                </div>
+                      {/* Expense Account */}
+                      <div className="mb-4">
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Expense Account <span className="text-red-500">*</span>
+                        </label>
+                        <select
+                          value={editExpenseAccountCode}
+                          onChange={(e) => setEditExpenseAccountCode(e.target.value)}
+                          className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-green-500/20 focus:border-green-500 ${
+                            errors.editExpenseAccount ? 'border-red-300' : 'border-gray-300'
+                          }`}
+                        >
+                          <option value="">Select Expense Account</option>
+                          {expenseAccounts.map((account) => (
+                            <option key={account.code} value={account.code}>
+                              {account.code} - {account.name}
+                            </option>
+                          ))}
+                        </select>
+                        {errors.editExpenseAccount && (
+                          <p className="mt-1 text-sm text-red-600">{errors.editExpenseAccount}</p>
+                        )}
+                      </div>
+
+                      {/* VAT Settings */}
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            VAT Type
+                          </label>
+                          <select
+                            value={editVatType}
+                            onChange={(e) => setEditVatType(e.target.value as VatType)}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500/20 focus:border-green-500"
+                          >
+                            {VAT_TYPE_OPTIONS.map((opt) => (
+                              <option key={opt.value} value={opt.value}>
+                                {opt.label}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            VAT Rate (%)
+                          </label>
+                          <input
+                            type="number"
+                            value={editVatRate}
+                            onChange={(e) => setEditVatRate(parseFloat(e.target.value) || 0)}
+                            disabled={editVatType === 'no_vat'}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500/20 focus:border-green-500 disabled:bg-gray-100"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Section: Payment Details */}
+                    <div className="border-b border-green-200 pb-4">
+                      <h5 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">
+                        Payment Details
+                      </h5>
+
+                      {/* Bank Account */}
+                      <div className="mb-4">
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Pay from Bank Account <span className="text-red-500">*</span>
+                        </label>
+                        <select
+                          value={bankAccountId}
+                          onChange={(e) => setBankAccountId(e.target.value)}
+                          disabled={!editCompanyId}
+                          className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-green-500/20 focus:border-green-500 disabled:bg-gray-100 disabled:cursor-not-allowed ${
+                            errors.bankAccountId ? 'border-red-300' : 'border-gray-300'
+                          }`}
+                        >
+                          <option value="">{editCompanyId ? 'Select Bank Account' : 'Select company first'}</option>
+                          {bankAccounts.map((account) => {
+                            const bankInfo = typeof account.bank_information === 'string'
+                              ? JSON.parse(account.bank_information)
+                              : account.bank_information as { bankName?: string };
+                            return (
+                              <option key={account.id} value={account.id}>
+                                {bankInfo?.bankName || 'Bank'} - {account.account_name} ({account.account_number}) [{account.currency}]
+                              </option>
+                            );
+                          })}
+                        </select>
+                        {!editCompanyId && (
+                          <p className="mt-1 text-xs text-gray-500">
+                            Please select a company first to see available bank accounts
+                          </p>
+                        )}
+                        {editCompanyId && bankAccounts.length === 0 && (
+                          <p className="mt-1 text-xs text-yellow-600">
+                            No bank accounts found for this company
+                          </p>
+                        )}
+                        {errors.bankAccountId && (
+                          <p className="mt-1 text-sm text-red-600">{errors.bankAccountId}</p>
+                        )}
+                      </div>
+
+                      {/* Payment Date */}
+                      <div className="mb-4">
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Payment Date <span className="text-red-500">*</span>
+                        </label>
+                        <input
+                          type="date"
+                          value={paymentDate}
+                          onChange={(e) => setPaymentDate(e.target.value)}
+                          className={`w-full md:w-48 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-green-500/20 focus:border-green-500 ${
+                            errors.paymentDate ? 'border-red-300' : 'border-gray-300'
+                          }`}
+                        />
+                        {errors.paymentDate && (
+                          <p className="mt-1 text-sm text-red-600">{errors.paymentDate}</p>
+                        )}
+                      </div>
+
+                      {/* Adjustment */}
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            Adjustment Amount (optional)
+                          </label>
+                          <input
+                            type="number"
+                            value={adjustmentAmount}
+                            onChange={(e) => setAdjustmentAmount(e.target.value)}
+                            placeholder="0.00"
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500/20 focus:border-green-500"
+                          />
+                          <p className="mt-1 text-xs text-gray-500">
+                            Positive to add, negative to deduct
+                          </p>
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            Adjustment Reason
+                            {adjustmentAmount && <span className="text-red-500"> *</span>}
+                          </label>
+                          <input
+                            type="text"
+                            value={adjustmentReason}
+                            onChange={(e) => setAdjustmentReason(e.target.value)}
+                            placeholder="Reason for adjustment"
+                            className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-green-500/20 focus:border-green-500 ${
+                              errors.adjustmentReason ? 'border-red-300' : 'border-gray-300'
+                            }`}
+                          />
+                          {errors.adjustmentReason && (
+                            <p className="mt-1 text-sm text-red-600">{errors.adjustmentReason}</p>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Payment Summary */}
+                    <div className="bg-white border border-green-200 rounded-lg p-4">
+                      <h5 className="text-sm font-semibold text-gray-700 mb-3">Payment Summary</h5>
+                      <div className="space-y-2">
+                        <div className="flex justify-between text-sm">
+                          <span className="text-gray-600">Pre-VAT Amount:</span>
+                          <span className="font-medium text-gray-900">
+                            {formatCurrency(vatBreakdown.preVatAmount)}
+                          </span>
+                        </div>
+                        <div className="flex justify-between text-sm">
+                          <span className="text-gray-600">
+                            VAT {editVatType !== 'no_vat' ? `(${editVatRate}%)` : ''}:
+                          </span>
+                          <span className="font-medium text-gray-900">
+                            {formatCurrency(vatBreakdown.vatAmount)}
+                          </span>
+                        </div>
+                        {adjustmentAmount && parseFloat(adjustmentAmount) !== 0 && (
+                          <div className="flex justify-between text-sm">
+                            <span className="text-gray-600">Adjustment:</span>
+                            <span className={`font-medium ${parseFloat(adjustmentAmount) > 0 ? 'text-green-600' : 'text-red-600'}`}>
+                              {parseFloat(adjustmentAmount) > 0 ? '+' : ''}{formatCurrency(parseFloat(adjustmentAmount))}
+                            </span>
+                          </div>
+                        )}
+                        <div className="flex justify-between text-sm pt-2 border-t border-gray-200">
+                          <span className="font-semibold text-gray-700">Final Payment Amount:</span>
+                          <span className="font-bold text-green-700 text-lg">
+                            {formatCurrency(finalAmount)}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </>
+                )}
               </div>
             )}
 
-            {/* Approval Form */}
-            {reimbursement.status === 'pending' && mode === 'approve' && (
-              <div className="p-4 bg-green-50 border border-green-200 rounded-lg space-y-4">
-                <h4 className="text-sm font-semibold text-green-800">
-                  Approve Reimbursement
-                </h4>
-
-                {/* Bank Account */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Pay from Bank Account <span className="text-red-500">*</span>
-                  </label>
-                  <select
-                    value={bankAccountId}
-                    onChange={(e) => setBankAccountId(e.target.value)}
-                    className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-green-500/20 focus:border-green-500 ${
-                      errors.bankAccountId ? 'border-red-300' : 'border-gray-300'
-                    }`}
-                  >
-                    <option value="">Select Bank Account</option>
-                    {bankAccounts.map((account) => (
-                      <option key={account.id} value={account.id}>
-                        {account.bankInformation.bankName} - {account.accountName} ({account.accountNumber}) [{account.currency}]
-                      </option>
-                    ))}
-                  </select>
-                  {errors.bankAccountId && (
-                    <p className="mt-1 text-sm text-red-600">
-                      {errors.bankAccountId}
-                    </p>
+            {/* Accounting Details for Approved/Paid claims - View or Edit mode */}
+            {(reimbursement.status === 'approved' || reimbursement.status === 'paid') && (
+              <div className="p-4 bg-gray-50 border border-gray-200 rounded-lg space-y-4 mb-6">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-sm font-semibold text-gray-700">
+                    Accounting Details
+                  </h4>
+                  {mode === 'view' && (
+                    <button
+                      onClick={() => setMode('edit')}
+                      className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-[#5A7A8F] bg-white border border-gray-300 rounded-lg hover:bg-gray-50"
+                    >
+                      <Edit3 className="h-3 w-3" />
+                      Edit
+                    </button>
                   )}
                 </div>
 
-                {/* Payment Date */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Payment Date <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    type="date"
-                    value={paymentDate}
-                    onChange={(e) => setPaymentDate(e.target.value)}
-                    className={`w-full md:w-48 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-green-500/20 focus:border-green-500 ${
-                      errors.paymentDate ? 'border-red-300' : 'border-gray-300'
-                    }`}
-                  />
-                  {errors.paymentDate && (
-                    <p className="mt-1 text-sm text-red-600">{errors.paymentDate}</p>
-                  )}
-                </div>
+                {errors.save && (
+                  <div className="p-2 bg-red-100 border border-red-200 rounded text-sm text-red-700">
+                    {errors.save}
+                  </div>
+                )}
 
-                {/* Adjustment */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Adjustment Amount (optional)
-                    </label>
-                    <input
-                      type="number"
-                      value={adjustmentAmount}
-                      onChange={(e) => setAdjustmentAmount(e.target.value)}
-                      placeholder="0.00"
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500/20 focus:border-green-500"
-                    />
-                    <p className="mt-1 text-xs text-gray-500">
-                      Positive to add, negative to deduct
-                    </p>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Adjustment Reason
-                      {adjustmentAmount && (
-                        <span className="text-red-500"> *</span>
-                      )}
-                    </label>
-                    <input
-                      type="text"
-                      value={adjustmentReason}
-                      onChange={(e) => setAdjustmentReason(e.target.value)}
-                      placeholder="Reason for adjustment"
-                      className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-green-500/20 focus:border-green-500 ${
-                        errors.adjustmentReason
-                          ? 'border-red-300'
-                          : 'border-gray-300'
-                      }`}
-                    />
-                    {errors.adjustmentReason && (
-                      <p className="mt-1 text-sm text-red-600">
-                        {errors.adjustmentReason}
-                      </p>
-                    )}
-                  </div>
-                </div>
+                {mode === 'view' ? (
+                  /* Read-only view */
+                  <div className="space-y-3">
+                    <div className="grid grid-cols-2 gap-4 text-sm">
+                      <div>
+                        <span className="text-gray-500">Company:</span>
+                        <p className="font-medium text-gray-900">
+                          {companies.find(c => c.id === editCompanyId)?.name || reimbursement.companyName || '-'}
+                        </p>
+                      </div>
+                      <div>
+                        <span className="text-gray-500">Expense Account:</span>
+                        <p className="font-medium text-gray-900">
+                          {expenseAccounts.find(a => a.code === editExpenseAccountCode)?.name
+                            ? `${editExpenseAccountCode} - ${expenseAccounts.find(a => a.code === editExpenseAccountCode)?.name}`
+                            : expense.expenseAccountName || '-'}
+                        </p>
+                      </div>
+                      <div>
+                        <span className="text-gray-500">VAT Type:</span>
+                        <p className="font-medium text-gray-900">
+                          {VAT_TYPE_OPTIONS.find(v => v.value === editVatType)?.label || 'No VAT'}
+                        </p>
+                      </div>
+                      <div>
+                        <span className="text-gray-500">VAT Rate:</span>
+                        <p className="font-medium text-gray-900">{editVatRate}%</p>
+                      </div>
+                      <div>
+                        <span className="text-gray-500">Bank Account:</span>
+                        <p className="font-medium text-gray-900">
+                          {reimbursement.bankAccountName || bankAccounts.find(b => b.id === bankAccountId)?.account_name || '-'}
+                        </p>
+                      </div>
+                      <div>
+                        <span className="text-gray-500">Payment Date:</span>
+                        <p className="font-medium text-gray-900">
+                          {reimbursement.paymentDate ? formatDate(reimbursement.paymentDate) : formatDate(paymentDate)}
+                        </p>
+                      </div>
+                    </div>
 
-                {/* Final Amount */}
-                <div className="pt-4 border-t border-green-200">
-                  <div className="flex justify-between items-center">
-                    <span className="text-sm font-medium text-gray-700">
-                      Final Payment Amount:
-                    </span>
-                    <span className="text-xl font-bold text-green-700">
-                      {formatCurrency(finalAmount)}
-                    </span>
+                    {/* Payment Summary */}
+                    <div className="bg-white border border-gray-200 rounded-lg p-4 mt-4">
+                      <h5 className="text-sm font-semibold text-gray-700 mb-3">Payment Summary</h5>
+                      <div className="space-y-2">
+                        <div className="flex justify-between text-sm">
+                          <span className="text-gray-600">Pre-VAT Amount:</span>
+                          <span className="font-medium text-gray-900">{formatCurrency(vatBreakdown.preVatAmount)}</span>
+                        </div>
+                        <div className="flex justify-between text-sm">
+                          <span className="text-gray-600">VAT {editVatType !== 'no_vat' ? `(${editVatRate}%)` : ''}:</span>
+                          <span className="font-medium text-gray-900">{formatCurrency(vatBreakdown.vatAmount)}</span>
+                        </div>
+                        <div className="flex justify-between text-sm pt-2 border-t border-gray-200">
+                          <span className="font-semibold text-gray-700">Total Amount:</span>
+                          <span className="font-bold text-gray-900">{formatCurrency(reimbursement.finalAmount)}</span>
+                        </div>
+                      </div>
+                    </div>
                   </div>
-                </div>
+                ) : (
+                  /* Edit mode - show form fields */
+                  <div className="space-y-4">
+                    {/* Company */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Company <span className="text-red-500">*</span>
+                      </label>
+                      <select
+                        value={editCompanyId}
+                        onChange={(e) => {
+                          setEditCompanyId(e.target.value);
+                          setBankAccountId('');
+                        }}
+                        className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 ${
+                          errors.editCompany ? 'border-red-300' : 'border-gray-300'
+                        }`}
+                      >
+                        <option value="">Select Company</option>
+                        {companies.map((company) => (
+                          <option key={company.id} value={company.id}>
+                            {company.name}
+                          </option>
+                        ))}
+                      </select>
+                      {errors.editCompany && <p className="mt-1 text-sm text-red-600">{errors.editCompany}</p>}
+                    </div>
+
+                    {/* Expense Account */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Expense Account <span className="text-red-500">*</span>
+                      </label>
+                      <select
+                        value={editExpenseAccountCode}
+                        onChange={(e) => setEditExpenseAccountCode(e.target.value)}
+                        className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 ${
+                          errors.editExpenseAccount ? 'border-red-300' : 'border-gray-300'
+                        }`}
+                      >
+                        <option value="">Select Expense Account</option>
+                        {expenseAccounts.map((account) => (
+                          <option key={account.code} value={account.code}>
+                            {account.code} - {account.name}
+                          </option>
+                        ))}
+                      </select>
+                      {errors.editExpenseAccount && <p className="mt-1 text-sm text-red-600">{errors.editExpenseAccount}</p>}
+                    </div>
+
+                    {/* VAT Settings */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">VAT Type</label>
+                        <select
+                          value={editVatType}
+                          onChange={(e) => setEditVatType(e.target.value as VatType)}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                        >
+                          {VAT_TYPE_OPTIONS.map((opt) => (
+                            <option key={opt.value} value={opt.value}>{opt.label}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">VAT Rate (%)</label>
+                        <input
+                          type="number"
+                          value={editVatRate}
+                          onChange={(e) => setEditVatRate(parseFloat(e.target.value) || 0)}
+                          disabled={editVatType === 'no_vat'}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 disabled:bg-gray-100"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Bank Account */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Bank Account <span className="text-red-500">*</span>
+                      </label>
+                      <select
+                        value={bankAccountId}
+                        onChange={(e) => setBankAccountId(e.target.value)}
+                        disabled={!editCompanyId}
+                        className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 disabled:bg-gray-100 ${
+                          errors.bankAccountId ? 'border-red-300' : 'border-gray-300'
+                        }`}
+                      >
+                        <option value="">{editCompanyId ? 'Select Bank Account' : 'Select company first'}</option>
+                        {bankAccounts.map((account) => {
+                          const bankInfo = typeof account.bank_information === 'string'
+                            ? JSON.parse(account.bank_information)
+                            : account.bank_information as { bankName?: string };
+                          return (
+                            <option key={account.id} value={account.id}>
+                              {bankInfo?.bankName || 'Bank'} - {account.account_name} ({account.account_number}) [{account.currency}]
+                            </option>
+                          );
+                        })}
+                      </select>
+                      {errors.bankAccountId && <p className="mt-1 text-sm text-red-600">{errors.bankAccountId}</p>}
+                    </div>
+
+                    {/* Payment Date */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Payment Date <span className="text-red-500">*</span>
+                      </label>
+                      <input
+                        type="date"
+                        value={paymentDate}
+                        onChange={(e) => setPaymentDate(e.target.value)}
+                        className={`w-full md:w-48 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 ${
+                          errors.paymentDate ? 'border-red-300' : 'border-gray-300'
+                        }`}
+                      />
+                      {errors.paymentDate && <p className="mt-1 text-sm text-red-600">{errors.paymentDate}</p>}
+                    </div>
+
+                    {/* Edit mode buttons */}
+                    <div className="flex justify-end gap-3 pt-4 border-t border-gray-200">
+                      <button
+                        onClick={() => setMode('view')}
+                        className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={handleSaveEdit}
+                        disabled={isProcessing}
+                        className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-[#5A7A8F] rounded-lg hover:bg-[#4a6a7f] disabled:opacity-50"
+                      >
+                        {isProcessing && <Loader2 className="h-4 w-4 animate-spin" />}
+                        Save Changes
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
@@ -676,7 +1070,7 @@ export default function ReimbursementApprovalModal({
             {reimbursement.status === 'pending' && mode === 'reject' && (
               <div className="p-4 bg-red-50 border border-red-200 rounded-lg space-y-4">
                 <h4 className="text-sm font-semibold text-red-800">
-                  Reject Reimbursement
+                  Reject Claim
                 </h4>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -686,7 +1080,7 @@ export default function ReimbursementApprovalModal({
                     value={rejectionReason}
                     onChange={(e) => setRejectionReason(e.target.value)}
                     rows={3}
-                    placeholder="Please provide a reason for rejecting this reimbursement"
+                    placeholder="Please provide a reason for rejecting this claim"
                     className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-red-500/20 focus:border-red-500 ${
                       errors.rejectionReason ? 'border-red-300' : 'border-gray-300'
                     }`}
@@ -719,25 +1113,7 @@ export default function ReimbursementApprovalModal({
                       className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-red-700 bg-red-50 border border-red-200 rounded-lg hover:bg-red-100"
                     >
                       <XCircle className="h-4 w-4" />
-                      Reject
-                    </button>
-                    <button
-                      onClick={() => setMode('approve')}
-                      className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-green-600 rounded-lg hover:bg-green-700"
-                    >
-                      <Check className="h-4 w-4" />
-                      Approve
-                    </button>
-                  </>
-                )}
-
-                {mode === 'approve' && (
-                  <>
-                    <button
-                      onClick={() => setMode('view')}
-                      className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50"
-                    >
-                      Back
+                      Reject Claim
                     </button>
                     <button
                       onClick={handleApprove}
@@ -745,7 +1121,8 @@ export default function ReimbursementApprovalModal({
                       className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-green-600 rounded-lg hover:bg-green-700 disabled:opacity-50"
                     >
                       {isProcessing && <Loader2 className="h-4 w-4 animate-spin" />}
-                      Confirm Approval
+                      <Check className="h-4 w-4" />
+                      Approve Claim
                     </button>
                   </>
                 )}
@@ -773,6 +1150,112 @@ export default function ReimbursementApprovalModal({
           </div>
         </div>
       </div>
+
+      {/* Attachment Preview Modal */}
+      {previewAttachment && (
+        <div
+          className="fixed inset-0 z-[60] bg-black/80 flex items-center justify-center p-4"
+          onClick={() => setPreviewAttachment(null)}
+        >
+          <div
+            className="relative max-w-4xl max-h-[90vh] w-full bg-white rounded-lg overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Preview Header */}
+            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 bg-gray-50">
+              <div className="flex items-center gap-2">
+                <ImageIcon className="h-5 w-5 text-gray-500" />
+                <span className="text-sm font-medium text-gray-900 truncate max-w-[300px]">
+                  {previewAttachment.name}
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <a
+                  href={previewAttachment.url}
+                  download={previewAttachment.name}
+                  className="inline-flex items-center gap-1 px-3 py-1.5 text-sm font-medium text-white bg-[#5A7A8F] rounded-lg hover:bg-[#4a6a7f]"
+                  onClick={(e) => {
+                    // For base64 URLs, handle download
+                    if (previewAttachment.url.startsWith('data:')) {
+                      e.preventDefault();
+                      const link = document.createElement('a');
+                      link.href = previewAttachment.url;
+                      link.download = previewAttachment.name;
+                      document.body.appendChild(link);
+                      link.click();
+                      document.body.removeChild(link);
+                    }
+                  }}
+                >
+                  <Download className="h-4 w-4" />
+                  Download
+                </a>
+                <button
+                  onClick={() => setPreviewAttachment(null)}
+                  className="p-1.5 text-gray-400 hover:text-gray-600 rounded-full hover:bg-gray-100"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+            </div>
+            {/* Preview Content */}
+            <div className="flex items-center justify-center bg-gray-100 p-4 min-h-[400px] max-h-[calc(90vh-60px)] overflow-auto">
+              {previewAttachment.type?.startsWith('image/') ||
+              previewAttachment.name?.toLowerCase().match(/\.(jpg|jpeg|png|gif|webp|bmp)$/) ? (
+                /* eslint-disable-next-line @next/next/no-img-element */
+                <img
+                  src={previewAttachment.url}
+                  alt={previewAttachment.name}
+                  className="max-w-full max-h-full object-contain"
+                  onError={(e) => {
+                    const target = e.target as HTMLImageElement;
+                    target.style.display = 'none';
+                    const parent = target.parentElement;
+                    if (parent) {
+                      const errorDiv = document.createElement('div');
+                      errorDiv.className = 'text-center text-gray-500';
+                      errorDiv.innerHTML = '<p>Unable to load image</p>';
+                      parent.appendChild(errorDiv);
+                    }
+                  }}
+                />
+              ) : previewAttachment.type === 'application/pdf' ||
+                previewAttachment.name?.toLowerCase().endsWith('.pdf') ? (
+                <iframe
+                  src={previewAttachment.url}
+                  className="w-full h-[600px]"
+                  title={previewAttachment.name}
+                />
+              ) : (
+                <div className="text-center text-gray-500">
+                  <FileText className="h-16 w-16 mx-auto mb-4 text-gray-400" />
+                  <p className="text-lg font-medium mb-2">Preview not available</p>
+                  <p className="text-sm mb-4">Click download to view this file</p>
+                  <a
+                    href={previewAttachment.url}
+                    download={previewAttachment.name}
+                    className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-[#5A7A8F] rounded-lg hover:bg-[#4a6a7f]"
+                    onClick={(e) => {
+                      if (previewAttachment.url.startsWith('data:')) {
+                        e.preventDefault();
+                        const link = document.createElement('a');
+                        link.href = previewAttachment.url;
+                        link.download = previewAttachment.name;
+                        document.body.appendChild(link);
+                        link.click();
+                        document.body.removeChild(link);
+                      }
+                    }}
+                  >
+                    <Download className="h-4 w-4" />
+                    Download File
+                  </a>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

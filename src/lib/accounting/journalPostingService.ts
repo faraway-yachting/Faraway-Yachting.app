@@ -11,6 +11,8 @@
 
 import { journalEntriesApi } from '@/lib/supabase/api/journalEntries';
 import { bankAccountsApi } from '@/lib/supabase/api/bankAccounts';
+import { journalEventSettingsApi } from '@/lib/supabase/api/journalEventSettings';
+import { financialPeriodsApi } from '@/lib/supabase/api/financialPeriods';
 import { createClient } from '@/lib/supabase/client';
 import type { Database } from '@/lib/supabase/database.types';
 
@@ -18,7 +20,7 @@ import type { Database } from '@/lib/supabase/database.types';
 // Types
 // ============================================================================
 
-export type SourceDocumentType = 'expense' | 'expense_payment' | 'receipt';
+export type SourceDocumentType = 'expense' | 'expense_payment' | 'receipt' | 'beam_settlement';
 
 export interface JournalPostingResult {
   success: boolean;
@@ -95,6 +97,8 @@ const DEFAULT_ACCOUNTS = {
   DEFAULT_REVENUE: '4490',       // Other Operating Revenue
   DEFAULT_BANK: '1010',          // Bank Account THB
   CASH: '1000',                  // Petty Cash THB
+  CREDIT_CARD_RECEIVABLE: '1140', // Credit Card Receivables (Beam/gateway)
+  CC_PROCESSING_FEE: '6710',     // Credit Card Processing Fees
 };
 
 // ============================================================================
@@ -224,6 +228,9 @@ export async function createExpenseApprovalJournalEntry(
       };
     }
 
+    // Check period is open
+    await financialPeriodsApi.assertOpen(data.companyId, data.expenseDate);
+
     // Build journal entry lines
     const lines: JournalEntryLineInsert[] = [];
 
@@ -271,13 +278,16 @@ export async function createExpenseApprovalJournalEntry(
     // Calculate totals
     const { totalDebit, totalCredit } = calculateTotals(lines);
 
+    // Check auto-post setting
+    const shouldAutoPost = await journalEventSettingsApi.shouldAutoPost(data.companyId, 'EXPENSE_APPROVED');
+
     // Create journal entry
     const entry: JournalEntryInsert = {
       reference_number: referenceNumber,
       entry_date: data.expenseDate,
       company_id: data.companyId,
       description: `Expense approval - ${data.expenseNumber} - ${data.vendorName}`,
-      status: 'draft',
+      status: shouldAutoPost ? 'posted' : 'draft',
       total_debit: totalDebit,
       total_credit: totalCredit,
       created_by: createdBy,
@@ -324,6 +334,9 @@ export async function createExpensePaymentJournalEntry(
       };
     }
 
+    // Check period is open
+    await financialPeriodsApi.assertOpen(data.companyId, data.paymentDate);
+
     // Get bank account GL code
     const bankGLCode = await getBankAccountGLCode(data.bankAccountId);
     const cashAccount = bankGLCode || DEFAULT_ACCOUNTS.DEFAULT_BANK;
@@ -360,13 +373,16 @@ export async function createExpensePaymentJournalEntry(
     // Calculate totals
     const { totalDebit, totalCredit } = calculateTotals(lines);
 
+    // Check auto-post setting
+    const shouldAutoPost = await journalEventSettingsApi.shouldAutoPost(data.companyId, 'EXPENSE_PAID');
+
     // Create journal entry
     const entry: JournalEntryInsert = {
       reference_number: referenceNumber,
       entry_date: data.paymentDate,
       company_id: data.companyId,
       description: `Expense payment - ${data.expenseNumber} - ${data.vendorName}`,
-      status: 'draft',
+      status: shouldAutoPost ? 'posted' : 'draft',
       total_debit: totalDebit,
       total_credit: totalCredit,
       created_by: createdBy,
@@ -403,48 +419,89 @@ export async function createReceiptJournalEntry(
   data: ReceiptCreationData,
   createdBy: string
 ): Promise<JournalPostingResult> {
+  console.log('[JournalPosting] Starting createReceiptJournalEntry', {
+    receiptId: data.receiptId,
+    receiptNumber: data.receiptNumber,
+    companyId: data.companyId,
+    createdBy: createdBy || '(empty)',
+    totalAmount: data.totalAmount,
+    paymentsCount: data.payments.length,
+    lineItemsCount: data.lineItems.length,
+  });
+
   try {
     // Check for duplicate
     const isDuplicate = await checkDuplicateEntry('receipt', data.receiptId);
     if (isDuplicate) {
-      console.log(`Journal entry already exists for receipt ${data.receiptId}`);
+      console.log(`[JournalPosting] Journal entry already exists for receipt ${data.receiptId}`);
       return {
         success: true,
         error: 'Journal entry already exists for this receipt',
       };
     }
 
+    // Check period is open
+    await financialPeriodsApi.assertOpen(data.companyId, data.receiptDate);
+
     // Build journal entry lines
     const lines: JournalEntryLineInsert[] = [];
 
-    // Debit: Bank/Cash accounts (one per payment)
+    // Debit: Bank/Cash/Receivable accounts (one per payment)
     for (const payment of data.payments) {
       if (payment.amount > 0) {
-        let cashAccount = DEFAULT_ACCOUNTS.CASH;
+        let debitAccount = DEFAULT_ACCOUNTS.CASH;
 
-        if (payment.bankAccountId) {
+        if (payment.paymentMethod === 'beam') {
+          // Beam payment: debit Credit Card Receivables (money not yet in bank)
+          debitAccount = DEFAULT_ACCOUNTS.CREDIT_CARD_RECEIVABLE;
+          console.log(`[JournalPosting] Beam payment -> GL code ${debitAccount} (Credit Card Receivables)`);
+        } else if (payment.bankAccountId) {
           const bankGLCode = await getBankAccountGLCode(payment.bankAccountId);
-          cashAccount = bankGLCode || DEFAULT_ACCOUNTS.DEFAULT_BANK;
+          debitAccount = bankGLCode || DEFAULT_ACCOUNTS.DEFAULT_BANK;
+          console.log(`[JournalPosting] Payment bank account ${payment.bankAccountId} -> GL code ${debitAccount}`);
         }
 
         lines.push({
-          account_code: cashAccount,
+          account_code: debitAccount,
           entry_type: 'debit',
           amount: payment.amount,
-          description: `Received from ${data.clientName}`,
+          description: payment.paymentMethod === 'beam'
+            ? `Beam payment from ${data.clientName}`
+            : `Received from ${data.clientName}`,
         });
       }
     }
 
     // Credit: Revenue accounts (one per line item)
+    // When VAT is included in prices, line item amounts contain VAT.
+    // Credit the ex-VAT amount to revenue, and separate VAT to its own line.
+    const lineItemTotal = data.lineItems.reduce((sum, li) => sum + (li.amount || 0), 0);
+    const hasVatInclusive = data.totalVatAmount > 0 && lineItemTotal > 0
+      && Math.abs(lineItemTotal - data.totalSubtotal) > 0.01;
+
     for (const lineItem of data.lineItems) {
       if (lineItem.amount > 0) {
+        const revenueAmount = hasVatInclusive
+          ? Math.round((lineItem.amount / lineItemTotal) * data.totalSubtotal * 100) / 100
+          : lineItem.amount;
+
         lines.push({
           account_code: lineItem.accountCode || DEFAULT_ACCOUNTS.DEFAULT_REVENUE,
           entry_type: 'credit',
-          amount: lineItem.amount,
+          amount: revenueAmount,
           description: lineItem.description,
         });
+      }
+    }
+
+    // Fix rounding: ensure revenue credits sum exactly to totalSubtotal when VAT-inclusive
+    if (hasVatInclusive) {
+      const revenueLines = lines.filter(l => l.entry_type === 'credit');
+      const revenueSum = revenueLines.reduce((sum, l) => sum + (l.amount || 0), 0);
+      const roundingDiff = Math.round((data.totalSubtotal - revenueSum) * 100) / 100;
+      if (Math.abs(roundingDiff) > 0 && Math.abs(roundingDiff) < 0.05 && revenueLines.length > 0) {
+        revenueLines[revenueLines.length - 1].amount =
+          Math.round(((revenueLines[revenueLines.length - 1].amount || 0) + roundingDiff) * 100) / 100;
       }
     }
 
@@ -458,19 +515,43 @@ export async function createReceiptJournalEntry(
       });
     }
 
+    console.log('[JournalPosting] Journal lines prepared:', lines.length, 'lines');
+
     // Validate balance
+    const totalDebitCheck = lines
+      .filter(l => l.entry_type === 'debit')
+      .reduce((sum, l) => sum + (l.amount || 0), 0);
+    const totalCreditCheck = lines
+      .filter(l => l.entry_type === 'credit')
+      .reduce((sum, l) => sum + (l.amount || 0), 0);
+
+    console.log('[JournalPosting] Balance check:', {
+      totalDebit: totalDebitCheck,
+      totalCredit: totalCreditCheck,
+      difference: Math.abs(totalDebitCheck - totalCreditCheck),
+      isBalanced: Math.abs(totalDebitCheck - totalCreditCheck) < 0.01,
+    });
+
     if (!validateBalance(lines)) {
+      console.error('[JournalPosting] Journal entry is not balanced!', {
+        totalDebit: totalDebitCheck,
+        totalCredit: totalCreditCheck,
+      });
       return {
         success: false,
-        error: 'Journal entry is not balanced (debits != credits)',
+        error: `Journal entry is not balanced: Debit=${totalDebitCheck.toFixed(2)}, Credit=${totalCreditCheck.toFixed(2)}`,
       };
     }
 
     // Generate reference number
     const referenceNumber = await generateJournalReferenceNumber(data.companyId);
+    console.log('[JournalPosting] Generated reference number:', referenceNumber);
 
     // Calculate totals
     const { totalDebit, totalCredit } = calculateTotals(lines);
+
+    // Check auto-post setting
+    const shouldAutoPost = await journalEventSettingsApi.shouldAutoPost(data.companyId, 'RECEIPT_RECEIVED');
 
     // Create journal entry
     const entry: JournalEntryInsert = {
@@ -478,7 +559,7 @@ export async function createReceiptJournalEntry(
       entry_date: data.receiptDate,
       company_id: data.companyId,
       description: `Receipt - ${data.receiptNumber} - ${data.clientName}`,
-      status: 'draft',
+      status: shouldAutoPost ? 'posted' : 'draft',
       total_debit: totalDebit,
       total_credit: totalCredit,
       created_by: createdBy,
@@ -487,7 +568,11 @@ export async function createReceiptJournalEntry(
       is_auto_generated: true,
     };
 
+    console.log('[JournalPosting] Attempting to create journal entry:', entry);
+
     const createdEntry = await journalEntriesApi.create(entry, lines);
+
+    console.log('[JournalPosting] Successfully created journal entry:', createdEntry.id, createdEntry.reference_number);
 
     return {
       success: true,
@@ -495,10 +580,133 @@ export async function createReceiptJournalEntry(
       referenceNumber: createdEntry.reference_number,
     };
   } catch (error) {
-    console.error('Failed to create receipt journal entry:', error);
+    const errMsg = error instanceof Error ? error.message : JSON.stringify(error);
+    console.error('[JournalPosting] Failed to create receipt journal entry:', errMsg, error);
     return {
       success: false,
-      error: error instanceof Error ? error.message : 'Unknown error',
+      error: errMsg || 'Unknown error',
     };
+  }
+}
+
+/**
+ * Create journal entry for Beam settlement (when money arrives in bank)
+ *
+ * Entry pattern:
+ *   Debit: Bank account (net amount received)
+ *   Debit: CC Processing Fee expense (fee ex-VAT)
+ *   Debit: VAT Receivable (input VAT on fee)
+ *   Credit: Credit Card Receivables (gross amount - clears the receivable)
+ */
+export interface BeamSettlementData {
+  beamTransactionId: string;
+  companyId: string;
+  grossAmount: number;
+  feeAmount: number;
+  vatOnFee: number;
+  netAmount: number;
+  settlementBankAccountId: string;
+  settlementDate: string;
+  beamInvoiceNo?: string;
+  merchantName: string;
+  currency: string;
+}
+
+export async function createBeamSettlementJournalEntry(
+  data: BeamSettlementData,
+  createdBy: string
+): Promise<JournalPostingResult> {
+  console.log('[JournalPosting] Starting createBeamSettlementJournalEntry', data);
+
+  try {
+    const isDuplicate = await checkDuplicateEntry('beam_settlement', data.beamTransactionId);
+    if (isDuplicate) {
+      return { success: true, error: 'Journal entry already exists for this Beam settlement' };
+    }
+
+    // Check period is open
+    await financialPeriodsApi.assertOpen(data.companyId, data.settlementDate);
+
+    const lines: JournalEntryLineInsert[] = [];
+
+    // Debit: Bank account (net amount actually received)
+    const bankGLCode = await getBankAccountGLCode(data.settlementBankAccountId);
+    lines.push({
+      account_code: bankGLCode || DEFAULT_ACCOUNTS.DEFAULT_BANK,
+      entry_type: 'debit',
+      amount: data.netAmount,
+      description: `Beam settlement - ${data.merchantName}`,
+    });
+
+    // Debit: CC Processing Fee (fee amount excluding VAT)
+    const feeExVat = Math.round((data.feeAmount - data.vatOnFee) * 100) / 100;
+    if (feeExVat > 0) {
+      lines.push({
+        account_code: DEFAULT_ACCOUNTS.CC_PROCESSING_FEE,
+        entry_type: 'debit',
+        amount: feeExVat,
+        description: `Beam fee${data.beamInvoiceNo ? ` - Invoice ${data.beamInvoiceNo}` : ''}`,
+      });
+    }
+
+    // Debit: Input VAT on fee
+    if (data.vatOnFee > 0) {
+      lines.push({
+        account_code: DEFAULT_ACCOUNTS.VAT_RECEIVABLE,
+        entry_type: 'debit',
+        amount: data.vatOnFee,
+        description: `Input VAT on Beam fee${data.beamInvoiceNo ? ` - Invoice ${data.beamInvoiceNo}` : ''}`,
+      });
+    }
+
+    // Credit: Credit Card Receivables (clears the gross amount receivable)
+    lines.push({
+      account_code: DEFAULT_ACCOUNTS.CREDIT_CARD_RECEIVABLE,
+      entry_type: 'credit',
+      amount: data.grossAmount,
+      description: `Clear Beam receivable - ${data.merchantName}`,
+    });
+
+    if (!validateBalance(lines)) {
+      const totalDebitCheck = lines.filter(l => l.entry_type === 'debit').reduce((s, l) => s + (l.amount || 0), 0);
+      const totalCreditCheck = lines.filter(l => l.entry_type === 'credit').reduce((s, l) => s + (l.amount || 0), 0);
+      return {
+        success: false,
+        error: `Beam settlement journal not balanced: Debit=${totalDebitCheck.toFixed(2)}, Credit=${totalCreditCheck.toFixed(2)}`,
+      };
+    }
+
+    const referenceNumber = await generateJournalReferenceNumber(data.companyId);
+    const { totalDebit, totalCredit } = calculateTotals(lines);
+
+    // Check auto-post setting (beam settlement uses RECEIPT_RECEIVED setting)
+    const shouldAutoPost = await journalEventSettingsApi.shouldAutoPost(data.companyId, 'RECEIPT_RECEIVED');
+
+    const entry: JournalEntryInsert = {
+      reference_number: referenceNumber,
+      entry_date: data.settlementDate,
+      company_id: data.companyId,
+      description: `Beam Settlement - ${data.merchantName}${data.beamInvoiceNo ? ` - ${data.beamInvoiceNo}` : ''}`,
+      status: shouldAutoPost ? 'posted' : 'draft',
+      total_debit: totalDebit,
+      total_credit: totalCredit,
+      created_by: createdBy,
+      source_document_type: 'beam_settlement',
+      source_document_id: data.beamTransactionId,
+      is_auto_generated: true,
+    };
+
+    const createdEntry = await journalEntriesApi.create(entry, lines);
+    console.log('[JournalPosting] Beam settlement journal created:', createdEntry.id);
+
+    return {
+      success: true,
+      journalEntryId: createdEntry.id,
+      referenceNumber: createdEntry.reference_number,
+    };
+  } catch (error) {
+    const errMsg = error instanceof Error ? error.message : JSON.stringify(error);
+    console.error('[JournalPosting] Failed to create Beam settlement journal:', errMsg);
+    return { success: false, error: errMsg || 'Unknown error' };
   }
 }

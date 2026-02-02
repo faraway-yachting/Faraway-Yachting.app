@@ -21,6 +21,12 @@ export type BookingStatus =
   | 'cancelled'  // Cancelled
   | 'completed'; // Charter completed
 
+// Contact channels
+export type ContactChannel = 'whatsapp' | 'email' | 'line' | 'phone' | 'other';
+
+// Payment status
+export type PaymentStatus = 'unpaid' | 'awaiting_payment' | 'partial' | 'paid';
+
 // Main Booking entity
 export interface Booking {
   id: string;
@@ -29,59 +35,119 @@ export interface Booking {
   // Core booking info
   type: BookingType;
   status: BookingStatus;
-  title: string; // Display name for calendar (e.g., "Smith Family Day Charter")
+  title: string;
 
   // Dates
-  dateFrom: string; // ISO date
-  dateTo: string;   // ISO date
-  time?: string;    // e.g., "09:00 - 17:00"
-  holdUntil?: string; // ISO datetime for HOLD status auto-expiry
+  dateFrom: string;
+  dateTo: string;
+  time?: string;
+  holdUntil?: string;
 
   // Boat/Project
-  projectId?: string;      // Links to Project (yacht) - null for external boats
-  externalBoatName?: string; // For agency bookings on external boats
+  projectId?: string;
+  externalBoatName?: string;
 
-  // Customer info (restricted for agency users)
+  // Customer info
   customerName: string;
   customerEmail?: string;
   customerPhone?: string;
+  contactChannel?: ContactChannel;
   numberOfGuests?: number;
 
   // Booking source
-  bookingOwner: string;        // User ID who owns the booking
-  bookingOwnerName?: string;   // Display name for UI
-  agentName?: string;          // External agent name
-  agentPlatform?: string;      // "Direct", "Booking.com", "Charter Agency X"
-  meetAndGreeter?: string;     // Staff assigned for meet & greet
+  bookingOwner: string;
+  bookingOwnerName?: string;
+  agentName?: string;
+  agentPlatform?: string;
+  meetAndGreeter?: string;
 
   // Location
   destination?: string;
   pickupLocation?: string;
+  departureFrom?: string;
+  arrivalTo?: string;
+  charterTime?: string;
 
-  // Financial info (restricted for agency users)
+  // Financial info
   currency: Currency;
   totalPrice?: number;
+  charterFee?: number;
+  extraCharges?: number;
+  adminFee?: number;
+  beamChargeId?: string;
+  paymentStatus?: PaymentStatus;
   depositAmount?: number;
   depositDueDate?: string;
   depositPaidDate?: string;
   balanceAmount?: number;
   balanceDueDate?: string;
   balancePaidDate?: string;
+  financeNote?: string;
+  financeAttachments?: BookingAttachment[];
 
-  // Links to Accounting (to be populated)
+  // Commission
+  commissionRate?: number;
+  totalCommission?: number;
+  commissionDeduction?: number;
+  commissionReceived?: number;
+
+  // Links to Accounting
   depositReceiptId?: string;
   finalReceiptId?: string;
   invoiceId?: string;
   expenseIds?: string[];
 
-  // Internal notes (restricted for agency users)
+  // Extras
+  extras?: string[]; // e.g., ['taxi', 'bbq', 'diving']
+
+  // Charter Contract
+  contractNote?: string;
+  contractAttachments?: BookingAttachment[];
+
+  // Notes
   internalNotes?: string;
-  customerNotes?: string; // Notes visible to customer
+  customerNotes?: string;
+  internalNoteAttachments?: BookingAttachment[];
 
   // Metadata
   createdBy: string;
   createdAt: string;
   updatedAt: string;
+  updatedBy?: string;
+  updatedByName?: string;
+}
+
+// Booking payment record (multiple deposits/balances in multiple currencies)
+export interface BookingPayment {
+  id: string;
+  bookingId: string;
+  paymentType: 'deposit' | 'balance';
+  amount: number;
+  currency: Currency;
+  dueDate?: string;
+  paidDate?: string;
+  note?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// Booking crew assignment
+export interface BookingCrew {
+  id: string;
+  bookingId: string;
+  employeeId: string;
+  employeeName?: string;
+  role?: string;
+  createdAt: string;
+}
+
+// Booking attachment (stored as JSONB)
+export interface BookingAttachment {
+  id: string;
+  name: string;
+  url: string;
+  size: number;
+  uploadedAt: string;
 }
 
 // Guest/Cabin allocation for cabin charters
@@ -138,6 +204,21 @@ export const agentPlatforms = [
 ] as const;
 
 export type AgentPlatform = typeof agentPlatforms[number];
+
+export const contactChannelLabels: Record<ContactChannel, string> = {
+  whatsapp: 'WhatsApp',
+  email: 'Email',
+  line: 'Line',
+  phone: 'Phone',
+  other: 'Other',
+};
+
+export const paymentStatusLabels: Record<PaymentStatus, string> = {
+  unpaid: 'Unpaid',
+  awaiting_payment: 'Awaiting Payment',
+  partial: 'Partially Paid',
+  paid: 'Paid',
+};
 
 // Helper to check if booking spans multiple days
 export function isMultiDayBooking(booking: Booking): boolean {

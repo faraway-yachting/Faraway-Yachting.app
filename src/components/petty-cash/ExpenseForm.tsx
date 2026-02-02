@@ -181,7 +181,7 @@ export default function ExpenseForm({
         <div className="w-full max-w-lg bg-white rounded-lg shadow-xl">
           {/* Header */}
           <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
-            <h2 className="text-lg font-semibold text-gray-900">New Expense</h2>
+            <h2 className="text-lg font-semibold text-gray-900">New Expense Claim</h2>
             <button
               onClick={onCancel}
               className="p-2 text-gray-400 hover:text-gray-600 rounded-full hover:bg-gray-100"
@@ -373,7 +373,7 @@ export default function ExpenseForm({
             <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg">
               <p className="text-xs text-amber-700">
                 <strong>Note:</strong> Please send the original receipt to the
-                accountant to complete the reimbursement process.
+                accountant to complete the claim process.
               </p>
             </div>
           </div>
@@ -392,7 +392,7 @@ export default function ExpenseForm({
               className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-[#5A7A8F] rounded-lg hover:bg-[#4a6a7f] disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {isSaving && <Loader2 className="h-4 w-4 animate-spin" />}
-              Submit Expense
+              Submit Claim
             </button>
           </div>
         </div>

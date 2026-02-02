@@ -15,6 +15,8 @@ import {
   Home,
   User,
   Shield,
+  Users,
+  Anchor,
 } from "lucide-react";
 
 export type BookingsRole = "admin" | "manager" | "agent" | "viewer" | "crew" | "investor";
@@ -28,6 +30,8 @@ interface BookingsAppShellProps {
 const allMenuItems = [
   { name: "Calendar", href: "/bookings/{role}/calendar", icon: Calendar },
   { name: "Bookings List", href: "/bookings/{role}/list", icon: List },
+  { name: "Agencies", href: "/bookings/{role}/agencies", icon: Users },
+  { name: "Boat Register", href: "/bookings/{role}/boats", icon: Anchor },
   { name: "Settings", href: "/bookings/{role}/settings", icon: Settings },
 ];
 
@@ -35,11 +39,11 @@ const allMenuItems = [
 const roleConfig: Record<BookingsRole, { name: string; allowedMenus: string[] }> = {
   admin: {
     name: "Admin",
-    allowedMenus: ["Calendar", "Bookings List", "Settings"],
+    allowedMenus: ["Calendar", "Bookings List", "Agencies", "Boat Register", "Settings"],
   },
   manager: {
     name: "Manager",
-    allowedMenus: ["Calendar", "Bookings List", "Settings"],
+    allowedMenus: ["Calendar", "Bookings List", "Agencies", "Boat Register", "Settings"],
   },
   agent: {
     name: "Agent",

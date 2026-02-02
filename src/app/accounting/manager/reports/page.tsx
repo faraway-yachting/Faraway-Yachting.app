@@ -5,9 +5,12 @@ import { AppShell } from "@/components/accounting/AppShell";
 import { PLReport } from "@/components/reports/PLReport";
 import { ProjectPLReport } from "@/components/reports/ProjectPLReport";
 import { BalanceSheetReport } from "@/components/reports/BalanceSheetReport";
-import { BarChart3, FileText, TrendingUp, Building2, Ship } from "lucide-react";
+import { TrialBalanceReport } from "@/components/reports/TrialBalanceReport";
+import { AgingReport } from "@/components/reports/AgingReport";
+import NumberingGapReport from "@/components/reports/NumberingGapReport";
+import { BarChart3, FileText, TrendingUp, Building2, Ship, Scale, Clock, Hash } from "lucide-react";
 
-type ReportTab = "pl" | "balance-sheet" | "project-pl" | "other";
+type ReportTab = "pl" | "balance-sheet" | "trial-balance" | "project-pl" | "aging" | "other";
 
 export default function ReportsPage() {
   const [activeTab, setActiveTab] = useState<ReportTab>("pl");
@@ -15,7 +18,9 @@ export default function ReportsPage() {
   const tabs = [
     { id: "pl" as ReportTab, label: "P&L Report", icon: TrendingUp },
     { id: "balance-sheet" as ReportTab, label: "Balance Sheet", icon: Building2 },
+    { id: "trial-balance" as ReportTab, label: "Trial Balance", icon: Scale },
     { id: "project-pl" as ReportTab, label: "Project P&L", icon: Ship },
+    { id: "aging" as ReportTab, label: "AR/AP Aging", icon: Clock },
     { id: "other" as ReportTab, label: "Other Reports", icon: FileText },
   ];
 
@@ -51,7 +56,11 @@ export default function ReportsPage() {
 
       {activeTab === "balance-sheet" && <BalanceSheetReport />}
 
+      {activeTab === "trial-balance" && <TrialBalanceReport />}
+
       {activeTab === "project-pl" && <ProjectPLReport projectId="" />}
+
+      {activeTab === "aging" && <AgingReport />}
 
       {activeTab === "other" && (
         <div>
@@ -119,32 +128,9 @@ export default function ReportsPage() {
               </div>
             </div>
 
-            {/* Expense Analysis */}
-            <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
-              <div className="flex items-start gap-4">
-                <div className="flex h-12 w-12 items-center justify-center rounded-full bg-red-50">
-                  <TrendingUp className="h-6 w-6 text-red-600" />
-                </div>
-                <div className="flex-1">
-                  <h3 className="text-lg font-semibold text-gray-900 mb-1">
-                    Expense Analysis
-                  </h3>
-                  <p className="text-sm text-gray-600 mb-3">
-                    Detailed breakdown of expenses by category
-                  </p>
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs text-gray-500">
-                      Period: Monthly, Quarterly
-                    </span>
-                    <button
-                      disabled
-                      className="inline-flex items-center gap-2 rounded-lg bg-gray-100 px-3 py-1.5 text-xs font-medium text-gray-400 cursor-not-allowed"
-                    >
-                      Coming Soon
-                    </button>
-                  </div>
-                </div>
-              </div>
+            {/* Numbering Gap Detection */}
+            <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm col-span-full">
+              <NumberingGapReport />
             </div>
           </div>
 

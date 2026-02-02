@@ -7,7 +7,7 @@
 
 import { Currency } from '../company/types';
 
-export type JournalEntryStatus = 'draft' | 'posted';
+export type JournalEntryStatus = 'draft' | 'posted' | 'deleted';
 export type EntryType = 'debit' | 'credit';
 
 export interface Attachment {

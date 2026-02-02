@@ -15,10 +15,35 @@ export interface ExternalYacht {
 // Backwards compatibility alias
 export type ExternalBoat = ExternalYacht;
 
+export interface CalendarDisplaySettings {
+  allBookingsFields: string[];
+  boatTabFields: string[];
+}
+
+export const CALENDAR_DISPLAY_FIELD_OPTIONS = [
+  { key: 'title', label: 'Title' },
+  { key: 'customerName', label: 'Customer Name' },
+  { key: 'bookingType', label: 'Booking Type' },
+  { key: 'time', label: 'Time' },
+  { key: 'totalPrice', label: 'Total Price' },
+  { key: 'paymentStatus', label: 'Payment Status' },
+  { key: 'destination', label: 'Destination' },
+  { key: 'numberOfGuests', label: 'Number of Guests' },
+  { key: 'bookingOwner', label: 'Booking Owner' },
+  { key: 'extras', label: 'Extras' },
+  { key: 'contractNote', label: 'Charter Contract' },
+] as const;
+
+const DEFAULT_CALENDAR_DISPLAY: CalendarDisplaySettings = {
+  allBookingsFields: ['title', 'customerName'],
+  boatTabFields: ['title', 'customerName', 'bookingType'],
+};
+
 interface BookingSettings {
   boatColors: BoatColor[];
   externalBoats: ExternalYacht[];
   bannerImageUrl: string | null;
+  calendarDisplay: CalendarDisplaySettings;
 }
 
 interface BookingSettingsContextType {
@@ -38,6 +63,9 @@ interface BookingSettingsContextType {
   // Banner image
   bannerImageUrl: string | null;
   setBannerImageUrl: (url: string | null) => void;
+  // Calendar display settings
+  calendarDisplay: CalendarDisplaySettings;
+  setCalendarDisplayFields: (view: 'all' | 'boat', fields: string[]) => void;
 }
 
 const STORAGE_KEY = 'faraway-booking-settings';
@@ -49,6 +77,7 @@ export function BookingSettingsProvider({ children }: { children: ReactNode }) {
     boatColors: [],
     externalBoats: [],
     bannerImageUrl: null,
+    calendarDisplay: DEFAULT_CALENDAR_DISPLAY,
   });
   const [isLoaded, setIsLoaded] = useState(false);
 
@@ -71,6 +100,7 @@ export function BookingSettingsProvider({ children }: { children: ReactNode }) {
           boatColors: parsed.boatColors || [],
           externalBoats: migratedExternalBoats,
           bannerImageUrl: parsed.bannerImageUrl ?? null,
+          calendarDisplay: parsed.calendarDisplay ?? DEFAULT_CALENDAR_DISPLAY,
         });
       }
     } catch (error) {
@@ -169,6 +199,17 @@ export function BookingSettingsProvider({ children }: { children: ReactNode }) {
     updateExternalYacht(id, { name });
   };
 
+  // Set calendar display fields
+  const setCalendarDisplayFields = (view: 'all' | 'boat', fields: string[]) => {
+    setSettings(prev => ({
+      ...prev,
+      calendarDisplay: {
+        ...prev.calendarDisplay,
+        [view === 'all' ? 'allBookingsFields' : 'boatTabFields']: fields,
+      },
+    }));
+  };
+
   // Set banner image URL
   const setBannerImageUrl = (url: string | null) => {
     setSettings(prev => ({
@@ -194,6 +235,8 @@ export function BookingSettingsProvider({ children }: { children: ReactNode }) {
         updateExternalBoat,
         bannerImageUrl: settings.bannerImageUrl ?? null,
         setBannerImageUrl,
+        calendarDisplay: settings.calendarDisplay ?? DEFAULT_CALENDAR_DISPLAY,
+        setCalendarDisplayFields,
       }}
     >
       {children}

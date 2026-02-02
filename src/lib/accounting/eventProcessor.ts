@@ -53,6 +53,11 @@ import { partnerPaymentHandler } from './eventHandlers/partnerPaymentHandler';
 import { openingBalanceHandler } from './eventHandlers/openingBalanceHandler';
 import { projectServiceCompletedHandler } from './eventHandlers/projectServiceCompletedHandler';
 import { capexIncurredHandler } from './eventHandlers/capexIncurredHandler';
+import { pettyCashExpenseHandler } from './eventHandlers/pettyCashExpenseHandler';
+import { pettyCashTopupHandler } from './eventHandlers/pettyCashTopupHandler';
+import { pettyCashReimbursementHandler } from './eventHandlers/pettyCashReimbursementHandler';
+import { expensePaidIntercompanyHandler } from './eventHandlers/expensePaidIntercompanyHandler';
+import { receiptReceivedIntercompanyHandler } from './eventHandlers/receiptReceivedIntercompanyHandler';
 
 // ============================================================================
 // Event Handler Registry
@@ -63,7 +68,9 @@ const eventHandlers: Map<AccountingEventType, EventHandler> = new Map();
 // Register all handlers
 eventHandlers.set('EXPENSE_APPROVED', expenseApprovedHandler);
 eventHandlers.set('EXPENSE_PAID', expensePaidHandler);
+eventHandlers.set('EXPENSE_PAID_INTERCOMPANY', expensePaidIntercompanyHandler);
 eventHandlers.set('RECEIPT_RECEIVED', receiptReceivedHandler);
+eventHandlers.set('RECEIPT_RECEIVED_INTERCOMPANY', receiptReceivedIntercompanyHandler);
 eventHandlers.set('MANAGEMENT_FEE_RECOGNIZED', managementFeeHandler);
 eventHandlers.set('INTERCOMPANY_SETTLEMENT', intercompanySettlementHandler);
 eventHandlers.set('PARTNER_PROFIT_ALLOCATION', partnerProfitAllocationHandler);
@@ -71,6 +78,9 @@ eventHandlers.set('PARTNER_PAYMENT', partnerPaymentHandler);
 eventHandlers.set('OPENING_BALANCE', openingBalanceHandler);
 eventHandlers.set('PROJECT_SERVICE_COMPLETED', projectServiceCompletedHandler);
 eventHandlers.set('CAPEX_INCURRED', capexIncurredHandler);
+eventHandlers.set('PETTYCASH_EXPENSE_CREATED', pettyCashExpenseHandler);
+eventHandlers.set('PETTYCASH_TOPUP_COMPLETED', pettyCashTopupHandler);
+eventHandlers.set('PETTYCASH_REIMBURSEMENT_PAID', pettyCashReimbursementHandler);
 
 // ============================================================================
 // Default Account Fallback Logic
@@ -215,10 +225,13 @@ interface FilteredSpec {
 /**
  * Filter journal specs by enabled companies and apply settings
  * Returns only specs that should be created
+ *
+ * @param forcePost - If true, bypasses auto-post settings and forces journal status to 'posted'
  */
 async function filterAndPrepareSpecs(
   specs: JournalSpec[],
-  eventType: string
+  eventType: string,
+  forcePost?: boolean
 ): Promise<{ filtered: FilteredSpec[]; skippedCompanies: string[] }> {
   const filtered: FilteredSpec[] = [];
   const skippedCompanies: string[] = [];
@@ -238,8 +251,8 @@ async function filterAndPrepareSpecs(
     // Apply default accounts as fallbacks
     const specWithDefaults = await applyDefaultAccounts(spec, eventType);
 
-    // Check auto-post setting
-    const shouldAutoPost = await journalEventSettingsApi.shouldAutoPost(
+    // Check auto-post setting (forcePost bypasses this)
+    const shouldAutoPost = forcePost || await journalEventSettingsApi.shouldAutoPost(
       spec.companyId,
       eventType
     );
@@ -281,8 +294,10 @@ function validateBalance(spec: JournalSpec): { valid: boolean; error?: string } 
 /**
  * Process a pending accounting event
  * Creates journal entries atomically for all affected companies
+ *
+ * @param forcePost - If true, bypasses auto-post settings and forces journal status to 'posted'
  */
-export async function processEvent(eventId: string): Promise<EventProcessResult> {
+export async function processEvent(eventId: string, forcePost?: boolean): Promise<EventProcessResult> {
   const supabase = getClient();
 
   try {
@@ -361,7 +376,8 @@ export async function processEvent(eventId: string): Promise<EventProcessResult>
     // 6. Filter by enabled companies and apply settings
     const { filtered, skippedCompanies } = await filterAndPrepareSpecs(
       journalSpecs,
-      event.event_type
+      event.event_type,
+      forcePost
     );
 
     // If all companies are disabled, mark as processed with note
@@ -505,6 +521,8 @@ export async function cancelEvent(eventId: string): Promise<void> {
 /**
  * Create and process an event in one operation
  * This is the main entry point for creating accounting events
+ *
+ * @param forcePost - If true, bypasses auto-post settings and forces journal status to 'posted'
  */
 export async function createAndProcessEvent(
   eventType: AccountingEventType,
@@ -513,7 +531,8 @@ export async function createAndProcessEvent(
   eventData: Record<string, unknown>,
   sourceDocumentType?: string,
   sourceDocumentId?: string,
-  createdBy?: string
+  createdBy?: string,
+  forcePost?: boolean
 ): Promise<EventProcessResult> {
   const supabase = getClient();
 
@@ -544,7 +563,7 @@ export async function createAndProcessEvent(
     }
 
     // Process the event
-    return processEvent(event.id);
+    return processEvent(event.id, forcePost);
   } catch (error) {
     return {
       success: false,

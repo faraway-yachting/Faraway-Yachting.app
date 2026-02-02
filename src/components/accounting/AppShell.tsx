@@ -31,6 +31,8 @@ import {
   Users,
   Tags,
   Shield,
+  ArrowLeftRight,
+  Banknote,
 } from "lucide-react";
 
 interface AppShellProps {
@@ -98,6 +100,13 @@ const menuItems = [
     dynamicHref: true, // Flag to indicate dynamic href determination
   },
   {
+    name: "Cash Collections",
+    href: "/accounting/manager/cash-collections",
+    icon: Banknote,
+    permission: ACCOUNTING_PERMISSIONS.FINANCES_VIEW,
+    menuKey: "cash-collections",
+  },
+  {
     name: "Chart of Accounts",
     href: "/accounting/manager/chart-of-accounts",
     icon: BookOpen,
@@ -117,6 +126,20 @@ const menuItems = [
     icon: Building,
     permission: ACCOUNTING_PERMISSIONS.SETTINGS_VIEW,
     menuKey: "companies",
+  },
+  {
+    name: "Intercompany",
+    href: "/accounting/manager/intercompany",
+    icon: ArrowLeftRight,
+    permission: ACCOUNTING_PERMISSIONS.SETTINGS_VIEW,
+    menuKey: "intercompany",
+  },
+  {
+    name: "Commissions",
+    href: "/accounting/manager/commissions",
+    icon: Percent,
+    permission: ACCOUNTING_PERMISSIONS.SETTINGS_VIEW,
+    menuKey: "commissions",
   },
   {
     name: "Reports",

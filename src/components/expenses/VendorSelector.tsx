@@ -86,7 +86,7 @@ export function VendorSelector({
 
   const handleSaveContact = async (contactData: Partial<Contact>) => {
     // Force vendor type
-    const dbData = frontendContactToDb({ ...contactData, type: 'vendor' });
+    const dbData = frontendContactToDb({ ...contactData, type: ['vendor'] });
     await contactsApi.create(dbData);
     setIsContactModalOpen(false);
     await fetchVendors();

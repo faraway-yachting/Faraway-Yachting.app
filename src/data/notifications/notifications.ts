@@ -83,11 +83,69 @@ export function notifyAccountantNewReimbursement(
 ): Notification {
   return addNotification({
     type: 'reimbursement_created',
-    title: 'New Reimbursement Request',
-    message: `${walletHolderName} submitted a reimbursement request for ${amount.toLocaleString('th-TH', { style: 'currency', currency: 'THB' })}`,
-    link: '/accounting/accountant/petty-cash-management/reimbursements',
+    title: 'New Expense Claim',
+    message: `${walletHolderName} submitted an expense claim for ${amount.toLocaleString('th-TH', { style: 'currency', currency: 'THB' })}`,
+    link: '/accounting/manager/petty-cash-management/reimbursements',
     referenceId: reimbursementId,
     referenceNumber: reimbursementNumber,
+    targetRole: 'accountant',
+  });
+}
+
+// Helper: Notify wallet holder when their claim has been paid
+export function notifyWalletHolderClaimPaid(
+  reimbursementId: string,
+  reimbursementNumber: string,
+  amount: number,
+  walletHolderId?: string
+): Notification {
+  return addNotification({
+    type: 'reimbursement_paid',
+    title: 'Claim Processed',
+    message: `Your expense claim ${reimbursementNumber} for ${amount.toLocaleString('th-TH', { style: 'currency', currency: 'THB' })} has been processed. Wallet replenishment complete.`,
+    link: '/accounting/petty-cash',
+    referenceId: reimbursementId,
+    referenceNumber: reimbursementNumber,
+    targetRole: 'petty_cash_holder',
+    targetUserId: walletHolderId,
+  });
+}
+
+// Helper: Notify wallet holder when their claim has been rejected
+export function notifyWalletHolderClaimRejected(
+  reimbursementId: string,
+  reimbursementNumber: string,
+  amount: number,
+  rejectionReason: string,
+  walletHolderId?: string
+): Notification {
+  return addNotification({
+    type: 'reimbursement_rejected',
+    title: 'Claim Rejected',
+    message: `Your expense claim ${reimbursementNumber} for ${amount.toLocaleString('th-TH', { style: 'currency', currency: 'THB' })} was rejected. Reason: ${rejectionReason}`,
+    link: '/accounting/petty-cash',
+    referenceId: reimbursementId,
+    referenceNumber: reimbursementNumber,
+    targetRole: 'petty_cash_holder',
+    targetUserId: walletHolderId,
+  });
+}
+
+// Helper: Notify accountant about unlinked booking payment
+export function notifyAccountantUnlinkedPayment(
+  bookingId: string,
+  bookingReference: string,
+  amount: number,
+  currency: string,
+  paymentType: string,
+): Notification {
+  return addNotification({
+    type: 'booking_payment_needs_action',
+    title: 'Booking Payment Needs Action',
+    message: `${paymentType} payment of ${currency} ${amount.toLocaleString('en-US', { minimumFractionDigits: 2 })} recorded on booking ${bookingReference} — needs receipt linking`,
+    link: '/accounting/manager/income/overview',
+    referenceId: bookingId,
+    referenceNumber: bookingReference,
     targetRole: 'accountant',
   });
 }

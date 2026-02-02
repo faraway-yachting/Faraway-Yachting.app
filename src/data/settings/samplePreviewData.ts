@@ -46,7 +46,7 @@ export const sampleCompany: Company = {
 // Sample client for preview
 export const sampleClient: Contact = {
   id: 'preview-client',
-  type: 'customer',
+  type: ['customer'],
   name: 'Karen Durbidge',
   contactPerson: 'Karen Durbidge',
   email: 'karen.d@example.com',

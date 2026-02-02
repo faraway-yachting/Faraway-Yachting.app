@@ -62,24 +62,12 @@ export const contactsApi = {
     if (error) throw error;
   },
 
-  async getByType(type: 'customer' | 'vendor' | 'both'): Promise<Contact[]> {
-    const supabase = createClient();
-    const { data, error } = await supabase
-      .from('contacts')
-      .select('*')
-      .eq('type', type)
-      .eq('is_active', true)
-      .order('name');
-    if (error) throw error;
-    return data ?? [];
-  },
-
   async getCustomers(): Promise<Contact[]> {
     const supabase = createClient();
     const { data, error } = await supabase
       .from('contacts')
       .select('*')
-      .in('type', ['customer', 'both'])
+      .contains('type', ['customer'])
       .eq('is_active', true)
       .order('name');
     if (error) throw error;
@@ -91,7 +79,31 @@ export const contactsApi = {
     const { data, error } = await supabase
       .from('contacts')
       .select('*')
-      .in('type', ['vendor', 'both'])
+      .contains('type', ['vendor'])
+      .eq('is_active', true)
+      .order('name');
+    if (error) throw error;
+    return data ?? [];
+  },
+
+  async getAgencies(): Promise<Contact[]> {
+    const supabase = createClient();
+    const { data, error } = await supabase
+      .from('contacts')
+      .select('*')
+      .contains('type', ['agency'])
+      .eq('is_active', true)
+      .order('name');
+    if (error) throw error;
+    return data ?? [];
+  },
+
+  async getBoatOperators(): Promise<Contact[]> {
+    const supabase = createClient();
+    const { data, error } = await supabase
+      .from('contacts')
+      .select('*')
+      .contains('type', ['boat_operator'])
       .eq('is_active', true)
       .order('name');
     if (error) throw error;

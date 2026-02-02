@@ -3,86 +3,17 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useParams, useSearchParams, useRouter } from 'next/navigation';
 import { Plus, Calendar as CalendarIcon, Ship } from 'lucide-react';
-import { BookingCalendar, CalendarViewMode } from '@/components/bookings/BookingCalendar';
-import { CalendarViewToggle } from '@/components/bookings/CalendarViewToggle';
+import { BookingCalendar } from '@/components/bookings/BookingCalendar';
+import { CalendarDisplayPopover } from '@/components/bookings/CalendarDisplayPopover';
 import { BookingForm } from '@/components/bookings/BookingForm';
 import { Booking, BookingType, BookingStatus } from '@/data/booking/types';
 import { Project } from '@/data/project/types';
 import { Currency } from '@/data/company/types';
 import { projectsApi } from '@/lib/supabase/api/projects';
+import { bookingsApi } from '@/lib/supabase/api/bookings';
 import { dbProjectToFrontend } from '@/lib/supabase/transforms';
 import { useBookingSettings } from '@/contexts/BookingSettingsContext';
 import { useAuth } from '@/components/auth';
-
-// Mock bookings for demo (replace with API call)
-const mockBookings: Booking[] = [
-  {
-    id: '1',
-    bookingNumber: 'FA-202601001',
-    type: 'day_charter',
-    status: 'booked',
-    title: 'Smith Family',
-    dateFrom: new Date().toISOString().split('T')[0],
-    dateTo: new Date().toISOString().split('T')[0],
-    time: '09:00 - 17:00',
-    projectId: 'project-1',
-    customerName: 'John Smith',
-    customerEmail: 'john@example.com',
-    numberOfGuests: 6,
-    bookingOwner: 'user-1',
-    agentPlatform: 'Direct',
-    destination: 'Phi Phi Islands',
-    currency: 'THB',
-    totalPrice: 85000,
-    depositAmount: 42500,
-    depositPaidDate: new Date().toISOString().split('T')[0],
-    balanceAmount: 42500,
-    createdBy: 'user-1',
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  },
-  {
-    id: '2',
-    bookingNumber: 'FA-202601002',
-    type: 'overnight_charter',
-    status: 'hold',
-    title: 'Corporate Event',
-    dateFrom: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-    dateTo: new Date(Date.now() + 4 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-    projectId: 'project-1',
-    customerName: 'ABC Corp',
-    numberOfGuests: 12,
-    bookingOwner: 'user-1',
-    agentPlatform: 'Charter Agency',
-    destination: 'Krabi',
-    currency: 'USD',
-    totalPrice: 8500,
-    holdUntil: new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString(),
-    createdBy: 'user-1',
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  },
-  {
-    id: '3',
-    bookingNumber: 'FA-202601003',
-    type: 'day_charter',
-    status: 'enquiry',
-    title: 'Wedding Party',
-    dateFrom: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-    dateTo: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-    time: '14:00 - 22:00',
-    externalBoatName: 'External Yacht',
-    customerName: 'Sarah Johnson',
-    numberOfGuests: 20,
-    bookingOwner: 'user-1',
-    agentPlatform: 'Hotel Concierge',
-    currency: 'THB',
-    totalPrice: 150000,
-    createdBy: 'user-1',
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  },
-];
 
 export default function BookingCalendarPage() {
   const params = useParams();
@@ -91,7 +22,7 @@ export default function BookingCalendarPage() {
   const role = params.role as string;
 
   // Get user's actual role from auth context (database-enforced)
-  const { getModuleRole, isSuperAdmin, hasPermission } = useAuth();
+  const { user, getModuleRole, isSuperAdmin, hasPermission } = useAuth();
   const userBookingsRole = getModuleRole('bookings');
 
   // Determine if user is an agent based on their ACTUAL role, not URL
@@ -102,7 +33,7 @@ export default function BookingCalendarPage() {
   const canCreate = isSuperAdmin || userBookingsRole === 'manager' || userBookingsRole === 'agent';
 
   // Get boat color settings and banner
-  const { getBoatColor, bannerImageUrl } = useBookingSettings();
+  const { getBoatColor, bannerImageUrl, calendarDisplay } = useBookingSettings();
 
   // Pre-filled booking from URL params (from Quotation/Invoice/Receipt)
   const [prefilledBooking, setPrefilledBooking] = useState<Partial<Booking> | null>(null);
@@ -110,10 +41,10 @@ export default function BookingCalendarPage() {
   // Calendar state
   const [currentYear, setCurrentYear] = useState(new Date().getFullYear());
   const [currentMonth, setCurrentMonth] = useState(new Date().getMonth() + 1);
-  const [viewMode, setViewMode] = useState<CalendarViewMode>('month');
+
 
   // Data state
-  const [bookings, setBookings] = useState<Booking[]>(mockBookings);
+  const [bookings, setBookings] = useState<Booking[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -125,24 +56,41 @@ export default function BookingCalendarPage() {
   const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null);
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
 
-  // Load projects
+  // Load projects and bookings
+  const loadBookings = async (year: number, month: number) => {
+    try {
+      const data = await bookingsApi.getByMonth(year, month);
+      setBookings(data);
+    } catch (error) {
+      console.error('Error loading bookings:', error);
+    }
+  };
+
   useEffect(() => {
-    async function loadProjects() {
+    async function loadData() {
+      setIsLoading(true);
       try {
-        const data = await projectsApi.getActive();
-        // Transform DB rows to frontend types and filter to yacht type only
-        const yachts = data
+        const [projectsData] = await Promise.all([
+          projectsApi.getActive(),
+          loadBookings(currentYear, currentMonth),
+        ]);
+        const yachts = projectsData
           .map(dbProjectToFrontend)
           .filter(p => p.type === 'yacht');
         setProjects(yachts);
       } catch (error) {
-        console.error('Error loading projects:', error);
+        console.error('Error loading data:', error);
       } finally {
         setIsLoading(false);
       }
     }
-    loadProjects();
-  }, []);
+    loadData();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Reload bookings when month changes
+  useEffect(() => {
+    loadBookings(currentYear, currentMonth);
+  }, [currentYear, currentMonth]);
 
   // Handle URL parameters for pre-filled booking (from Quotation/Invoice/Receipt)
   useEffect(() => {
@@ -225,12 +173,30 @@ export default function BookingCalendarPage() {
     }
   };
 
+  // Build prefilled booking data from selected boat tab
+  const buildBoatPrefill = (): Partial<Booking> | null => {
+    if (!selectedBoatFilter || selectedBoatFilter === 'external') return null;
+    const project = projects.find(p => p.id === selectedBoatFilter);
+    if (!project) return null;
+    return { projectId: project.id };
+  };
+
   // Booking handlers
-  const handleDateClick = (date: string) => {
+  const handleDateClick = async (date: string) => {
     if (!canCreate) return;
-    setSelectedDate(date);
-    setSelectedBooking(null);
-    setShowBookingForm(true);
+    let prefill = buildBoatPrefill();
+    // If no boat selected in filter, default to first project to satisfy DB constraint
+    if (!prefill && projects.length > 0) {
+      prefill = { projectId: projects[0].id };
+    }
+    if (!prefill) return; // No projects available at all
+    const draft = await createDraftBooking(date, prefill);
+    if (draft) {
+      setSelectedBooking(draft);
+      setSelectedDate(null);
+      setPrefilledBooking(null);
+      setShowBookingForm(true);
+    }
   };
 
   const handleBookingClick = (booking: Booking) => {
@@ -239,30 +205,53 @@ export default function BookingCalendarPage() {
     setShowBookingForm(true);
   };
 
-  const handleSaveBooking = async (bookingData: Partial<Booking>) => {
-    // In production, this would call the API
-    console.log('Saving booking:', bookingData);
+  // Auto-create draft booking when opening new form
+  const createDraftBooking = async (date?: string, prefill?: Partial<Booking> | null) => {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    const rand = String(Math.floor(Math.random() * 10000)).padStart(4, '0');
+    const today = `${year}-${month}-${day}`;
+    const draftData: Partial<Booking> = {
+      ...prefill,
+      status: 'enquiry' as BookingStatus,
+      type: prefill?.type || 'day_charter' as BookingType,
+      title: prefill?.title || 'Draft',
+      customerName: prefill?.customerName || '-',
+      dateFrom: date || prefill?.dateFrom || today,
+      dateTo: date || prefill?.dateTo || today,
+      bookingNumber: `FA-${year}${month}${rand}`,
+    };
+    try {
+      const created = await bookingsApi.create(draftData);
+      setBookings(prev => [...prev, created]);
+      return created;
+    } catch (err: any) {
+      console.error('Failed to create draft booking:', err?.message || err?.code || JSON.stringify(err));
+      return null;
+    }
+  };
 
+  const handleSaveBooking = async (bookingData: Partial<Booking>) => {
     if (selectedBooking) {
-      // Update existing
+      // Update existing (including auto-created drafts)
+      const updated = await bookingsApi.update(selectedBooking.id, bookingData);
       setBookings(prev =>
-        prev.map(b => b.id === selectedBooking.id ? { ...b, ...bookingData } as Booking : b)
+        prev.map(b => b.id === selectedBooking.id ? updated : b)
       );
     } else {
-      // Create new - Generate FA-YYYYMMXXX format booking number
+      // Fallback: Create new if no selectedBooking (shouldn't happen with auto-draft)
       const now = new Date();
       const year = now.getFullYear();
       const month = String(now.getMonth() + 1).padStart(2, '0');
-      const seq = String(Math.floor(Math.random() * 1000)).padStart(3, '0');
-      const newBooking: Booking = {
-        id: `new-${Date.now()}`,
-        bookingNumber: `FA-${year}${month}${seq}`,
+      const rand = String(Math.floor(Math.random() * 10000)).padStart(4, '0');
+      const created = await bookingsApi.create({
         ...bookingData,
-        createdBy: 'user-1',
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      } as Booking;
-      setBookings(prev => [...prev, newBooking]);
+        bookingNumber: `FA-${year}${month}${rand}`,
+        bookingOwner: bookingData.bookingOwner || undefined,
+      });
+      setBookings(prev => [...prev, created]);
     }
 
     setShowBookingForm(false);
@@ -271,7 +260,7 @@ export default function BookingCalendarPage() {
   };
 
   const handleDeleteBooking = async (id: string) => {
-    // In production, this would call the API
+    await bookingsApi.delete(id);
     setBookings(prev => prev.filter(b => b.id !== id));
     setShowBookingForm(false);
     setSelectedBooking(null);
@@ -367,16 +356,21 @@ export default function BookingCalendarPage() {
 
         {/* Right side actions */}
         <div className="flex items-center gap-3 flex-shrink-0 ml-4">
-          {/* View toggle */}
-          <CalendarViewToggle viewMode={viewMode} onChange={setViewMode} />
+          {/* Display settings */}
+          <CalendarDisplayPopover />
 
           {/* Add booking button */}
           {canCreate && (
             <button
-              onClick={() => {
-                setSelectedDate(new Date().toISOString().split('T')[0]);
-                setSelectedBooking(null);
-                setShowBookingForm(true);
+              onClick={async () => {
+                const prefill = buildBoatPrefill();
+                const draft = await createDraftBooking(undefined, prefill);
+                if (draft) {
+                  setSelectedBooking(draft);
+                  setSelectedDate(null);
+                  setPrefilledBooking(null);
+                  setShowBookingForm(true);
+                }
               }}
               className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors shadow-sm"
             >
@@ -393,13 +387,16 @@ export default function BookingCalendarPage() {
         month={currentMonth}
         bookings={filteredBookings}
         projects={projects}
-        viewMode={viewMode}
+        viewMode="month"
         onDateClick={canCreate ? handleDateClick : undefined}
         onBookingClick={handleBookingClick}
         onPrevMonth={handlePrevMonth}
         onNextMonth={handleNextMonth}
         isAgencyView={isAgencyView}
         getBoatColor={getBoatColor}
+        selectedBoatFilter={selectedBoatFilter}
+        allBookingsDisplayFields={calendarDisplay.allBookingsFields}
+        boatTabDisplayFields={calendarDisplay.boatTabFields}
       />
 
       {/* Booking Form Modal */}

@@ -19,10 +19,11 @@ const emptyAddress: ContactAddress = {
   country: '',
 };
 
-const contactTypes: { value: ContactType; label: string }[] = [
+const contactTypeOptions: { value: ContactType; label: string }[] = [
   { value: 'customer', label: 'Customer' },
   { value: 'vendor', label: 'Vendor' },
-  { value: 'both', label: 'Both' },
+  { value: 'agency', label: 'Agency' },
+  { value: 'boat_operator', label: 'Boat Operator' },
 ];
 
 export function ContactFormModal({
@@ -35,7 +36,7 @@ export function ContactFormModal({
 
   // Form state
   const [name, setName] = useState('');
-  const [type, setType] = useState<ContactType>('customer');
+  const [types, setTypes] = useState<ContactType[]>(['customer']);
   const [contactPerson, setContactPerson] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
@@ -57,7 +58,7 @@ export function ContactFormModal({
     if (isOpen) {
       if (editingContact) {
         setName(editingContact.name);
-        setType(editingContact.type);
+        setTypes(editingContact.type);
         setContactPerson(editingContact.contactPerson || '');
         setEmail(editingContact.email || '');
         setPhone(editingContact.phone || '');
@@ -71,7 +72,7 @@ export function ContactFormModal({
       } else {
         // Reset for new contact
         setName('');
-        setType('customer');
+        setTypes(['customer']);
         setContactPerson('');
         setEmail('');
         setPhone('');
@@ -112,6 +113,7 @@ export function ContactFormModal({
     const newErrors: Record<string, string> = {};
 
     if (!name.trim()) newErrors.name = 'Name is required';
+    if (types.length === 0) newErrors.type = 'At least one type is required';
     if (email && !validateEmail(email)) newErrors.email = 'Invalid email format';
 
     setErrors(newErrors);
@@ -128,7 +130,7 @@ export function ContactFormModal({
 
     const contactData: Partial<Contact> = {
       name: name.trim(),
-      type,
+      type: types,
       contactPerson: contactPerson.trim() || undefined,
       email: email.trim() || undefined,
       phone: phone.trim() || undefined,
@@ -203,21 +205,31 @@ export function ContactFormModal({
                 </div>
 
                 <div>
-                  <label htmlFor="contact-type" className="block text-sm font-medium text-gray-700 mb-1">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
                     Type
                   </label>
-                  <select
-                    id="contact-type"
-                    value={type}
-                    onChange={(e) => setType(e.target.value as ContactType)}
-                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#5A7A8F]/20 focus:border-[#5A7A8F]"
-                  >
-                    {contactTypes.map((t) => (
-                      <option key={t.value} value={t.value}>
-                        {t.label}
-                      </option>
+                  <div className="flex flex-wrap gap-3 py-1">
+                    {contactTypeOptions.map((t) => (
+                      <label key={t.value} className="flex items-center gap-1.5 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={types.includes(t.value)}
+                          onChange={() => {
+                            setTypes(prev =>
+                              prev.includes(t.value)
+                                ? prev.filter(x => x !== t.value)
+                                : [...prev, t.value]
+                            );
+                          }}
+                          className="rounded border-gray-300 text-[#5A7A8F] focus:ring-[#5A7A8F]"
+                        />
+                        <span className="text-sm text-gray-700">{t.label}</span>
+                      </label>
                     ))}
-                  </select>
+                  </div>
+                  {types.length === 0 && (
+                    <p className="mt-1 text-xs text-red-600">At least one type is required</p>
+                  )}
                 </div>
 
                 <div>

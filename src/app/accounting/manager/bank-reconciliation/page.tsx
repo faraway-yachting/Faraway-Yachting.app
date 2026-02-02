@@ -13,6 +13,7 @@ import { ImportSyncModal } from "@/components/banking/ImportSyncModal";
 import { ExportOptionsModal } from "@/components/banking/ExportOptionsModal";
 import { FilterInfoBanner } from "@/components/banking/FilterInfoBanner";
 import { CreateTransactionModal } from "@/components/banking/CreateTransactionModal";
+import BeamTransactionsPanel from "@/components/banking/BeamTransactionsPanel";
 import {
   mockBankAccountCoverage,
   getReconciliationStats,
@@ -59,6 +60,9 @@ export default function BankReconciliationPage() {
   const [selectedStatuses, setSelectedStatuses] = useState<BankFeedStatus[]>([]);
   const [viewMode, setViewMode] = useState<ViewMode>("bank-first");
   const [showUnassignedLines, setShowUnassignedLines] = useState(true);
+  const [activeTab, setActiveTab] = useState<'bank-feed' | 'beam' | 'deleted'>('bank-feed');
+  const [deletedLines, setDeletedLines] = useState<BankFeedLine[]>([]);
+  const [loadingDeleted, setLoadingDeleted] = useState(false);
 
   // Selection state
   const [selectedLineId, setSelectedLineId] = useState<string | undefined>();
@@ -213,6 +217,9 @@ export default function BankReconciliationPage() {
 
   // Then apply additional filters (bank accounts, currency, status)
   const filteredBankLines = bankLinesInScope.filter((line) => {
+    // Safety: exclude deleted lines from normal view
+    if (line.status === 'deleted') return false;
+
     // Bank account filter (subset of scope)
     if (selectedBankAccountIds.length > 0 && !selectedBankAccountIds.includes(line.bankAccountId)) {
       return false;
@@ -453,6 +460,87 @@ export default function BankReconciliationPage() {
     }
   };
 
+  const handleDeleteLine = async (lineId: string) => {
+    try {
+      await bankFeedLinesApi.delete(lineId);
+      if (selectedLineId === lineId) setSelectedLineId(undefined);
+      triggerRefresh();
+    } catch (error) {
+      console.error('Failed to delete transaction:', error);
+    }
+  };
+
+  // Load deleted lines when Deleted tab is active
+  useEffect(() => {
+    if (activeTab !== 'deleted') return;
+    const loadDeleted = async () => {
+      setLoadingDeleted(true);
+      try {
+        const companyIds = companies.map(c => c.id);
+        if (companyIds.length === 0) return;
+        const data = await bankFeedLinesApi.getDeleted(companyIds);
+        setDeletedLines(data.map((line: BankFeedLineWithMatches): BankFeedLine => ({
+          id: line.id,
+          bankAccountId: line.bank_account_id,
+          companyId: line.company_id,
+          projectId: line.project_id || undefined,
+          currency: line.currency as Currency,
+          transactionDate: line.transaction_date,
+          valueDate: line.value_date,
+          description: line.description,
+          reference: line.reference || undefined,
+          amount: line.amount,
+          runningBalance: line.running_balance ?? undefined,
+          status: line.status as BankFeedStatus,
+          matchedAmount: line.matched_amount,
+          confidenceScore: line.confidence_score ?? undefined,
+          matches: (line.matches || []).map(m => ({
+            id: m.id,
+            bankFeedLineId: m.bank_feed_line_id,
+            systemRecordType: m.system_record_type as TransactionType,
+            systemRecordId: m.system_record_id,
+            projectId: m.project_id || undefined,
+            matchedAmount: m.matched_amount,
+            amountDifference: m.amount_difference,
+            matchedBy: m.matched_by,
+            matchedAt: m.matched_at,
+            matchScore: m.match_score,
+            matchMethod: m.match_method as 'manual' | 'rule' | 'suggested',
+            ruleId: m.rule_id || undefined,
+            adjustmentRequired: m.adjustment_required,
+            adjustmentReason: m.adjustment_reason || undefined,
+            adjustmentJournalId: m.adjustment_journal_id || undefined,
+          })),
+          importedAt: line.imported_at,
+          importedBy: line.imported_by || 'system',
+          importSource: line.import_source,
+          notes: line.notes || undefined,
+          attachments: line.attachments || undefined,
+          matchedBy: line.matched_by || undefined,
+          matchedAt: line.matched_at || undefined,
+          ignoredBy: line.ignored_by || undefined,
+          ignoredAt: line.ignored_at || undefined,
+          ignoredReason: line.ignored_reason || undefined,
+        })));
+      } catch (error) {
+        console.error('Failed to load deleted lines:', error);
+      } finally {
+        setLoadingDeleted(false);
+      }
+    };
+    loadDeleted();
+  }, [activeTab, companies, refreshKey]);
+
+  const handleRestoreLine = async (lineId: string) => {
+    try {
+      await bankFeedLinesApi.restore(lineId);
+      setDeletedLines(prev => prev.filter(l => l.id !== lineId));
+      triggerRefresh();
+    } catch (error) {
+      console.error('Failed to restore transaction:', error);
+    }
+  };
+
   const handleAcceptSuggestion = async (suggestion: SuggestedMatch) => {
     if (!selectedLine) return;
 
@@ -630,8 +718,111 @@ export default function BankReconciliationPage() {
             onImport={handleScopeImport}
             onExport={handleScopeExport}
           />
+
+          {/* Tab bar */}
+          <div className="flex gap-1 mt-4 border-b border-gray-200">
+            <button
+              onClick={() => setActiveTab('bank-feed')}
+              className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+                activeTab === 'bank-feed'
+                  ? 'border-[#5A7A8F] text-[#5A7A8F]'
+                  : 'border-transparent text-gray-500 hover:text-gray-700'
+              }`}
+            >
+              Bank Feed
+            </button>
+            <button
+              onClick={() => setActiveTab('beam')}
+              className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+                activeTab === 'beam'
+                  ? 'border-[#5A7A8F] text-[#5A7A8F]'
+                  : 'border-transparent text-gray-500 hover:text-gray-700'
+              }`}
+            >
+              Beam Transactions
+            </button>
+            <button
+              onClick={() => setActiveTab('deleted')}
+              className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+                activeTab === 'deleted'
+                  ? 'border-red-500 text-red-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700'
+              }`}
+            >
+              Deleted
+              {deletedLines.length > 0 && (
+                <span className="ml-1.5 inline-flex items-center justify-center px-1.5 py-0.5 text-xs font-medium bg-red-100 text-red-700 rounded-full">
+                  {deletedLines.length}
+                </span>
+              )}
+            </button>
+          </div>
         </div>
 
+        {activeTab === 'deleted' ? (
+          <div className="rounded-lg border border-gray-200 bg-white">
+            <div className="px-4 py-3 border-b border-gray-200 bg-gray-50">
+              <h3 className="text-sm font-semibold text-gray-900">Deleted Transactions</h3>
+              <p className="text-xs text-gray-500 mt-0.5">Transactions removed from the bank feed. You can restore them if needed.</p>
+            </div>
+            {loadingDeleted ? (
+              <div className="text-center py-12">
+                <div className="flex items-center justify-center gap-2 text-gray-500">
+                  <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-[#5A7A8F]"></div>
+                  <span>Loading deleted transactions...</span>
+                </div>
+              </div>
+            ) : deletedLines.length === 0 ? (
+              <div className="text-center py-12">
+                <p className="text-sm text-gray-500">No deleted transactions.</p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Description</th>
+                      <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Amount</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Deleted At</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-200">
+                    {deletedLines.map((line) => (
+                      <tr key={line.id} className="hover:bg-gray-50">
+                        <td className="px-4 py-3 text-sm text-gray-600 whitespace-nowrap">
+                          {new Date(line.transactionDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                        </td>
+                        <td className="px-4 py-3 text-sm text-gray-900 max-w-xs truncate">
+                          {line.description}
+                          {line.reference && <span className="text-xs text-gray-500 ml-2">Ref: {line.reference}</span>}
+                        </td>
+                        <td className={`px-4 py-3 text-sm font-medium text-right whitespace-nowrap ${line.amount >= 0 ? 'text-green-700' : 'text-red-700'}`}>
+                          {new Intl.NumberFormat('en-US', { style: 'currency', currency: line.currency, minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(line.amount)}
+                        </td>
+                        <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">
+                          {line.ignoredAt ? new Date(line.ignoredAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '-'}
+                        </td>
+                        <td className="px-4 py-3">
+                          <button
+                            onClick={() => handleRestoreLine(line.id)}
+                            className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-[#5A7A8F] bg-[#5A7A8F]/10 hover:bg-[#5A7A8F]/20 rounded transition-colors"
+                          >
+                            Restore
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        ) : activeTab === 'beam' ? (
+          <BeamTransactionsPanel dateFrom={dateFrom} dateTo={dateTo} />
+        ) : (
+        <>
         {/* KPI Summary Row */}
         <CoverageCards stats={stats} onFilterByStatus={handleFilterByStatus} />
 
@@ -727,6 +918,7 @@ export default function BankReconciliationPage() {
                 onSelectLine={handleSelectLine}
                 onQuickMatch={handleQuickMatch}
                 onIgnore={handleIgnore}
+                onDelete={handleDeleteLine}
               />
             </div>
 
@@ -745,6 +937,8 @@ export default function BankReconciliationPage() {
             </div>
           </div>
         </div>
+        </>
+        )}
       </div>
 
       {/* Modals */}

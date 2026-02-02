@@ -5,12 +5,13 @@ import { useRouter } from 'next/navigation';
 import { IncomeScopeBar } from '@/components/income/IncomeScopeBar';
 import { AlertsPanel } from '@/components/income/AlertsPanel';
 import { RecentTransactions } from '@/components/income/RecentTransactions';
-import { DollarSign, FileText, Receipt, TrendingUp, Calendar, ArrowUpRight, Plus, Loader2 } from 'lucide-react';
+import { DollarSign, FileText, Receipt, TrendingUp, Calendar, ArrowUpRight, Plus, Loader2, AlertTriangle } from 'lucide-react';
 import { companiesApi } from '@/lib/supabase/api/companies';
 import { invoicesApi } from '@/lib/supabase/api/invoices';
 import { quotationsApi } from '@/lib/supabase/api/quotations';
 import { receiptsApi } from '@/lib/supabase/api/receipts';
 import { projectsApi } from '@/lib/supabase/api/projects';
+import { bookingPaymentsApi, BookingPaymentExtended } from '@/lib/supabase/api/bookingPayments';
 import type { Database } from '@/lib/supabase/database.types';
 
 type Invoice = Database['public']['Tables']['invoices']['Row'];
@@ -41,6 +42,7 @@ export default function IncomeOverviewPage() {
   const [receipts, setReceipts] = useState<ReceiptRow[]>([]);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
+  const [paymentsNeedingAction, setPaymentsNeedingAction] = useState<BookingPaymentExtended[]>([]);
 
   // Fetch data from Supabase
   useEffect(() => {
@@ -49,12 +51,13 @@ export default function IncomeOverviewPage() {
         setLoading(true);
         setError(null);
 
-        const [invoicesData, quotationsData, receiptsData, companiesData, projectsData] = await Promise.all([
+        const [invoicesData, quotationsData, receiptsData, companiesData, projectsData, needingActionData] = await Promise.all([
           invoicesApi.getAll(),
           quotationsApi.getAll(),
           receiptsApi.getAll(),
           companiesApi.getAll(),
           projectsApi.getAll(),
+          bookingPaymentsApi.getNeedingAction(),
         ]);
 
         setInvoices(invoicesData);
@@ -62,6 +65,7 @@ export default function IncomeOverviewPage() {
         setReceipts(receiptsData);
         setCompanies(companiesData);
         setProjects(projectsData);
+        setPaymentsNeedingAction(needingActionData);
       } catch (err) {
         console.error('Error fetching data:', err);
         setError(err instanceof Error ? err.message : 'Failed to load data');
@@ -547,6 +551,43 @@ export default function IncomeOverviewPage() {
         expiringQuotations={transformedExpiringQuotations}
         unreconciledReceipts={transformedUnreconciledReceipts}
       />
+
+      {/* Payments Needing Action */}
+      {paymentsNeedingAction.length > 0 && (
+        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+          <div className="flex items-center gap-2 mb-3">
+            <AlertTriangle className="h-5 w-5 text-yellow-600" />
+            <h3 className="text-sm font-semibold text-yellow-800">
+              Booking Payments Needing Action ({paymentsNeedingAction.length})
+            </h3>
+          </div>
+          <div className="space-y-2">
+            {paymentsNeedingAction.map(p => (
+              <div key={p.id} className="flex items-center justify-between bg-white rounded-lg border border-yellow-100 px-4 py-2">
+                <div className="text-sm text-gray-700">
+                  <span className="font-medium">{p.currency} {Number(p.amount).toLocaleString('en-US', { minimumFractionDigits: 2 })}</span>
+                  <span className="text-gray-400 mx-2">·</span>
+                  <span className="text-gray-500">{p.payment_type}</span>
+                  {p.paid_date && (
+                    <>
+                      <span className="text-gray-400 mx-2">·</span>
+                      <span className="text-gray-500">Paid {new Date(p.paid_date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}</span>
+                    </>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => router.push(`/accounting/manager/income/receipts/new?bookingId=${p.booking_id}&amount=${p.amount}&currency=${p.currency}`)}
+                    className="text-xs px-3 py-1 rounded bg-[#5A7A8F] text-white hover:bg-[#4a6a7f]"
+                  >
+                    Create Receipt
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Secondary Metrics - Operational KPIs */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">

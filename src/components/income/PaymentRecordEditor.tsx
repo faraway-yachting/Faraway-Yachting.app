@@ -7,10 +7,17 @@ import type { Currency } from '@/data/company/types';
 import type { BankAccount } from '@/data/banking/types';
 import { generateId, getTodayISO } from '@/lib/income/utils';
 
+interface BeamGatewayOption {
+  id: string;
+  merchantName: string;
+  merchantId: string;
+}
+
 interface PaymentRecordEditorProps {
   payments: PaymentRecord[];
   onChange: (payments: PaymentRecord[]) => void;
   bankAccounts: BankAccount[];
+  beamGateways?: BeamGatewayOption[];
   currency: Currency;
   netAmountToPay: number;
   readOnly?: boolean;
@@ -20,6 +27,7 @@ export default function PaymentRecordEditor({
   payments,
   onChange,
   bankAccounts,
+  beamGateways = [],
   currency,
   netAmountToPay,
   readOnly = false,
@@ -55,6 +63,11 @@ export default function PaymentRecordEditor({
   const getReceivedAtLabel = (receivedAt: string): string => {
     if (receivedAt === 'cash') return 'Cash';
     if (!receivedAt) return 'Select...';
+    if (receivedAt.startsWith('beam:')) {
+      const gwId = receivedAt.slice(5);
+      const gateway = beamGateways.find((gw) => gw.id === gwId);
+      return gateway ? `Beam - ${gateway.merchantName}` : 'Beam';
+    }
     const account = bankAccounts.find((ba) => ba.id === receivedAt);
     if (account) {
       return `${account.bankInformation.bankName} - ${account.accountNumber}`;
@@ -142,6 +155,15 @@ export default function PaymentRecordEditor({
                           {account.bankInformation.bankName} - {account.accountNumber} ({account.currency})
                         </option>
                       ))}
+                      {beamGateways.length > 0 && (
+                        <optgroup label="Beam Payment Gateway">
+                          {beamGateways.map((gw) => (
+                            <option key={gw.id} value={`beam:${gw.id}`}>
+                              Beam - {gw.merchantName}
+                            </option>
+                          ))}
+                        </optgroup>
+                      )}
                     </select>
                   </td>
                   <td className="px-4 py-3">

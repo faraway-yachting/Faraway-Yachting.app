@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { AppShell } from "@/components/accounting/AppShell";
-import { Settings as SettingsIcon, Building2, Users, Bell, CreditCard, Edit2, Anchor, FileText, Wallet, Trash2, Hash, Loader2, Upload } from "lucide-react";
+import { Settings as SettingsIcon, Building2, Users, Bell, CreditCard, Edit2, Anchor, FileText, Wallet, Trash2, Hash, Loader2, Upload, Zap, Calendar } from "lucide-react";
 import { Company } from "@/data/company/types";
 import { CompanyFormModal } from "@/components/company/CompanyFormModal";
 import { companiesApi, projectsApi, bankAccountsApi } from "@/lib/supabase/api";
@@ -34,6 +34,10 @@ import { NumberFormatSettings } from "@/components/settings/NumberFormatSettings
 import { UserManagementModal } from "@/components/settings/UserManagementModal";
 import { ImportPriorYearModal } from "@/components/accounting/ImportPriorYearModal";
 import { JournalEventSettings } from "@/components/accounting/JournalEventSettings";
+import { beamMerchantAccountsApi } from "@/lib/supabase/api/beamMerchantAccounts";
+import type { BeamMerchantAccount } from "@/data/beam/types";
+import { financialPeriodsApi } from "@/lib/supabase/api/financialPeriods";
+import type { FinancialPeriod } from "@/lib/supabase/api/financialPeriods";
 
 export default function SettingsPage() {
   // Loading and error states
@@ -78,10 +82,11 @@ export default function SettingsPage() {
       setLoading(true);
       setError(null);
       try {
-        const [companiesData, projectsData, walletsData] = await Promise.all([
+        const [companiesData, projectsData, walletsData, gatewaysData] = await Promise.all([
           companiesApi.getAll(),
           projectsApi.getAll(),
           pettyCashApi.getAllWallets(),
+          beamMerchantAccountsApi.getAll(),
         ]);
         const transformedCompanies = companiesData.map(dbCompanyToFrontend);
         setCompanies(transformedCompanies);
@@ -104,6 +109,8 @@ export default function SettingsPage() {
           createdAt: w.created_at,
           updatedAt: w.updated_at,
         })));
+
+        setGateways(gatewaysData);
 
         // Set initial selected company to "all" to show all bank accounts
         if (!selectedCompanyId) {
@@ -150,11 +157,115 @@ export default function SettingsPage() {
     ? wallets
     : wallets.filter(w => w.status === 'active');
 
+  // Payment Gateway state
+  const [gateways, setGateways] = useState<Array<{
+    id: string;
+    merchant_id: string;
+    merchant_name: string;
+    company_id: string;
+    settlement_bank_account_id: string | null;
+    is_active: boolean;
+    notes: string | null;
+    company?: { id: string; name: string } | null;
+  }>>([]);
+  const [isGatewayModalOpen, setIsGatewayModalOpen] = useState(false);
+  const [editingGateway, setEditingGateway] = useState<typeof gateways[0] | null>(null);
+  const [gatewayForm, setGatewayForm] = useState({
+    merchant_id: '',
+    merchant_name: '',
+    company_id: '',
+    settlement_bank_account_id: '',
+    is_active: true,
+    notes: '',
+  });
+  const [gatewaySaving, setGatewaySaving] = useState(false);
+
   // User Management state
   const [isUserManagementModalOpen, setIsUserManagementModalOpen] = useState(false);
 
   // Import Prior Year state
   const [isImportPriorYearModalOpen, setIsImportPriorYearModalOpen] = useState(false);
+
+  // Financial Periods state
+  const [fpCompanyId, setFpCompanyId] = useState<string>("");
+  const [financialPeriods, setFinancialPeriods] = useState<FinancialPeriod[]>([]);
+  const [fpLoading, setFpLoading] = useState(false);
+  const [fpActionLoading, setFpActionLoading] = useState<string | null>(null);
+
+  // Generate last 24 months + current month period strings
+  const generatePeriodStrings = (): string[] => {
+    const periods: string[] = [];
+    const now = new Date();
+    for (let i = 0; i <= 24; i++) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      periods.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+    }
+    return periods;
+  };
+
+  const allPeriodStrings = generatePeriodStrings();
+
+  // Fetch financial periods when company changes
+  useEffect(() => {
+    const fetchFinancialPeriods = async () => {
+      if (!fpCompanyId) {
+        setFinancialPeriods([]);
+        return;
+      }
+      setFpLoading(true);
+      try {
+        const data = await financialPeriodsApi.getAll(fpCompanyId);
+        setFinancialPeriods(data);
+      } catch (e) {
+        console.error('Failed to fetch financial periods:', e);
+      } finally {
+        setFpLoading(false);
+      }
+    };
+    fetchFinancialPeriods();
+  }, [fpCompanyId]);
+
+  const refreshFinancialPeriods = async () => {
+    if (!fpCompanyId) return;
+    try {
+      const data = await financialPeriodsApi.getAll(fpCompanyId);
+      setFinancialPeriods(data);
+    } catch (e) {
+      console.error('Failed to refresh financial periods:', e);
+    }
+  };
+
+  const handleClosePeriod = async (period: string) => {
+    if (!fpCompanyId) return;
+    setFpActionLoading(period);
+    try {
+      // Use a placeholder userId - in production this would come from auth context
+      await financialPeriodsApi.closePeriod(fpCompanyId, period, 'current-user');
+      await refreshFinancialPeriods();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Failed to close period');
+    } finally {
+      setFpActionLoading(null);
+    }
+  };
+
+  const handleReopenPeriod = async (period: string) => {
+    if (!fpCompanyId) return;
+    if (!confirm(`Are you sure you want to reopen period ${period}?`)) return;
+    setFpActionLoading(period);
+    try {
+      await financialPeriodsApi.reopenPeriod(fpCompanyId, period);
+      await refreshFinancialPeriods();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Failed to reopen period');
+    } finally {
+      setFpActionLoading(null);
+    }
+  };
+
+  const getPeriodRecord = (period: string): FinancialPeriod | undefined => {
+    return financialPeriods.find(fp => fp.period === period);
+  };
 
   // PDF Settings state
   const [pdfDocumentType, setPdfDocumentType] = useState<DocumentType>('quotation');
@@ -246,6 +357,81 @@ export default function SettingsPage() {
       console.error('Failed to refresh wallets:', e);
     }
   };
+
+  // Gateway helpers
+  const refreshGateways = async () => {
+    try {
+      const data = await beamMerchantAccountsApi.getAll();
+      setGateways(data);
+    } catch (e) {
+      console.error('Failed to refresh gateways:', e);
+    }
+  };
+
+  const openGatewayModal = (gateway?: typeof gateways[0]) => {
+    if (gateway) {
+      setEditingGateway(gateway);
+      setGatewayForm({
+        merchant_id: gateway.merchant_id,
+        merchant_name: gateway.merchant_name,
+        company_id: gateway.company_id,
+        settlement_bank_account_id: gateway.settlement_bank_account_id || '',
+        is_active: gateway.is_active,
+        notes: gateway.notes || '',
+      });
+    } else {
+      setEditingGateway(null);
+      setGatewayForm({ merchant_id: '', merchant_name: '', company_id: '', settlement_bank_account_id: '', is_active: true, notes: '' });
+    }
+    setIsGatewayModalOpen(true);
+  };
+
+  const handleGatewaySave = async () => {
+    setGatewaySaving(true);
+    try {
+      const payload = {
+        merchant_id: gatewayForm.merchant_id,
+        merchant_name: gatewayForm.merchant_name,
+        company_id: gatewayForm.company_id,
+        settlement_bank_account_id: gatewayForm.settlement_bank_account_id || null,
+        is_active: gatewayForm.is_active,
+        notes: gatewayForm.notes || null,
+      };
+      if (editingGateway) {
+        await beamMerchantAccountsApi.update(editingGateway.id, payload);
+      } else {
+        await beamMerchantAccountsApi.create(payload);
+      }
+      setIsGatewayModalOpen(false);
+      setEditingGateway(null);
+      await refreshGateways();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Failed to save gateway');
+    } finally {
+      setGatewaySaving(false);
+    }
+  };
+
+  const handleDeleteGateway = async (id: string) => {
+    if (confirm('Are you sure you want to delete this payment gateway?')) {
+      try {
+        await beamMerchantAccountsApi.delete(id);
+        await refreshGateways();
+      } catch (e) {
+        console.error('Failed to delete gateway:', e);
+      }
+    }
+  };
+
+  // All bank accounts for gateway form dropdown
+  const [allBankAccounts, setAllBankAccounts] = useState<BankAccount[]>([]);
+  useEffect(() => {
+    bankAccountsApi.getAll().then(data => setAllBankAccounts(data.map(dbBankAccountToFrontend))).catch(() => {});
+  }, []);
+
+  const gatewayBankAccounts = allBankAccounts.filter(ba =>
+    gatewayForm.company_id ? ba.companyId === gatewayForm.company_id : false
+  );
 
   // Company event handlers
   const handleEditCompany = (company: Company) => {
@@ -378,6 +564,122 @@ export default function SettingsPage() {
         </div>
       ) : (
       <div className="space-y-6">
+        {/* Financial Periods */}
+        <div className="rounded-lg border border-gray-200 bg-white p-6">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-3">
+              <Calendar className="h-5 w-5 text-[#5A7A8F]" />
+              <h2 className="text-lg font-semibold text-gray-900">Financial Periods</h2>
+            </div>
+          </div>
+
+          <p className="text-sm text-gray-600 mb-4">
+            Manage open and closed accounting periods. Closing a period prevents new journal entries from being posted to it.
+          </p>
+
+          {/* Company Selector */}
+          <div className="mb-4">
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Select Company
+            </label>
+            <select
+              value={fpCompanyId}
+              onChange={(e) => setFpCompanyId(e.target.value)}
+              className="w-full rounded-md border-gray-300 shadow-sm focus:border-[#5A7A8F] focus:ring-[#5A7A8F]"
+            >
+              <option value="">Select a company...</option>
+              {companies.filter(c => c.isActive).map((company) => (
+                <option key={company.id} value={company.id}>
+                  {company.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {!fpCompanyId ? (
+            <div className="text-center py-8 text-gray-500">
+              <p>Select a company to view financial periods</p>
+            </div>
+          ) : fpLoading ? (
+            <div className="text-center py-8 text-gray-500">
+              <div className="flex items-center justify-center gap-2">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                <span>Loading periods...</span>
+              </div>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Period</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Closed By</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Closed At</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {allPeriodStrings.map((period) => {
+                    const record = getPeriodRecord(period);
+                    const status = record?.status || 'open';
+                    const isCurrentAction = fpActionLoading === period;
+                    return (
+                      <tr key={period}>
+                        <td className="px-4 py-3 text-sm font-mono text-gray-900">{period}</td>
+                        <td className="px-4 py-3">
+                          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                            status === 'open'
+                              ? 'bg-green-100 text-green-800'
+                              : status === 'closed'
+                              ? 'bg-yellow-100 text-yellow-800'
+                              : 'bg-red-100 text-red-800'
+                          }`}>
+                            {status.charAt(0).toUpperCase() + status.slice(1)}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-sm text-gray-600">
+                          {record?.closed_by || '-'}
+                        </td>
+                        <td className="px-4 py-3 text-sm text-gray-600">
+                          {record?.closed_at
+                            ? new Date(record.closed_at).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+                            : '-'}
+                        </td>
+                        <td className="px-4 py-3 text-sm">
+                          {status === 'open' && (
+                            <button
+                              onClick={() => handleClosePeriod(period)}
+                              disabled={isCurrentAction}
+                              className="text-sm bg-[#5A7A8F] text-white px-3 py-1 rounded hover:bg-[#2c3e50] transition-colors disabled:opacity-50 inline-flex items-center gap-1"
+                            >
+                              {isCurrentAction && <Loader2 className="h-3 w-3 animate-spin" />}
+                              Close Period
+                            </button>
+                          )}
+                          {status === 'closed' && (
+                            <button
+                              onClick={() => handleReopenPeriod(period)}
+                              disabled={isCurrentAction}
+                              className="text-sm border border-[#5A7A8F] text-[#5A7A8F] px-3 py-1 rounded hover:bg-[#5A7A8F] hover:text-white transition-colors disabled:opacity-50 inline-flex items-center gap-1"
+                            >
+                              {isCurrentAction && <Loader2 className="h-3 w-3 animate-spin" />}
+                              Reopen
+                            </button>
+                          )}
+                          {status === 'locked' && (
+                            <span className="text-xs text-gray-400 italic">Locked</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+
         {/* Company Settings */}
         <div className="rounded-lg border border-gray-200 bg-white p-6">
           <div className="flex items-center justify-between mb-4">
@@ -582,6 +884,86 @@ export default function SettingsPage() {
                         >
                           <Edit2 className="h-4 w-4" />
                         </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+
+        {/* Payment Gateways Section */}
+        <div className="rounded-lg border border-gray-200 bg-white p-6">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-3">
+              <Zap className="h-5 w-5 text-[#5A7A8F]" />
+              <h2 className="text-lg font-semibold text-gray-900">Payment Gateways</h2>
+            </div>
+            <button
+              onClick={() => openGatewayModal()}
+              className="text-sm bg-[#5A7A8F] text-white px-4 py-2 rounded-lg hover:bg-[#2c3e50] transition-colors inline-flex items-center gap-2"
+            >
+              + Add Gateway
+            </button>
+          </div>
+
+          <p className="text-sm text-gray-600 mb-4">
+            Manage Beam payment gateway merchant accounts and their settlement bank accounts.
+          </p>
+
+          {gateways.length === 0 ? (
+            <div className="text-center py-8 text-gray-500">
+              <p>No payment gateways configured</p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Merchant ID</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Company</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Settlement Bank Account</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {gateways.map((gw) => (
+                    <tr key={gw.id} className={!gw.is_active ? 'bg-gray-50' : ''}>
+                      <td className="px-4 py-3 text-sm font-mono text-gray-900">{gw.merchant_id}</td>
+                      <td className="px-4 py-3 text-sm font-medium text-gray-900">{gw.merchant_name}</td>
+                      <td className="px-4 py-3 text-sm text-gray-600">{gw.company?.name || 'Unknown'}</td>
+                      <td className="px-4 py-3 text-sm text-gray-600">
+                        {gw.settlement_bank_account_id
+                          ? allBankAccounts.find(ba => ba.id === gw.settlement_bank_account_id)?.accountName || 'Linked'
+                          : <span className="text-gray-400">Not set</span>}
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                          gw.is_active ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
+                        }`}>
+                          {gw.is_active ? 'Active' : 'Inactive'}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-sm">
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => openGatewayModal(gw)}
+                            className="text-[#5A7A8F] hover:text-[#2c3e50] transition-colors"
+                            title="Edit gateway"
+                          >
+                            <Edit2 className="h-4 w-4" />
+                          </button>
+                          <button
+                            onClick={() => handleDeleteGateway(gw.id)}
+                            className="text-red-400 hover:text-red-600 transition-colors"
+                            title="Delete gateway"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -1228,6 +1610,103 @@ export default function SettingsPage() {
         isOpen={isUserManagementModalOpen}
         onClose={() => setIsUserManagementModalOpen(false)}
       />
+
+      {/* Gateway Modal */}
+      {isGatewayModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-lg p-6 mx-4">
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">
+              {editingGateway ? 'Edit Payment Gateway' : 'Add Payment Gateway'}
+            </h3>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Merchant ID</label>
+                <input
+                  type="text"
+                  value={gatewayForm.merchant_id}
+                  onChange={(e) => setGatewayForm(f => ({ ...f, merchant_id: e.target.value }))}
+                  placeholder="e.g. farawayyacht"
+                  className="w-full rounded-md border-gray-300 shadow-sm focus:border-[#5A7A8F] focus:ring-[#5A7A8F]"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Merchant Name</label>
+                <input
+                  type="text"
+                  value={gatewayForm.merchant_name}
+                  onChange={(e) => setGatewayForm(f => ({ ...f, merchant_name: e.target.value }))}
+                  placeholder="e.g. Faraway Yachting - Beam"
+                  className="w-full rounded-md border-gray-300 shadow-sm focus:border-[#5A7A8F] focus:ring-[#5A7A8F]"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Company</label>
+                <select
+                  value={gatewayForm.company_id}
+                  onChange={(e) => setGatewayForm(f => ({ ...f, company_id: e.target.value, settlement_bank_account_id: '' }))}
+                  className="w-full rounded-md border-gray-300 shadow-sm focus:border-[#5A7A8F] focus:ring-[#5A7A8F]"
+                >
+                  <option value="">Select company...</option>
+                  {companies.filter(c => c.isActive).map(c => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Settlement Bank Account</label>
+                <select
+                  value={gatewayForm.settlement_bank_account_id}
+                  onChange={(e) => setGatewayForm(f => ({ ...f, settlement_bank_account_id: e.target.value }))}
+                  className="w-full rounded-md border-gray-300 shadow-sm focus:border-[#5A7A8F] focus:ring-[#5A7A8F]"
+                  disabled={!gatewayForm.company_id}
+                >
+                  <option value="">Select bank account...</option>
+                  {gatewayBankAccounts.filter(ba => ba.isActive).map(ba => (
+                    <option key={ba.id} value={ba.id}>{ba.accountName} - {ba.accountNumber}</option>
+                  ))}
+                </select>
+                {!gatewayForm.company_id && (
+                  <p className="text-xs text-gray-500 mt-1">Select a company first</p>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  id="gatewayActive"
+                  checked={gatewayForm.is_active}
+                  onChange={(e) => setGatewayForm(f => ({ ...f, is_active: e.target.checked }))}
+                  className="rounded border-gray-300 text-[#5A7A8F] focus:ring-[#5A7A8F]"
+                />
+                <label htmlFor="gatewayActive" className="text-sm text-gray-700">Active</label>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
+                <textarea
+                  value={gatewayForm.notes}
+                  onChange={(e) => setGatewayForm(f => ({ ...f, notes: e.target.value }))}
+                  rows={2}
+                  className="w-full rounded-md border-gray-300 shadow-sm focus:border-[#5A7A8F] focus:ring-[#5A7A8F]"
+                />
+              </div>
+            </div>
+            <div className="flex justify-end gap-3 mt-6">
+              <button
+                onClick={() => setIsGatewayModalOpen(false)}
+                className="px-4 py-2 text-sm text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleGatewaySave}
+                disabled={gatewaySaving || !gatewayForm.merchant_id || !gatewayForm.merchant_name || !gatewayForm.company_id}
+                className="px-4 py-2 text-sm text-white bg-[#5A7A8F] rounded-lg hover:bg-[#2c3e50] transition-colors disabled:opacity-50"
+              >
+                {gatewaySaving ? 'Saving...' : editingGateway ? 'Update' : 'Add'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Import Prior Year Modal */}
       <ImportPriorYearModal

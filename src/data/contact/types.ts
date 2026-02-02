@@ -7,7 +7,7 @@
 
 import { Currency } from '@/data/company/types';
 
-export type ContactType = 'customer' | 'vendor' | 'both';
+export type ContactType = 'customer' | 'vendor' | 'agency' | 'boat_operator';
 
 export interface ContactAddress {
   street?: string;
@@ -20,7 +20,7 @@ export interface ContactAddress {
 export interface Contact {
   id: string;
   name: string; // Company or individual name
-  type: ContactType; // customer, vendor, or both
+  type: ContactType[]; // array of types: customer, vendor, agency, boat_operator
   contactPerson?: string; // Primary contact person name
   email?: string;
   phone?: string;

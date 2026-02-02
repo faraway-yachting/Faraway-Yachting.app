@@ -37,11 +37,12 @@ import {
 import { useAuth } from '@/components/auth';
 
 // Supabase API imports
-import { pettyCashApi } from '@/lib/supabase/api/pettyCash';
+import { pettyCashApi, type PettyCashReimbursement as SupabaseReimbursement } from '@/lib/supabase/api/pettyCash';
 import { companiesApi } from '@/lib/supabase/api/companies';
 import { projectsApi } from '@/lib/supabase/api/projects';
 import type { Database } from '@/lib/supabase/database.types';
 import type { Currency } from '@/data/company/types';
+import type { VatType } from '@/data/petty-cash/types';
 
 // Mock data imports (still needed for some features not yet migrated)
 import {
@@ -62,12 +63,9 @@ import {
 import type { SimplifiedExpenseInput } from '@/data/petty-cash/expenses';
 import {
   getAllReimbursements,
-  getPendingReimbursements,
-  getTotalPendingReimbursements,
   approveReimbursement,
   processReimbursementPayment,
   rejectReimbursement,
-  getReimbursementsByWallet,
   getPendingAmountForWallet,
   createReimbursement,
 } from '@/data/petty-cash/reimbursements';
@@ -190,6 +188,7 @@ export default function PettyCashManagementPage() {
 
   // Supabase-loaded data for My Wallet view
   const [myWalletExpensesDb, setMyWalletExpensesDb] = useState<SupabaseExpense[]>([]);
+  const [myWalletReimbursementsDb, setMyWalletReimbursementsDb] = useState<SupabaseReimbursement[]>([]);
   const [companies, setCompanies] = useState<{ id: string; name: string }[]>([]);
   const [projects, setProjects] = useState<{ id: string; name: string; code: string }[]>([]);
   const [isLoadingData, setIsLoadingData] = useState(true);
@@ -256,11 +255,16 @@ export default function PettyCashManagementPage() {
             setMyWallet(activeWallet);
           }
 
-          // Also fetch expenses for this wallet from Supabase
-          const expensesData = await pettyCashApi.getExpensesByWallet(activeWallet.id);
+          // Also fetch expenses and reimbursements for this wallet from Supabase
+          const [expensesData, reimbursementsData] = await Promise.all([
+            pettyCashApi.getExpensesByWallet(activeWallet.id),
+            pettyCashApi.getReimbursementsByWallet(activeWallet.id),
+          ]);
           setMyWalletExpensesDb(expensesData);
+          setMyWalletReimbursementsDb(reimbursementsData);
         } else {
           setMyWallet(null);
+          setMyWalletReimbursementsDb([]);
         }
       } catch (error) {
         console.error('Error fetching my wallet:', error);
@@ -338,9 +342,151 @@ export default function PettyCashManagementPage() {
     });
   }, [allExpensesDb, companies, projects, allWalletsDb]);
 
-  // Still using mock data for reimbursements (to be migrated later)
+  // Still using mock data for all reimbursements list
   const reimbursements = useMemo(() => getAllReimbursements(), [refreshKey]);
-  const pendingReimbursements = useMemo(() => getPendingReimbursements(), [refreshKey]);
+
+  // Fetch pending reimbursements from Supabase
+  const [pendingReimbursements, setPendingReimbursements] = useState<PettyCashReimbursement[]>([]);
+  const [isLoadingPendingReimbursements, setIsLoadingPendingReimbursements] = useState(true);
+
+  useEffect(() => {
+    const fetchPendingReimbursements = async () => {
+      setIsLoadingPendingReimbursements(true);
+      try {
+        // Fetch reimbursements and all expenses in parallel
+        const [reimbursementsData, expensesData] = await Promise.all([
+          pettyCashApi.getPendingReimbursementsWithDetails(),
+          pettyCashApi.getAllExpenses(),
+        ]);
+
+        // Find submitted expenses that don't have reimbursements
+        const existingExpenseIds = new Set(reimbursementsData.map(r => r.expense_id));
+        const submittedExpensesWithoutReimbursement = expensesData.filter(
+          e => e.status === 'submitted' && !existingExpenseIds.has(e.id) && e.company_id
+        );
+
+        // Auto-create reimbursements for submitted expenses that don't have them
+        const createdReimbursements = await Promise.all(
+          submittedExpensesWithoutReimbursement.map(async (expense) => {
+            try {
+              const reimbursement = await pettyCashApi.createReimbursementWithNumber({
+                wallet_id: expense.wallet_id,
+                expense_id: expense.id,
+                amount: expense.amount || 0,
+                final_amount: expense.amount || 0,
+                company_id: expense.company_id!,
+                status: 'pending' as const,
+                // Optional fields - set to null for auto-created reimbursements
+                bank_account_id: null,
+                payment_date: null,
+                payment_reference: null,
+                adjustment_amount: null,
+                adjustment_reason: null,
+                approved_by: null,
+                rejected_by: null,
+                rejection_reason: null,
+                bank_feed_line_id: null,
+                created_by: null,
+              });
+              console.log(`Auto-created reimbursement for expense ${expense.expense_number}`);
+              return reimbursement;
+            } catch (error) {
+              console.error(`Failed to auto-create reimbursement for expense ${expense.expense_number}:`, error);
+              return null;
+            }
+          })
+        );
+
+        // If we created any new reimbursements, refresh the data
+        let finalData = reimbursementsData;
+        if (createdReimbursements.some(r => r !== null)) {
+          // Refetch to get complete data with wallet/company details
+          finalData = await pettyCashApi.getPendingReimbursementsWithDetails();
+        }
+
+        const transformed = finalData.map((r) => ({
+          id: r.id,
+          reimbursementNumber: r.reimbursement_number || '',
+          walletId: r.wallet_id,
+          walletHolderName: r.wallet_holder_name || '',
+          expenseId: r.expense_id || '',
+          companyId: '',
+          companyName: r.company_name || '',
+          amount: Number(r.amount) || 0,
+          finalAmount: Number(r.final_amount) || Number(r.amount) || 0,
+          status: r.status as 'pending' | 'approved' | 'paid' | 'rejected',
+          createdAt: r.created_at || '',
+          createdBy: r.created_by || '',
+          updatedAt: r.updated_at || '',
+          notes: '',
+          expenseNumber: '',
+        }));
+        setPendingReimbursements(transformed);
+      } catch (error) {
+        console.error('Failed to fetch pending reimbursements:', error);
+        setPendingReimbursements([]);
+      } finally {
+        setIsLoadingPendingReimbursements(false);
+      }
+    };
+    fetchPendingReimbursements();
+  }, [refreshKey]);
+
+  // Fetch approved reimbursements (Payment Queue) from Supabase
+  const [approvedReimbursements, setApprovedReimbursements] = useState<PettyCashReimbursement[]>([]);
+  const [isLoadingApprovedReimbursements, setIsLoadingApprovedReimbursements] = useState(true);
+
+  useEffect(() => {
+    const fetchApprovedReimbursements = async () => {
+      setIsLoadingApprovedReimbursements(true);
+      try {
+        const data = await pettyCashApi.getReimbursementsByStatus('approved');
+        const transformed = data.map((r) => ({
+          id: r.id,
+          reimbursementNumber: r.reimbursement_number || '',
+          walletId: r.wallet_id,
+          walletHolderName: '',
+          expenseId: r.expense_id || '',
+          companyId: r.company_id || '',
+          companyName: '',
+          amount: Number(r.amount) || 0,
+          finalAmount: Number(r.final_amount) || Number(r.amount) || 0,
+          status: r.status as 'pending' | 'approved' | 'paid' | 'rejected',
+          createdAt: r.created_at || '',
+          createdBy: r.created_by || '',
+          updatedAt: r.updated_at || '',
+          notes: '',
+          expenseNumber: '',
+        }));
+        setApprovedReimbursements(transformed);
+      } catch (error) {
+        console.error('Failed to fetch approved reimbursements:', error);
+        setApprovedReimbursements([]);
+      } finally {
+        setIsLoadingApprovedReimbursements(false);
+      }
+    };
+    fetchApprovedReimbursements();
+  }, [refreshKey]);
+
+  // Group approved reimbursements by company for Payment Queue
+  const paymentQueueByCompany = useMemo(() => {
+    const grouped = new Map<string, { companyId: string; companyName: string; claims: typeof approvedReimbursements; total: number }>();
+    approvedReimbursements.forEach((rmb) => {
+      const companyId = rmb.companyId || 'unassigned';
+      const company = companies.find(c => c.id === companyId);
+      const existing = grouped.get(companyId) || {
+        companyId,
+        companyName: company?.name || 'Unassigned',
+        claims: [],
+        total: 0,
+      };
+      existing.claims.push(rmb);
+      existing.total += rmb.finalAmount;
+      grouped.set(companyId, existing);
+    });
+    return Array.from(grouped.values());
+  }, [approvedReimbursements, companies]);
 
   // Calculate low balance wallets from Supabase data
   const lowBalanceWallets = useMemo(() => {
@@ -403,7 +549,10 @@ export default function PettyCashManagementPage() {
     return wallets.reduce((sum, w) => sum + (w.balance || 0), 0);
   }, [wallets]);
 
-  const pendingStats = useMemo(() => getTotalPendingReimbursements(), [refreshKey]);
+  const pendingStats = useMemo(() => ({
+    count: pendingReimbursements.length,
+    amount: pendingReimbursements.reduce((sum, r) => sum + r.amount, 0),
+  }), [pendingReimbursements]);
 
   // Monthly expenses calculation from Supabase data
   const monthlyExpenses = useMemo(() => {
@@ -412,27 +561,6 @@ export default function PettyCashManagementPage() {
     return allExpenses
       .filter((e) => e.expenseDate >= monthStart && e.expenseDate <= monthEnd)
       .reduce((sum, e) => sum + e.netAmount, 0);
-  }, [allExpenses]);
-
-  // Group expenses by company from Supabase data
-  const expensesByCompany = useMemo(() => {
-    const grouped = new Map<string, { companyName: string; total: number; count: number }>();
-    allExpenses.forEach((exp) => {
-      const existing = grouped.get(exp.companyId) || {
-        companyName: exp.companyName,
-        total: 0,
-        count: 0,
-      };
-      grouped.set(exp.companyId, {
-        companyName: exp.companyName,
-        total: existing.total + exp.netAmount,
-        count: existing.count + 1,
-      });
-    });
-    return Array.from(grouped.entries()).map(([companyId, data]) => ({
-      companyId,
-      ...data,
-    }));
   }, [allExpenses]);
 
   // ========== My Wallet View Data ==========
@@ -446,10 +574,26 @@ export default function PettyCashManagementPage() {
     return myWalletExpensesDb.map(exp => transformExpenseForDisplay(exp, companies, projects, walletHolderName));
   }, [myWallet, myWalletExpensesDb, companies, projects]);
 
-  const myWalletReimbursements = useMemo(
-    () => (myWallet ? getReimbursementsByWallet(myWallet.id) : []),
-    [myWallet, refreshKey]
-  );
+  // Transform my wallet reimbursements from Supabase data
+  const myWalletReimbursements = useMemo(() => {
+    return myWalletReimbursementsDb.map((r) => ({
+      id: r.id,
+      reimbursementNumber: r.reimbursement_number || '',
+      walletId: r.wallet_id,
+      walletHolderName: myWallet?.user_name || '',
+      expenseId: r.expense_id || '',
+      companyId: r.company_id || '',
+      companyName: '',
+      amount: Number(r.amount) || 0,
+      finalAmount: Number(r.final_amount) || Number(r.amount) || 0,
+      status: r.status as 'pending' | 'approved' | 'paid' | 'rejected',
+      createdAt: r.created_at || '',
+      createdBy: r.created_by || '',
+      updatedAt: r.updated_at || '',
+      notes: '',
+      expenseNumber: '',
+    }));
+  }, [myWalletReimbursementsDb, myWallet]);
 
   const myWalletTopUps = useMemo(
     () => (myWallet ? getTopUpsByWallet(myWallet.id) : []),
@@ -562,7 +706,7 @@ export default function PettyCashManagementPage() {
           description: expenseData.description || null,
           project_id: expenseData.projectId,
           amount: expenseData.amount,
-          status: 'draft' as const,
+          status: 'submitted' as const,
           created_by: myWallet.user_id || null,  // Use user_id from wallet, not the name
           attachments: expenseData.attachments ? JSON.stringify(expenseData.attachments) : '[]',
         };
@@ -657,10 +801,15 @@ export default function PettyCashManagementPage() {
       bankAccountId: string,
       bankAccountName: string,
       paymentDate: string,
+      _expenseAccountCode: string,
+      _companyId: string,
+      _vatType: VatType,
+      _vatRate: number,
       adjustmentAmount?: number,
       adjustmentReason?: string
     ) => {
       // Approve the reimbursement
+      // Note: expenseAccountCode, companyId, vatType, vatRate are saved via the modal's onExpenseUpdated
       const approved = approveReimbursement(
         reimbursementId,
         'Manager',
@@ -1222,30 +1371,26 @@ export default function PettyCashManagementPage() {
           {/* KPI Cards Row */}
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4 mb-6">
             <KPICard
-              title="Total Expenses"
+              title="Total Claims"
               value={myWalletExpenses.length}
               icon={Receipt}
               subtitle="All time"
             />
             <KPICard
-              title="Draft Expenses"
-              value={myWalletExpenses.filter((e) => e.status === 'draft').length}
+              title="Submitted"
+              value={myWalletExpenses.filter((e) => e.status === 'submitted').length}
               icon={FileText}
-              variant={
-                myWalletExpenses.filter((e) => e.status === 'draft').length > 0
-                  ? 'warning'
-                  : 'default'
-              }
-              subtitle="Not yet submitted"
+              variant="default"
+              subtitle="Awaiting review"
             />
             <KPICard
               title="This Month"
               value={formatCurrency(myWalletMonthlyExpenses)}
               icon={TrendingDown}
-              subtitle="Expenses"
+              subtitle="Claims"
             />
             <KPICard
-              title="Pending Reimb."
+              title="Pending Claims"
               value={myWalletReimbursements.filter((r) => r.status === 'pending').length}
               icon={Clock}
               variant={
@@ -1265,7 +1410,7 @@ export default function PettyCashManagementPage() {
               className="inline-flex items-center gap-2 rounded-lg bg-[#5A7A8F] px-4 py-2 text-sm font-medium text-white hover:bg-[#4a6a7f] transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <Plus className="h-4 w-4" />
-              New Expense
+              New Claim
             </button>
             {myWallet?.status === 'closed' && (
               <span className="ml-3 text-sm text-red-600">
@@ -1278,8 +1423,8 @@ export default function PettyCashManagementPage() {
           <div className="border-b border-gray-200 mb-6">
             <nav className="-mb-px flex gap-6">
               {[
-                { id: 'expenses', label: 'Expenses', icon: Receipt },
-                { id: 'reimbursements', label: 'Reimbursements', icon: Clock },
+                { id: 'expenses', label: 'My Claims', icon: Receipt },
+                { id: 'reimbursements', label: 'Claim History', icon: Clock },
                 { id: 'history', label: 'Transaction History', icon: FileText },
               ].map((tab) => (
                 <button
@@ -1411,7 +1556,7 @@ export default function PettyCashManagementPage() {
           subtitle="Across all wallets"
         />
         <KPICard
-          title="Pending Reimbursements"
+          title="Pending Claims"
           value={pendingStats.count}
           icon={Clock}
           variant={pendingStats.count > 0 ? 'warning' : 'default'}
@@ -1457,7 +1602,7 @@ export default function PettyCashManagementPage() {
           className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-[#5A7A8F] rounded-lg hover:bg-[#4a6a7f] shadow-sm"
         >
           <CheckCircle className="h-4 w-4" />
-          Approve Reimbursements
+          Review Claims
           {pendingStats.count > 0 && (
             <span className="ml-1 px-2 py-0.5 text-xs bg-white/20 rounded-full">
               {pendingStats.count}
@@ -1468,11 +1613,11 @@ export default function PettyCashManagementPage() {
 
       {/* Two Column Layout */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-        {/* Pending Reimbursements */}
+        {/* Pending Claims */}
         <div className="bg-white border border-gray-200 rounded-lg shadow-sm">
           <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between">
             <h3 className="text-sm font-semibold text-gray-900">
-              Pending Reimbursements
+              Pending Claims
             </h3>
             <span className="px-2 py-1 text-xs font-medium bg-yellow-100 text-yellow-800 rounded-full">
               {pendingReimbursements.length} pending
@@ -1481,7 +1626,7 @@ export default function PettyCashManagementPage() {
           <div className="p-4">
             {pendingReimbursements.length === 0 ? (
               <p className="text-sm text-gray-500 text-center py-8">
-                No pending reimbursements
+                No pending claims
               </p>
             ) : (
               <div className="space-y-3">
@@ -1514,7 +1659,7 @@ export default function PettyCashManagementPage() {
                     }
                     className="w-full text-center text-sm text-[#5A7A8F] hover:underline py-2"
                   >
-                    View all {pendingReimbursements.length} pending
+                    View all {pendingReimbursements.length} pending claims
                   </button>
                 )}
               </div>
@@ -1522,41 +1667,59 @@ export default function PettyCashManagementPage() {
           </div>
         </div>
 
-        {/* Expense Summary by Company */}
+        {/* Payment Queue - Approved claims ready for payment */}
         <div className="bg-white border border-gray-200 rounded-lg shadow-sm">
-          <div className="px-4 py-3 border-b border-gray-200">
+          <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between">
             <h3 className="text-sm font-semibold text-gray-900">
-              Expenses by Company
+              Payment Queue
             </h3>
+            <span className="px-2 py-1 text-xs font-medium bg-green-100 text-green-800 rounded-full">
+              {approvedReimbursements.length} approved
+            </span>
           </div>
           <div className="p-4">
-            {expensesByCompany.length === 0 ? (
+            {paymentQueueByCompany.length === 0 ? (
               <p className="text-sm text-gray-500 text-center py-8">
-                No expenses recorded
+                No claims ready for payment
               </p>
             ) : (
-              <div className="space-y-3">
-                {expensesByCompany.map((item) => (
+              <div className="space-y-4">
+                {paymentQueueByCompany.map((group) => (
                   <div
-                    key={item.companyId}
-                    className="flex items-center justify-between p-3 bg-gray-50 rounded-lg"
+                    key={group.companyId}
+                    className="border border-gray-200 rounded-lg overflow-hidden"
                   >
-                    <div className="flex items-center gap-3">
-                      <div className="p-2 bg-[#5A7A8F]/10 rounded-lg">
+                    <div className="px-3 py-2 bg-gray-50 flex items-center justify-between">
+                      <div className="flex items-center gap-2">
                         <Building2 className="h-4 w-4 text-[#5A7A8F]" />
+                        <span className="text-sm font-medium text-gray-900">
+                          {group.companyName}
+                        </span>
                       </div>
-                      <div>
-                        <p className="text-sm font-medium text-gray-900">
-                          {item.companyName}
-                        </p>
-                        <p className="text-xs text-gray-500">
-                          {item.count} expense{item.count !== 1 ? 's' : ''}
-                        </p>
-                      </div>
+                      <span className="text-sm font-bold text-green-700">
+                        {formatCurrency(group.total)}
+                      </span>
                     </div>
-                    <p className="text-sm font-bold text-gray-900">
-                      {formatCurrency(item.total)}
-                    </p>
+                    <div className="divide-y divide-gray-100">
+                      {group.claims.slice(0, 3).map((claim) => (
+                        <div
+                          key={claim.id}
+                          className="px-3 py-2 flex items-center justify-between text-sm"
+                        >
+                          <span className="text-gray-600">
+                            {claim.reimbursementNumber}
+                          </span>
+                          <span className="font-medium text-gray-900">
+                            {formatCurrency(claim.finalAmount)}
+                          </span>
+                        </div>
+                      ))}
+                      {group.claims.length > 3 && (
+                        <div className="px-3 py-2 text-xs text-gray-500 text-center">
+                          +{group.claims.length - 3} more claim{group.claims.length - 3 !== 1 ? 's' : ''}
+                        </div>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>

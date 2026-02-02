@@ -1,8 +1,9 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { X, Save, FileText, Printer, XCircle, Share2, ChevronDown, Pencil, Loader2 } from 'lucide-react';
+import { X, Save, FileText, Printer, XCircle, Share2, ChevronDown, Pencil, Loader2, Upload, Trash2, Download, Eye } from 'lucide-react';
+import { createClient } from '@/lib/supabase/client';
 import ClientSelector from './ClientSelector';
 import LineItemEditor from './LineItemEditor';
 import PaymentRecordEditor from './PaymentRecordEditor';
@@ -13,6 +14,9 @@ import { RelatedJournalEntries } from '@/components/accounting/RelatedJournalEnt
 import { CharterInfoBox } from './CharterInfoBox';
 import { RevenueRecognitionStatus } from './RevenueRecognitionStatus';
 import type { Receipt, PaymentRecord, AdjustmentType, LineItem, PricingType, CharterType } from '@/data/income/types';
+import type { Booking, BookingType, BookingStatus } from '@/data/booking/types';
+import { BookingFormContainer } from '@/components/bookings/form/BookingFormContainer';
+import { bookingsApi } from '@/lib/supabase/api/bookings';
 import { charterTypeAccountCodes } from '@/data/income/types';
 import type { Currency, Company } from '@/data/company/types';
 import type { Project } from '@/data/project/types';
@@ -21,6 +25,7 @@ import type { Contact } from '@/data/contact/types';
 import { companiesApi } from '@/lib/supabase/api/companies';
 import { projectsApi } from '@/lib/supabase/api/projects';
 import { bankAccountsApi } from '@/lib/supabase/api/bankAccounts';
+import { beamMerchantAccountsApi } from '@/lib/supabase/api/beamMerchantAccounts';
 import { contactsApi } from '@/lib/supabase/api/contacts';
 import { receiptsApi } from '@/lib/supabase/api/receipts';
 import { invoicesApi } from '@/lib/supabase/api/invoices';
@@ -39,38 +44,60 @@ import {
 import { getDefaultTermsAndConditions } from '@/data/settings/pdfSettings';
 import { getExchangeRate } from '@/lib/exchangeRate/service';
 import type { FxRateSource } from '@/data/exchangeRate/types';
+import { generateReceiptPdf, uploadReceiptPdf, type ReceiptPdfData } from '@/lib/pdf/generateReceiptPdf';
+
+export interface CharterPrefill {
+  boatId?: string;
+  charterType?: string;
+  charterDateFrom?: string;
+  charterDateTo?: string;
+  charterTime?: string;
+  customerName?: string;
+  currency?: string;
+  totalPrice?: number;
+  bookingId?: string;
+}
 
 interface ReceiptFormProps {
   receipt?: Receipt;
   invoiceId?: string; // For pre-filling from invoice
+  charterPrefill?: CharterPrefill;
   onCancel?: () => void;
 }
 
-export default function ReceiptForm({ receipt, invoiceId, onCancel }: ReceiptFormProps) {
+export default function ReceiptForm({ receipt, invoiceId, charterPrefill, onCancel }: ReceiptFormProps) {
   const router = useRouter();
   const isEditing = !!receipt;
+
+  // Current user
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
   // Async loaded data
   const [companies, setCompanies] = useState<Company[]>([]);
   const [companyProjects, setCompanyProjects] = useState<Project[]>([]);
   const [companyBankAccounts, setCompanyBankAccounts] = useState<BankAccount[]>([]);
+  const [beamGateways, setBeamGateways] = useState<Array<{ id: string; merchantName: string; merchantId: string }>>([]);
   const [clientContact, setClientContact] = useState<Contact | undefined>(undefined);
   const [sourceInvoice, setSourceInvoice] = useState<{ companyId: string; clientId: string; clientName: string; currency: Currency; pricingType: PricingType; invoiceNumber: string; lineItems: LineItem[] } | undefined>(undefined);
   const [isLoading, setIsLoading] = useState(true);
 
+  // Booking modal state
+  const [showBookingModal, setShowBookingModal] = useState(false);
+  const [prefilledBooking, setPrefilledBooking] = useState<Partial<Booking> | null>(null);
+
   // Form state - initialized from receipt or defaults (invoice data loaded async)
   const [companyId, setCompanyId] = useState(receipt?.companyId || '');
   const [clientId, setClientId] = useState(receipt?.clientId || '');
-  const [clientName, setClientName] = useState(receipt?.clientName || '');
+  const [clientName, setClientName] = useState(receipt?.clientName || charterPrefill?.customerName || '');
   // Charter information
-  const [boatId, setBoatId] = useState(receipt?.boatId || '');
-  const [charterType, setCharterType] = useState<CharterType | ''>(receipt?.charterType || '');
-  const [charterDateFrom, setCharterDateFrom] = useState(receipt?.charterDateFrom || '');
-  const [charterDateTo, setCharterDateTo] = useState(receipt?.charterDateTo || '');
-  const [charterTime, setCharterTime] = useState(receipt?.charterTime || '');
+  const [boatId, setBoatId] = useState(receipt?.boatId || charterPrefill?.boatId || '');
+  const [charterType, setCharterType] = useState<CharterType | ''>(receipt?.charterType || (charterPrefill?.charterType as CharterType) || '');
+  const [charterDateFrom, setCharterDateFrom] = useState(receipt?.charterDateFrom || charterPrefill?.charterDateFrom || '');
+  const [charterDateTo, setCharterDateTo] = useState(receipt?.charterDateTo || charterPrefill?.charterDateTo || '');
+  const [charterTime, setCharterTime] = useState(receipt?.charterTime || charterPrefill?.charterTime || '');
   const [externalBoatName, setExternalBoatName] = useState('');
   const [receiptDate, setReceiptDate] = useState(receipt?.receiptDate || getTodayISO());
-  const [currency, setCurrency] = useState<Currency>(receipt?.currency || 'USD');
+  const [currency, setCurrency] = useState<Currency>(receipt?.currency || (charterPrefill?.currency as Currency) || 'USD');
   const [exchangeRate, setExchangeRate] = useState<number | undefined>(receipt?.fxRate);
   const [isFetchingRate, setIsFetchingRate] = useState(false);
   const [fxRateSource, setFxRateSource] = useState<FxRateSource>(receipt?.fxRateSource || 'bot');
@@ -92,13 +119,13 @@ export default function ReceiptForm({ receipt, invoiceId, onCancel }: ReceiptFor
         id: generateId(),
         description: '',
         quantity: 1,
-        unitPrice: 0,
+        unitPrice: charterPrefill?.totalPrice || 0,
         taxRate: 7,
         whtRate: 0,
         customWhtAmount: undefined,
         amount: 0,
         accountCode: '',
-        projectId: '',
+        projectId: charterPrefill?.boatId || '',
       },
     ]
   );
@@ -126,6 +153,35 @@ export default function ReceiptForm({ receipt, invoiceId, onCancel }: ReceiptFor
   const [showWhtPreview, setShowWhtPreview] = useState(false);
   const [showOptionsMenu, setShowOptionsMenu] = useState(false);
   const [isEditMode, setIsEditMode] = useState(!isEditing);
+
+  // Attachment state
+  interface ReceiptAttachment {
+    id: string;
+    name: string;
+    size: number;
+    type: string;
+    url: string;
+  }
+  const [attachments, setAttachments] = useState<ReceiptAttachment[]>([]);
+  const [isUploading, setIsUploading] = useState(false);
+  const [viewingAttachment, setViewingAttachment] = useState<ReceiptAttachment | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Load current user
+  useEffect(() => {
+    const loadCurrentUser = async () => {
+      try {
+        const supabase = createClient();
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+          setCurrentUserId(user.id);
+        }
+      } catch (error) {
+        console.error('Failed to get current user:', error);
+      }
+    };
+    loadCurrentUser();
+  }, []);
 
   // Load initial data (companies and optionally invoice)
   useEffect(() => {
@@ -200,13 +256,22 @@ export default function ReceiptForm({ receipt, invoiceId, onCancel }: ReceiptFor
     const loadCompanyData = async () => {
       if (!companyId) {
         setCompanyBankAccounts([]);
+        setBeamGateways([]);
         return;
       }
       try {
-        const bankAccountsData = await bankAccountsApi.getByCompanyActive(companyId);
+        const [bankAccountsData, gatewaysData] = await Promise.all([
+          bankAccountsApi.getByCompanyActive(companyId),
+          beamMerchantAccountsApi.getActive(),
+        ]);
         setCompanyBankAccounts(bankAccountsData.map(dbBankAccountToFrontend));
+        setBeamGateways(
+          gatewaysData
+            .filter((gw: any) => gw.company_id === companyId)
+            .map((gw: any) => ({ id: gw.id, merchantName: gw.merchant_name, merchantId: gw.merchant_id }))
+        );
       } catch (error) {
-        console.error('Failed to load company bank accounts:', error);
+        console.error('Failed to load company data:', error);
       }
     };
     loadCompanyData();
@@ -245,6 +310,32 @@ export default function ReceiptForm({ receipt, invoiceId, onCancel }: ReceiptFor
     loadClientContact();
   }, [clientId]);
 
+  // Load existing attachments when editing
+  useEffect(() => {
+    const loadAttachments = async () => {
+      if (!isEditing || !receipt?.id) return;
+      try {
+        // Fetch receipt with attachments from database
+        // Note: attachments column added in migration 038, types may not be updated
+        const supabase = createClient();
+        const { data } = await supabase
+          .from('receipts')
+          .select('*')
+          .eq('id', receipt.id)
+          .single();
+
+        // Cast data to include attachments field (column added in migration 038)
+        const receiptData = data as typeof data & { attachments?: ReceiptAttachment[] | null };
+        if (receiptData?.attachments && Array.isArray(receiptData.attachments)) {
+          setAttachments(receiptData.attachments);
+        }
+      } catch (error) {
+        console.error('Failed to load attachments:', error);
+      }
+    };
+    loadAttachments();
+  }, [isEditing, receipt?.id]);
+
   // Get selected company
   const selectedCompany = companies.find((c) => c.id === companyId);
 
@@ -261,6 +352,14 @@ export default function ReceiptForm({ receipt, invoiceId, onCancel }: ReceiptFor
 
   // Calculate receipt totals (payments + adjustments)
   const receiptTotals = calculateReceiptTotals(payments, adjustmentType, adjustmentAmount, netAmountToPay);
+
+  // Auto-prefill project in line items when boat is selected
+  useEffect(() => {
+    if (!boatId) return;
+    setLineItems(prev => prev.map(item =>
+      !item.projectId ? { ...item, projectId: boatId } : item
+    ));
+  }, [boatId]);
 
   // Agency project codes (when selected, external boat name is used)
   const AGENCY_PROJECT_CODES = ['FA'];
@@ -295,37 +394,23 @@ export default function ReceiptForm({ receipt, invoiceId, onCancel }: ReceiptFor
     };
     const bookingType = charterType ? bookingTypeMap[charterType] || 'day_charter' : 'day_charter';
 
-    // Build URL parameters for booking calendar
-    const params = new URLSearchParams();
-    params.set('status', 'booked'); // Receipt -> Booked
-    params.set('type', bookingType);
-    params.set('title', clientName || '');
-    params.set('customerName', clientName || '');
-
-    if (charterDateFrom) params.set('dateFrom', charterDateFrom);
-    if (charterDateTo) params.set('dateTo', charterDateTo);
-    if (charterTime) params.set('time', charterTime);
-
-    // Set boat info
-    if (isAgencyBooking && externalBoatName) {
-      params.set('externalBoatName', externalBoatName);
-    } else if (selectedBoat) {
-      params.set('projectId', selectedBoat.id);
-    }
-
-    // Set financial info
-    if (documentTotals.totalAmount > 0) {
-      params.set('totalPrice', documentTotals.totalAmount.toString());
-    }
-    params.set('currency', currency);
-
-    // Set source document reference
-    if (receiptNumber) {
-      params.set('sourceDoc', `Receipt: ${receiptNumber}`);
-    }
-
-    // Navigate to booking calendar with new booking form
-    router.push(`/bookings/manager/calendar?newBooking=true&${params.toString()}`);
+    // Build prefilled booking object
+    const prefilled: Partial<Booking> = {
+      status: 'booked' as BookingStatus,
+      type: bookingType as BookingType,
+      title: clientName || '',
+      customerName: clientName || '',
+      dateFrom: charterDateFrom || undefined,
+      dateTo: charterDateTo || undefined,
+      time: charterTime || undefined,
+      projectId: (isAgencyBooking ? undefined : selectedBoat?.id) || undefined,
+      externalBoatName: isAgencyBooking ? externalBoatName : undefined,
+      totalPrice: documentTotals.totalAmount > 0 ? documentTotals.totalAmount : undefined,
+      currency: currency as Currency,
+      internalNotes: receiptNumber ? `Source: Receipt ${receiptNumber}` : undefined,
+    };
+    setPrefilledBooking(prefilled);
+    setShowBookingModal(true);
   };
 
   // Handle Update Description - update first line item with charter info
@@ -365,6 +450,106 @@ Destination: `;
       accountCode: charterType ? charterTypeAccountCodes[charterType as CharterType] : updatedItems[0].accountCode,
     };
     setLineItems(updatedItems);
+  };
+
+  // Handle file upload for attachments
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    setIsUploading(true);
+    const supabase = createClient();
+
+    try {
+      for (const file of Array.from(files)) {
+        // Validate file type
+        const allowedTypes = ['image/jpeg', 'image/png', 'image/gif', 'application/pdf'];
+        if (!allowedTypes.includes(file.type)) {
+          alert(`File type not supported: ${file.name}. Allowed types: JPG, PNG, GIF, PDF`);
+          continue;
+        }
+
+        // Validate file size (max 10MB)
+        if (file.size > 10 * 1024 * 1024) {
+          alert(`File too large: ${file.name}. Maximum size is 10MB`);
+          continue;
+        }
+
+        // Generate unique file path
+        const timestamp = Date.now();
+        const randomId = Math.random().toString(36).substring(2, 8);
+        const ext = file.name.split('.').pop();
+        const receiptIdForPath = receipt?.id || 'temp';
+        const filePath = `receipt-attachments/${receiptIdForPath}/${timestamp}-${randomId}.${ext}`;
+
+        // Upload to Supabase Storage
+        const { error: uploadError } = await supabase.storage
+          .from('Documents')
+          .upload(filePath, file);
+
+        if (uploadError) {
+          console.error('Upload failed:', uploadError);
+          alert(`Failed to upload ${file.name}: ${uploadError.message}`);
+          continue;
+        }
+
+        // Get public URL
+        const { data: { publicUrl } } = supabase.storage
+          .from('Documents')
+          .getPublicUrl(filePath);
+
+        // Add to attachments state
+        const newAttachment: ReceiptAttachment = {
+          id: `${timestamp}-${randomId}`,
+          name: file.name,
+          size: file.size,
+          type: file.type,
+          url: publicUrl,
+        };
+        setAttachments(prev => [...prev, newAttachment]);
+      }
+    } catch (error) {
+      console.error('Error uploading files:', error);
+      alert('Failed to upload files. Please try again.');
+    } finally {
+      setIsUploading(false);
+      // Reset file input
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
+  };
+
+  // Handle attachment delete
+  const handleDeleteAttachment = async (attachmentId: string) => {
+    const attachment = attachments.find(a => a.id === attachmentId);
+    if (!attachment) return;
+
+    // Confirm deletion
+    if (!confirm(`Delete attachment "${attachment.name}"?`)) return;
+
+    // Try to delete from storage
+    const supabase = createClient();
+    const urlMatch = attachment.url.match(/\/storage\/v1\/object\/public\/Documents\/(.+)/);
+    if (urlMatch) {
+      const filePath = urlMatch[1];
+      await supabase.storage.from('Documents').remove([filePath]);
+    }
+
+    // Remove from state
+    setAttachments(prev => prev.filter(a => a.id !== attachmentId));
+  };
+
+  // Format file size for display
+  const formatFileSize = (bytes: number): string => {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  };
+
+  // Check if attachment is an image
+  const isImageAttachment = (attachment: ReceiptAttachment): boolean => {
+    return attachment.type.startsWith('image/');
   };
 
   // Generate receipt number when company changes (for new receipts)
@@ -449,6 +634,19 @@ Destination: `;
 
     fetchRate();
   }, [currency, receiptDate]);
+
+  // Auto-save as draft when company is selected (new receipts only)
+  const autoDraftTriggeredRef = useRef(false);
+  useEffect(() => {
+    if (isEditing || autoDraftTriggeredRef.current || !companyId) return;
+    autoDraftTriggeredRef.current = true;
+    // Small delay to let other state settle
+    const timer = setTimeout(() => {
+      handleSave('draft');
+    }, 500);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [companyId]);
 
   // Handle save
   const handleSave = async (status: 'draft' | 'paid') => {
@@ -564,6 +762,8 @@ Destination: `;
         fx_rate_date: currency !== 'THB' ? fxRateDate : null,
         notes: notes || null,
         status,
+        attachments: attachments.length > 0 ? attachments : null,
+        booking_id: charterPrefill?.bookingId || null,
       };
 
       // Filter out empty line items and convert to database format
@@ -607,18 +807,24 @@ Destination: `;
 
         // For payment records, we need to handle them differently
         // First, get existing payment records and delete them
-        const existingPayments = await receiptsApi.getPaymentRecords(receipt.id);
-        for (const ep of existingPayments) {
-          await receiptsApi.deletePaymentRecord(ep.id);
+        try {
+          const existingPayments = await receiptsApi.getPaymentRecords(receipt.id);
+          for (const ep of existingPayments) {
+            await receiptsApi.deletePaymentRecord(ep.id);
+          }
+          // Then add the new payment records
+          for (const pr of paymentRecordsForDb) {
+            await receiptsApi.addPaymentRecord({
+              ...pr,
+              receipt_id: receipt.id,
+            });
+          }
+          console.log('Updated payment records:', paymentRecordsForDb.length);
+        } catch (paymentError) {
+          const errMsg = paymentError instanceof Error ? paymentError.message : JSON.stringify(paymentError);
+          console.error('Failed to update payment records:', errMsg, paymentError);
+          // Continue - receipt was updated, payment records can be fixed manually
         }
-        // Then add the new payment records
-        for (const pr of paymentRecordsForDb) {
-          await receiptsApi.addPaymentRecord({
-            ...pr,
-            receipt_id: receipt.id,
-          });
-        }
-        console.log('Updated payment records:', paymentRecordsForDb.length);
 
         setCurrentStatus(status);
         setIsEditMode(false); // Switch to view mode after save
@@ -651,7 +857,7 @@ Destination: `;
                 })),
                 currency,
               },
-              'system' // createdBy - will be replaced with actual user later
+              currentUserId || '' // createdBy - actual user ID
             );
 
             if (journalResult.success) {
@@ -703,17 +909,113 @@ Destination: `;
             console.warn('Could not create WHT tracking records:', whtError);
             // Don't fail - table might not exist yet (migration not run)
           }
+
+          // Auto-generate and upload receipt PDF
+          try {
+            // Build company address string
+            const companyAddr = selectedCompany?.registeredAddress;
+            const companyAddressStr = companyAddr
+              ? [companyAddr.street, companyAddr.city, companyAddr.state, companyAddr.postalCode, companyAddr.country].filter(Boolean).join(', ')
+              : undefined;
+
+            // Build client address string
+            const clientAddr = clientContact?.billingAddress;
+            const clientAddressStr = clientAddr
+              ? [clientAddr.street, clientAddr.city, clientAddr.state, clientAddr.postalCode, clientAddr.country].filter(Boolean).join(', ')
+              : undefined;
+
+            const pdfData: ReceiptPdfData = {
+              receiptNumber: finalReceiptNumber,
+              receiptDate,
+              reference,
+              companyName: selectedCompany?.name || '',
+              companyAddress: companyAddressStr,
+              companyPhone: selectedCompany?.contactInformation?.phoneNumber,
+              companyEmail: selectedCompany?.contactInformation?.email,
+              companyTaxId: selectedCompany?.taxId,
+              isVatRegistered: selectedCompany?.isVatRegistered,
+              clientName,
+              clientAddress: clientAddressStr,
+              clientEmail: clientContact?.email,
+              clientTaxId: clientContact?.taxId,
+              charterType: charterType || undefined,
+              charterDateFrom: charterDateFrom || undefined,
+              charterDateTo: charterDateTo || undefined,
+              charterTime: charterTime || undefined,
+              lineItems: nonEmptyLineItems.map(item => ({
+                description: item.description,
+                quantity: item.quantity,
+                unitPrice: item.unitPrice,
+                amount: calculateLineItemTotal(item.quantity, item.unitPrice, item.taxRate, effectivePricingType),
+                taxRate: item.taxRate,
+                whtRate: item.whtRate,
+                customWhtAmount: item.customWhtAmount,
+              })),
+              pricingType: effectivePricingType,
+              subtotal: documentTotals.subtotal,
+              taxAmount: documentTotals.taxAmount,
+              whtAmount,
+              totalAmount: documentTotals.totalAmount,
+              netAmountToPay: documentTotals.totalAmount - whtAmount,
+              currency,
+              payments: payments.map(p => ({
+                date: p.paymentDate,
+                amount: p.amount,
+                method: p.receivedAt === 'cash' ? 'Cash' : p.receivedAt.startsWith('beam:') ? `Beam - ${beamGateways.find(gw => gw.id === p.receivedAt.slice(5))?.merchantName || 'Gateway'}` : (companyBankAccounts.find(b => b.id === p.receivedAt)?.accountName || 'Bank Transfer'),
+                remark: p.remark,
+              })),
+              notes,
+            };
+
+            const pdfBytes = await generateReceiptPdf(pdfData);
+            const uploadResult = await uploadReceiptPdf(pdfBytes, receipt.id, finalReceiptNumber);
+
+            if (uploadResult) {
+              // Add the generated PDF to attachments
+              const pdfAttachment: ReceiptAttachment = {
+                id: `auto-pdf-${Date.now()}`,
+                name: uploadResult.name,
+                size: pdfBytes.length,
+                type: 'application/pdf',
+                url: uploadResult.url,
+              };
+
+              // Update attachments in state and database
+              const updatedAttachments = [...attachments, pdfAttachment];
+              setAttachments(updatedAttachments);
+
+              // Update receipt with new attachment (cast to bypass TypeScript - column added in migration 038)
+              const supabase = createClient();
+              await supabase
+                .from('receipts')
+                .update({ attachments: updatedAttachments } as Record<string, unknown>)
+                .eq('id', receipt.id);
+
+              console.log('Auto-generated receipt PDF uploaded:', uploadResult.name);
+            }
+          } catch (pdfError) {
+            console.warn('Could not auto-generate receipt PDF:', pdfError);
+            // Don't fail the save - PDF generation is optional
+          }
         }
       } else {
-        // Create new receipt with line items
+        // Create new receipt with line items, payment records, and journal entry (if paid)
         // Use retry logic in case of duplicate key (race condition with another user)
         let newReceipt;
+        let journalResult: { success: boolean; journalEntryId?: string; referenceNumber?: string; error?: string } | null = null;
         let retries = 0;
         const maxRetries = 3;
 
         while (retries < maxRetries) {
           try {
-            newReceipt = await receiptsApi.create(receiptData, lineItemsForDb);
+            const result = await receiptsApi.createWithJournalEntry(
+              receiptData,
+              lineItemsForDb,
+              paymentRecordsForDb,
+              currentUserId || ''
+            );
+            newReceipt = result.receipt;
+            journalResult = result.journalResult;
             break; // Success, exit loop
           } catch (createError: unknown) {
             const errorObj = createError as { code?: string; message?: string };
@@ -738,62 +1040,22 @@ Destination: `;
         console.log('Created receipt:', newReceipt);
         savedReceiptId = newReceipt?.id;
 
-        // Add payment records
-        if (newReceipt) {
-          try {
-            for (const pr of paymentRecordsForDb) {
-              await receiptsApi.addPaymentRecord({
-                ...pr,
-                receipt_id: newReceipt.id,
-              });
-            }
-            console.log('Added payment records:', paymentRecordsForDb.length);
-          } catch (paymentError) {
-            console.error('Failed to add payment records:', paymentError);
-            // Continue - receipt was created, payment records can be added manually
+        // Log journal entry result and alert user if failed
+        if (journalResult) {
+          if (journalResult.success) {
+            console.log('Receipt journal entry created:', journalResult.referenceNumber);
+          } else {
+            console.error('[ReceiptForm] Journal entry creation failed:', journalResult.error);
+            // Show warning to user - receipt was saved but journal entry wasn't created
+            alert(`Receipt saved, but journal entry creation failed: ${journalResult.error}\n\nPlease check the browser console (F12) for details.`);
           }
+        } else if (status === 'paid') {
+          // If status is paid but no journal result, something went wrong
+          console.error('[ReceiptForm] Journal result is null for paid receipt');
         }
 
-        // Create journal entry for new receipt if status is paid
-        if (newReceipt && status === 'paid') {
-          try {
-            const { createReceiptJournalEntry } = await import('@/lib/accounting/journalPostingService');
-
-            const journalResult = await createReceiptJournalEntry(
-              {
-                receiptId: newReceipt.id,
-                companyId,
-                receiptNumber: finalReceiptNumber,
-                receiptDate,
-                clientName,
-                lineItems: nonEmptyLineItems.map(li => ({
-                  description: li.description,
-                  accountCode: null,
-                  amount: (li.unitPrice * li.quantity),
-                })),
-                totalSubtotal: documentTotals.subtotal,
-                totalVatAmount: documentTotals.taxAmount,
-                totalAmount: documentTotals.totalAmount,
-                payments: payments.map(p => ({
-                  amount: p.amount,
-                  bankAccountId: p.receivedAt === 'cash' ? null : p.receivedAt,
-                  paymentMethod: p.receivedAt === 'cash' ? 'cash' : 'bank_transfer',
-                })),
-                currency,
-              },
-              'system'
-            );
-
-            if (journalResult.success) {
-              console.log('Receipt journal entry created:', journalResult.referenceNumber);
-            } else {
-              console.warn('Journal entry creation warning:', journalResult.error);
-            }
-          } catch (journalError) {
-            console.error('Failed to create receipt journal entry:', journalError);
-          }
-
-          // Create WHT tracking records for line items with WHT
+        // Create WHT tracking records for line items with WHT
+        if (newReceipt) {
           try {
             const { whtFromCustomerApi } = await import('@/lib/supabase/api/whtFromCustomer');
             const whtLineItems = nonEmptyLineItems.filter(item => {
@@ -825,6 +1087,110 @@ Destination: `;
           } catch (whtError) {
             console.warn('Could not create WHT tracking records:', whtError);
             // Don't fail - table might not exist yet (migration not run)
+          }
+
+          // Auto-generate and upload receipt PDF for new paid receipt
+          try {
+            // Build company address string
+            const companyAddr = selectedCompany?.registeredAddress;
+            const companyAddressStr = companyAddr
+              ? [companyAddr.street, companyAddr.city, companyAddr.state, companyAddr.postalCode, companyAddr.country].filter(Boolean).join(', ')
+              : undefined;
+
+            // Build client address string
+            const clientAddr = clientContact?.billingAddress;
+            const clientAddressStr = clientAddr
+              ? [clientAddr.street, clientAddr.city, clientAddr.state, clientAddr.postalCode, clientAddr.country].filter(Boolean).join(', ')
+              : undefined;
+
+            const pdfData: ReceiptPdfData = {
+              receiptNumber: finalReceiptNumber,
+              receiptDate,
+              reference,
+              companyName: selectedCompany?.name || '',
+              companyAddress: companyAddressStr,
+              companyPhone: selectedCompany?.contactInformation?.phoneNumber,
+              companyEmail: selectedCompany?.contactInformation?.email,
+              companyTaxId: selectedCompany?.taxId,
+              isVatRegistered: selectedCompany?.isVatRegistered,
+              clientName,
+              clientAddress: clientAddressStr,
+              clientEmail: clientContact?.email,
+              clientTaxId: clientContact?.taxId,
+              charterType: charterType || undefined,
+              charterDateFrom: charterDateFrom || undefined,
+              charterDateTo: charterDateTo || undefined,
+              charterTime: charterTime || undefined,
+              lineItems: nonEmptyLineItems.map(item => ({
+                description: item.description,
+                quantity: item.quantity,
+                unitPrice: item.unitPrice,
+                amount: calculateLineItemTotal(item.quantity, item.unitPrice, item.taxRate, effectivePricingType),
+                taxRate: item.taxRate,
+                whtRate: item.whtRate,
+                customWhtAmount: item.customWhtAmount,
+              })),
+              pricingType: effectivePricingType,
+              subtotal: documentTotals.subtotal,
+              taxAmount: documentTotals.taxAmount,
+              whtAmount,
+              totalAmount: documentTotals.totalAmount,
+              netAmountToPay: documentTotals.totalAmount - whtAmount,
+              currency,
+              payments: payments.map(p => ({
+                date: p.paymentDate,
+                amount: p.amount,
+                method: p.receivedAt === 'cash' ? 'Cash' : p.receivedAt.startsWith('beam:') ? `Beam - ${beamGateways.find(gw => gw.id === p.receivedAt.slice(5))?.merchantName || 'Gateway'}` : (companyBankAccounts.find(b => b.id === p.receivedAt)?.accountName || 'Bank Transfer'),
+                remark: p.remark,
+              })),
+              notes,
+            };
+
+            const pdfBytes = await generateReceiptPdf(pdfData);
+            const uploadResult = await uploadReceiptPdf(pdfBytes, newReceipt.id, finalReceiptNumber);
+
+            if (uploadResult) {
+              // Add the generated PDF to attachments in database (cast to bypass TypeScript - column added in migration 038)
+              const pdfAttachment = {
+                id: `auto-pdf-${Date.now()}`,
+                name: uploadResult.name,
+                size: pdfBytes.length,
+                type: 'application/pdf',
+                url: uploadResult.url,
+              };
+
+              const supabase = createClient();
+              await supabase
+                .from('receipts')
+                .update({ attachments: [pdfAttachment] } as Record<string, unknown>)
+                .eq('id', newReceipt.id);
+
+              console.log('Auto-generated receipt PDF uploaded for new receipt:', uploadResult.name);
+            }
+          } catch (pdfError) {
+            console.warn('Could not auto-generate receipt PDF:', pdfError);
+            // Don't fail the save - PDF generation is optional
+          }
+        }
+
+        // Link receipt to booking and auto-update statuses
+        if (newReceipt && charterPrefill?.bookingId) {
+          try {
+            const updates: Record<string, unknown> = {
+              depositReceiptId: newReceipt.id,
+            };
+            // If receipt is paid, auto-set booking payment status to paid
+            if (status === 'paid') {
+              updates.paymentStatus = 'paid';
+              // Promote booking status to 'booked' if currently enquiry/hold
+              const currentBooking = await bookingsApi.getById(charterPrefill.bookingId);
+              if (currentBooking && ['enquiry', 'hold'].includes(currentBooking.status)) {
+                updates.status = 'booked';
+              }
+            }
+            await bookingsApi.update(charterPrefill.bookingId, updates);
+          } catch (linkErr) {
+            console.error('Failed to link receipt to booking:', linkErr);
           }
         }
 
@@ -1000,10 +1366,23 @@ Destination: `;
                   type="button"
                   onClick={() => handleSave(currentStatus === 'draft' ? 'draft' : 'paid')}
                   disabled={isSaving}
-                  className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-[#5A7A8F] rounded-lg hover:bg-[#4a6a7f] transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <Save className="h-4 w-4" />
                   <span>{isSaving ? 'Saving...' : 'Save'}</span>
+                </button>
+              )}
+
+              {/* Approve button - only for draft receipts in edit mode */}
+              {!isVoided && isEditMode && currentStatus === 'draft' && (
+                <button
+                  type="button"
+                  onClick={() => handleSave('paid')}
+                  disabled={isSaving}
+                  className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-[#5A7A8F] rounded-lg hover:bg-[#4a6a7f] transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <Save className="h-4 w-4" />
+                  <span>{isSaving ? 'Approving...' : 'Approve'}</span>
                 </button>
               )}
 
@@ -1058,6 +1437,24 @@ Destination: `;
                         >
                           <Pencil className="h-4 w-4" />
                           <span>Edit</span>
+                        </button>
+                      )}
+
+                      {/* Approve option - only for draft receipts when not in edit mode */}
+                      {!isEditMode && currentStatus === 'draft' && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowOptionsMenu(false);
+                            setIsEditMode(true);
+                            // Small delay to allow edit mode to enable, then trigger approve
+                            setTimeout(() => handleSave('paid'), 100);
+                          }}
+                          disabled={isSaving}
+                          className="w-full flex items-center gap-2 px-4 py-2 text-sm text-green-700 hover:bg-green-50 transition-colors"
+                        >
+                          <Save className="h-4 w-4" />
+                          <span>Approve</span>
                         </button>
                       )}
 
@@ -1373,6 +1770,7 @@ Destination: `;
           payments={payments}
           onChange={setPayments}
           bankAccounts={companyBankAccounts}
+          beamGateways={beamGateways}
           currency={currency}
           netAmountToPay={netAmountToPay}
           readOnly={isFieldsDisabled}
@@ -1563,6 +1961,186 @@ Destination: `;
         </div>
       </div>
 
+      {/* Receipt Attachments Section */}
+      <div className="bg-white border border-gray-200 rounded-lg p-6 space-y-4">
+        <h2 className="text-lg font-semibold text-gray-900 border-b border-gray-200 pb-3">
+          Receipt Attachments
+        </h2>
+
+        {/* Upload area */}
+        {!isFieldsDisabled && (
+          <div
+            className={`border-2 border-dashed rounded-lg p-6 text-center transition-colors ${
+              isUploading ? 'border-gray-300 bg-gray-50' : 'border-gray-300 hover:border-[#5A7A8F] hover:bg-gray-50'
+            }`}
+          >
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".pdf,.jpg,.jpeg,.png,.gif"
+              multiple
+              onChange={handleFileUpload}
+              disabled={isUploading}
+              className="hidden"
+              id="receipt-attachment-input"
+            />
+            <label
+              htmlFor="receipt-attachment-input"
+              className={`cursor-pointer flex flex-col items-center gap-2 ${isUploading ? 'cursor-not-allowed' : ''}`}
+            >
+              {isUploading ? (
+                <Loader2 className="h-8 w-8 text-gray-400 animate-spin" />
+              ) : (
+                <Upload className="h-8 w-8 text-gray-400" />
+              )}
+              <span className="text-sm text-gray-600">
+                {isUploading ? 'Uploading...' : 'Click to upload or drag and drop'}
+              </span>
+              <span className="text-xs text-gray-500">
+                PDF, JPG, PNG, GIF (max 10MB per file)
+              </span>
+            </label>
+          </div>
+        )}
+
+        {/* Attachments list */}
+        {attachments.length > 0 && (
+          <div className="space-y-2">
+            {attachments.map((attachment) => (
+              <div
+                key={attachment.id}
+                className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg border border-gray-200"
+              >
+                {/* Thumbnail or icon */}
+                <div className="flex-shrink-0 w-10 h-10 bg-white rounded border border-gray-200 flex items-center justify-center overflow-hidden">
+                  {isImageAttachment(attachment) ? (
+                    <img
+                      src={attachment.url}
+                      alt={attachment.name}
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <FileText className="h-5 w-5 text-red-500" />
+                  )}
+                </div>
+
+                {/* File info */}
+                <div className="flex-grow min-w-0">
+                  <p className="text-sm font-medium text-gray-900 truncate">
+                    {attachment.name}
+                  </p>
+                  <p className="text-xs text-gray-500">
+                    {formatFileSize(attachment.size)}
+                  </p>
+                </div>
+
+                {/* Actions */}
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setViewingAttachment(attachment)}
+                    className="p-1.5 text-gray-500 hover:text-[#5A7A8F] hover:bg-gray-100 rounded transition-colors"
+                    title="View"
+                  >
+                    <Eye className="h-4 w-4" />
+                  </button>
+                  <a
+                    href={attachment.url}
+                    download={attachment.name}
+                    className="p-1.5 text-gray-500 hover:text-[#5A7A8F] hover:bg-gray-100 rounded transition-colors"
+                    title="Download"
+                  >
+                    <Download className="h-4 w-4" />
+                  </a>
+                  {!isFieldsDisabled && (
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteAttachment(attachment.id)}
+                      className="p-1.5 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+                      title="Delete"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {attachments.length === 0 && (
+          <p className="text-sm text-gray-500 text-center py-2">
+            No attachments yet
+          </p>
+        )}
+      </div>
+
+      {/* Attachment Viewer Modal */}
+      {viewingAttachment && (
+        <div className="fixed inset-0 z-[60] overflow-y-auto">
+          <div
+            className="fixed inset-0 bg-black/70"
+            onClick={() => setViewingAttachment(null)}
+          />
+          <div className="flex min-h-full items-center justify-center p-4">
+            <div className="relative bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-hidden">
+              {/* Header */}
+              <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 bg-gray-50">
+                <h3 className="text-sm font-semibold text-gray-900 truncate pr-4">
+                  {viewingAttachment.name}
+                </h3>
+                <div className="flex items-center gap-2">
+                  <a
+                    href={viewingAttachment.url}
+                    download={viewingAttachment.name}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
+                  >
+                    <Download className="h-4 w-4" />
+                    Download
+                  </a>
+                  <button
+                    onClick={() => setViewingAttachment(null)}
+                    className="p-1.5 text-gray-400 hover:text-gray-600 rounded-lg hover:bg-gray-100"
+                  >
+                    <X className="h-5 w-5" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Content */}
+              <div className="p-4 bg-gray-100 flex items-center justify-center min-h-[400px] max-h-[calc(90vh-120px)] overflow-auto">
+                {isImageAttachment(viewingAttachment) ? (
+                  <img
+                    src={viewingAttachment.url}
+                    alt={viewingAttachment.name}
+                    className="max-w-full max-h-[calc(90vh-180px)] object-contain rounded shadow-lg"
+                  />
+                ) : viewingAttachment.type === 'application/pdf' ? (
+                  <iframe
+                    src={viewingAttachment.url}
+                    className="w-full h-[calc(90vh-180px)] rounded shadow-lg"
+                    title={viewingAttachment.name}
+                  />
+                ) : (
+                  <div className="text-center py-12">
+                    <FileText className="h-16 w-16 text-gray-400 mx-auto mb-4" />
+                    <p className="text-gray-600 mb-4">{viewingAttachment.name}</p>
+                    <a
+                      href={viewingAttachment.url}
+                      download={viewingAttachment.name}
+                      className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-[#5A7A8F] rounded-lg hover:bg-[#4a6a7f]"
+                    >
+                      <Download className="h-4 w-4" />
+                      Download File
+                    </a>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Void Confirmation Modal */}
       {showVoidModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
@@ -1684,6 +2262,35 @@ Destination: `;
         <RelatedJournalEntries
           documentType="receipt"
           documentId={receipt.id}
+        />
+      )}
+
+      {/* Inline Booking Modal */}
+      {showBookingModal && (
+        <BookingFormContainer
+          prefilled={prefilledBooking}
+          projects={companyProjects}
+          onSave={async (bookingData) => {
+            // Generate booking number: FA-YYYYMMXXX
+            const now = new Date();
+            const yr = now.getFullYear();
+            const mo = String(now.getMonth() + 1).padStart(2, '0');
+            const seq = String(Math.floor(Math.random() * 1000)).padStart(3, '0');
+            const bookingNumber = `FA-${yr}${mo}${seq}`;
+            // Ensure booking_owner is set (required NOT NULL field)
+            const dataWithDefaults = {
+              ...bookingData,
+              bookingNumber,
+              bookingOwner: bookingData.bookingOwner || currentUserId || undefined,
+            };
+            await bookingsApi.create(dataWithDefaults);
+            setShowBookingModal(false);
+            setPrefilledBooking(null);
+          }}
+          onClose={() => {
+            setShowBookingModal(false);
+            setPrefilledBooking(null);
+          }}
         />
       )}
     </div>

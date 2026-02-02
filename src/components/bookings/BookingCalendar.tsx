@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { ChevronLeft, ChevronRight, Plus } from 'lucide-react';
-import { Booking, bookingStatusColors } from '@/data/booking/types';
+import { Booking, bookingStatusColors, bookingStatusLabels, bookingTypeLabels } from '@/data/booking/types';
 import { Project } from '@/data/project/types';
 
 export type CalendarViewMode = 'month' | 'week' | 'day';
@@ -19,6 +19,9 @@ interface BookingCalendarProps {
   onNextMonth?: () => void;
   isAgencyView?: boolean;
   getBoatColor?: (boatId: string) => string;
+  selectedBoatFilter?: string | null;
+  allBookingsDisplayFields?: string[];
+  boatTabDisplayFields?: string[];
 }
 
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -60,6 +63,9 @@ export function BookingCalendar({
   onNextMonth,
   isAgencyView = false,
   getBoatColor,
+  selectedBoatFilter = null,
+  allBookingsDisplayFields = ['title'],
+  boatTabDisplayFields = ['title'],
 }: BookingCalendarProps) {
   const [hoveredDate, setHoveredDate] = useState<string | null>(null);
 
@@ -78,6 +84,24 @@ export function BookingCalendar({
       return project?.name || 'Unknown Boat';
     }
     return 'External';
+  };
+
+  // Get display value for a booking field
+  const getFieldValue = (booking: Booking, field: string, pMap: Map<string, Project>): string => {
+    switch (field) {
+      case 'title': return booking.title || '';
+      case 'customerName': return booking.customerName || '';
+      case 'bookingType': return bookingTypeLabels[booking.type] || booking.type || '';
+      case 'time': return booking.time || '';
+      case 'totalPrice': return booking.totalPrice ? `${booking.currency || 'THB'} ${booking.totalPrice.toLocaleString()}` : '';
+      case 'paymentStatus': return booking.paymentStatus || '';
+      case 'destination': return booking.destination || '';
+      case 'numberOfGuests': return booking.numberOfGuests ? `${booking.numberOfGuests} guests` : '';
+      case 'bookingOwner': return booking.bookingOwnerName || '';
+      case 'extras': return booking.extras?.length ? booking.extras.join(', ') : '';
+      case 'contractNote': return booking.contractNote || '';
+      default: return '';
+    }
   };
 
   // Calculate weeks with booking segments
@@ -209,7 +233,8 @@ export function BookingCalendar({
   }, [year, month, bookings]);
 
   // Check if date is today
-  const today = new Date().toISOString().split('T')[0];
+  const now = new Date();
+  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
 
   // Calculate the max rows needed per week for consistent height
   const maxRows = Math.max(3, ...weeks.map(w => Math.max(0, ...w.segments.map(s => s.row + 1))));
@@ -270,12 +295,12 @@ export function BookingCalendar({
                   return (
                     <div
                       key={`empty-${weekIndex}-${dayIndex}`}
-                      className="min-h-[100px] bg-gray-50 border-r border-gray-100 last:border-r-0"
+                      className="min-h-[50px] bg-gray-50 border-r border-gray-100 last:border-r-0"
                     />
                   );
                 }
 
-                const dateStr = day.date.toISOString().split('T')[0];
+                const dateStr = `${day.date.getFullYear()}-${String(day.date.getMonth() + 1).padStart(2, '0')}-${String(day.date.getDate()).padStart(2, '0')}`;
                 const isToday = dateStr === today;
                 const isHovered = hoveredDate === dateStr;
 
@@ -283,7 +308,7 @@ export function BookingCalendar({
                   <div
                     key={dateStr}
                     className={`
-                      min-h-[100px] p-1 border-r border-gray-100 last:border-r-0 transition-colors relative group cursor-pointer
+                      min-h-[50px] p-1 border-r border-gray-100 last:border-r-0 transition-colors relative group cursor-pointer
                       ${isToday ? 'bg-blue-50/50' : ''}
                       ${isHovered ? 'bg-gray-50' : ''}
                     `}
@@ -325,18 +350,23 @@ export function BookingCalendar({
               style={{ top: '36px' }}
             >
               {week.segments.map((segment, segIndex) => {
-                const boatName = getBoatName(segment.booking);
-                const displayTitle = isAgencyView ? boatName : segment.booking.title;
-
                 // Get boat color - use projectId if available, otherwise 'external'
                 const boatId = segment.booking.projectId || 'external';
                 const boatColor = getBoatColor ? getBoatColor(boatId) : '#3B82F6';
+
+                // Determine which extra fields to show
+                const isBoatTab = selectedBoatFilter !== null && selectedBoatFilter !== 'external';
+                const extraFields = isBoatTab ? boatTabDisplayFields : allBookingsDisplayFields;
+                const statusLabel = bookingStatusLabels[segment.booking.status] || segment.booking.status;
+
+                // Row height: base 20px for status + 16px per extra field + 4px padding
+                const rowHeight = 24 + (extraFields.length * 16);
 
                 // Calculate position
                 const colWidth = 100 / 7;
                 const left = segment.startCol * colWidth;
                 const width = (segment.endCol - segment.startCol + 1) * colWidth;
-                const top = segment.row * 24; // 24px per row
+                const top = segment.row * rowHeight;
 
                 return (
                   <div
@@ -348,52 +378,65 @@ export function BookingCalendar({
                       top: `${top}px`,
                     }}
                   >
-                    <button
+                    <div
+                      role="button"
+                      tabIndex={0}
                       onClick={() => onBookingClick?.(segment.booking)}
+                      onKeyDown={(e) => { if (e.key === 'Enter') onBookingClick?.(segment.booking); }}
                       className={`
-                        w-full text-left px-2 py-0.5 text-xs transition-all truncate
+                        w-full text-left px-2 py-0.5 text-xs transition-all cursor-pointer
                         hover:shadow-sm hover:brightness-95
                         ${segment.isStart ? 'rounded-l-md' : 'rounded-l-none'}
                         ${segment.isEnd ? 'rounded-r-md' : 'rounded-r-none'}
                       `}
                       style={{
-                        backgroundColor: boatColor + '20', // 20% opacity background
+                        backgroundColor: boatColor + '20',
                         borderColor: boatColor,
                         borderWidth: '1px',
                         borderStyle: 'solid',
                         borderLeftWidth: segment.isStart ? '1px' : '0',
                         borderRightWidth: segment.isEnd ? '1px' : '0',
+                        height: `${rowHeight - 2}px`,
+                        overflow: 'hidden',
                       }}
                     >
-                      <div className="flex items-center gap-1">
-                        {/* Status indicator - only show on start */}
-                        {segment.isStart && (
+                      {/* Line 1: Status (always) */}
+                      <div className="flex items-center gap-1" style={{ height: '18px' }}>
+                        {segment.isStart && !isBoatTab && (
                           <div
-                            className="w-1.5 h-1.5 rounded-full flex-shrink-0"
+                            className="w-2 h-2 rounded-full flex-shrink-0"
                             style={{ backgroundColor: boatColor }}
                           />
                         )}
                         <span
-                          className="truncate font-medium"
+                          className="truncate font-semibold"
                           style={{ color: boatColor }}
                         >
-                          {displayTitle}
+                          {statusLabel}
                         </span>
-                        {/* Show boat name if not agency view and on start segment */}
-                        {!isAgencyView && segment.isStart && (
-                          <span className="text-gray-500 text-[10px] truncate ml-1">
-                            • {boatName}
-                          </span>
-                        )}
                       </div>
-                    </button>
+                      {/* Extra fields - show on all segments so multi-day bookings display text */}
+                      {extraFields.map((field) => {
+                        const value = getFieldValue(segment.booking, field, projectMap);
+                        if (!value) return null;
+                        return (
+                          <div
+                            key={field}
+                            className="truncate opacity-70"
+                            style={{ color: boatColor, height: '16px', lineHeight: '16px' }}
+                          >
+                            {value}
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
                 );
               })}
             </div>
 
             {/* Spacer for booking rows */}
-            <div style={{ height: `${Math.max(maxRows, week.segments.length > 0 ? Math.max(...week.segments.map(s => s.row + 1)) : 0) * 24 + 8}px` }} />
+            <div style={{ height: `${Math.max(maxRows, week.segments.length > 0 ? Math.max(...week.segments.map(s => s.row + 1)) : 0) * (24 + ((selectedBoatFilter !== null && selectedBoatFilter !== 'external' ? boatTabDisplayFields : allBookingsDisplayFields).length * 16)) + 8}px` }} />
           </div>
         ))}
       </div>

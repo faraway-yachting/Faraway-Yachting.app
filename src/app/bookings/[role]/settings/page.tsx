@@ -9,6 +9,7 @@ import { dbProjectToFrontend } from '@/lib/supabase/transforms';
 import { useBookingSettings } from '@/contexts/BookingSettingsContext';
 import { defaultBoatColors, defaultExternalBoatColor } from '@/data/booking/types';
 import { YachtProductManager } from '@/components/bookings/YachtProductManager';
+import BookingLookupsSettings from '@/components/bookings/BookingLookupsSettings';
 
 // Preset marina locations for "Depart From"
 const marinaPresets = [
@@ -545,249 +546,20 @@ export default function BookingSettingsPage() {
 
           {/* External Yacht Tab */}
           {yachtRegisterTab === 'external' && (
-            <>
-              {/* Add new yacht form */}
-              {canEdit && (
-                <div className="bg-gray-50 rounded-lg p-4 mb-6">
-                  <h3 className="text-sm font-medium text-gray-700 mb-3">Add New External Yacht</h3>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-xs text-gray-500 mb-1">Yacht Name *</label>
-                      <input
-                        type="text"
-                        value={newYachtName}
-                        onChange={(e) => setNewYachtName(e.target.value)}
-                        placeholder="e.g., Ocean Paradise"
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs text-gray-500 mb-1">Display Name *</label>
-                      <input
-                        type="text"
-                        value={newYachtDisplayName}
-                        onChange={(e) => setNewYachtDisplayName(e.target.value)}
-                        placeholder="e.g., Ocean"
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs text-gray-500 mb-1">Depart From</label>
-                      {showCustomDepartFrom ? (
-                        <div className="flex gap-2">
-                          <input
-                            type="text"
-                            value={newYachtDepartFrom}
-                            onChange={(e) => setNewYachtDepartFrom(e.target.value)}
-                            placeholder="Enter custom location..."
-                            className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setShowCustomDepartFrom(false);
-                              setNewYachtDepartFrom('');
-                            }}
-                            className="px-3 py-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
-                          >
-                            <X className="h-4 w-4" />
-                          </button>
-                        </div>
-                      ) : (
-                        <select
-                          value={newYachtDepartFrom}
-                          onChange={(e) => handleDepartFromChange(e.target.value)}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                        >
-                          <option value="">Select marina...</option>
-                          {marinaPresets.map((marina) => (
-                            <option key={marina} value={marina}>{marina}</option>
-                          ))}
-                          <option value="other">Other (Custom)</option>
-                        </select>
-                      )}
-                    </div>
-                    <div>
-                      <label className="block text-xs text-gray-500 mb-1">Owner/Operator</label>
-                      <input
-                        type="text"
-                        value={newYachtOwnerOperator}
-                        onChange={(e) => setNewYachtOwnerOperator(e.target.value)}
-                        placeholder="e.g., ABC Yachts Co."
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                      />
-                    </div>
-                  </div>
-                  <div className="mt-4 flex justify-end">
-                    <button
-                      onClick={handleAddExternalYacht}
-                      disabled={!newYachtName.trim() || !newYachtDisplayName.trim()}
-                      className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                    >
-                      <Plus className="h-4 w-4" />
-                      Add Yacht
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {/* List of external yachts */}
-              {externalBoats.length > 0 ? (
-                <div className="space-y-3">
-                  {externalBoats.map((yacht) => (
-                    <div
-                      key={yacht.id}
-                      className="bg-gray-50 rounded-lg overflow-hidden"
-                    >
-                      {editingYachtId === yacht.id ? (
-                        // Edit mode
-                        <div className="p-4">
-                          <div className="grid grid-cols-2 gap-4">
-                            <div>
-                              <label className="block text-xs text-gray-500 mb-1">Yacht Name *</label>
-                              <input
-                                type="text"
-                                value={editYachtName}
-                                onChange={(e) => setEditYachtName(e.target.value)}
-                                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                                autoFocus
-                              />
-                            </div>
-                            <div>
-                              <label className="block text-xs text-gray-500 mb-1">Display Name *</label>
-                              <input
-                                type="text"
-                                value={editYachtDisplayName}
-                                onChange={(e) => setEditYachtDisplayName(e.target.value)}
-                                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                              />
-                            </div>
-                            <div>
-                              <label className="block text-xs text-gray-500 mb-1">Depart From</label>
-                              {showEditCustomDepartFrom ? (
-                                <div className="flex gap-2">
-                                  <input
-                                    type="text"
-                                    value={editYachtDepartFrom}
-                                    onChange={(e) => setEditYachtDepartFrom(e.target.value)}
-                                    placeholder="Enter custom location..."
-                                    className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                                  />
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      setShowEditCustomDepartFrom(false);
-                                      setEditYachtDepartFrom('');
-                                    }}
-                                    className="px-3 py-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
-                                  >
-                                    <X className="h-4 w-4" />
-                                  </button>
-                                </div>
-                              ) : (
-                                <select
-                                  value={marinaPresets.includes(editYachtDepartFrom) ? editYachtDepartFrom : ''}
-                                  onChange={(e) => handleDepartFromChange(e.target.value, true)}
-                                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                                >
-                                  <option value="">Select marina...</option>
-                                  {marinaPresets.map((marina) => (
-                                    <option key={marina} value={marina}>{marina}</option>
-                                  ))}
-                                  <option value="other">Other (Custom)</option>
-                                </select>
-                              )}
-                            </div>
-                            <div>
-                              <label className="block text-xs text-gray-500 mb-1">Owner/Operator</label>
-                              <input
-                                type="text"
-                                value={editYachtOwnerOperator}
-                                onChange={(e) => setEditYachtOwnerOperator(e.target.value)}
-                                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                              />
-                            </div>
-                          </div>
-                          <div className="mt-4 flex justify-end gap-2">
-                            <button
-                              onClick={handleCancelYachtEdit}
-                              className="px-4 py-2 text-gray-600 hover:bg-gray-200 rounded-lg transition-colors"
-                            >
-                              Cancel
-                            </button>
-                            <button
-                              onClick={handleSaveYachtEdit}
-                              disabled={!editYachtName.trim() || !editYachtDisplayName.trim()}
-                              className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                            >
-                              Save Changes
-                            </button>
-                          </div>
-                        </div>
-                      ) : (
-                        // Display mode
-                        <div className="p-4">
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-4 flex-1">
-                              <Ship className="h-5 w-5 text-gray-400 flex-shrink-0" />
-                              <div className="grid grid-cols-4 gap-4 flex-1">
-                                <div>
-                                  <p className="text-xs text-gray-500">Yacht Name</p>
-                                  <p className="font-medium text-gray-900">{yacht.name}</p>
-                                </div>
-                                <div>
-                                  <p className="text-xs text-gray-500">Display Name</p>
-                                  <p className="text-gray-700">{yacht.displayName || yacht.name}</p>
-                                </div>
-                                <div>
-                                  <p className="text-xs text-gray-500">Depart From</p>
-                                  <p className="text-gray-700">{yacht.departFrom || '-'}</p>
-                                </div>
-                                <div>
-                                  <p className="text-xs text-gray-500">Owner/Operator</p>
-                                  <p className="text-gray-700">{yacht.ownerOperator || '-'}</p>
-                                </div>
-                              </div>
-                            </div>
-                            {canEdit && (
-                              <div className="flex items-center gap-2 ml-4">
-                                <button
-                                  onClick={() => handleStartEditYacht(yacht)}
-                                  className="px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-200 rounded-lg transition-colors"
-                                >
-                                  Edit
-                                </button>
-                                <button
-                                  onClick={() => removeExternalYacht(yacht.id)}
-                                  className="p-1.5 text-red-500 hover:bg-red-50 rounded-lg transition-colors"
-                                >
-                                  <Trash2 className="h-4 w-4" />
-                                </button>
-                              </div>
-                            )}
-                          </div>
-                          {/* Products for this external yacht */}
-                          <YachtProductManager
-                            yachtSource="external"
-                            yachtId={yacht.id}
-                            yachtName={yacht.name}
-                            canEdit={canEdit}
-                          />
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="text-center py-8 text-gray-500">
-                  <Anchor className="h-8 w-8 mx-auto mb-2 text-gray-400" />
-                  <p>No external yachts added yet</p>
-                  {canEdit && (
-                    <p className="text-xs mt-1">Add yachts using the form above</p>
-                  )}
-                </div>
-              )}
-            </>
+            <div className="text-center py-8">
+              <Ship className="h-10 w-10 mx-auto mb-3 text-gray-400" />
+              <p className="text-gray-600 font-medium mb-2">External boats have moved to the Boat Register</p>
+              <p className="text-sm text-gray-500 mb-4">
+                Manage external boats with pictures, contracts, and contact details in the dedicated Boat Register page.
+              </p>
+              <a
+                href={`/bookings/${role}/boats`}
+                className="inline-flex items-center gap-2 px-4 py-2 bg-[#5A7A8F] text-white rounded-lg hover:bg-[#4a6a7f] transition-colors"
+              >
+                <Anchor className="h-4 w-4" />
+                Go to Boat Register
+              </a>
+            </div>
           )}
 
           {/* Own Yacht Tab */}
@@ -930,6 +702,9 @@ export default function BookingSettingsPage() {
           )}
         </div>
       </div>
+
+      {/* Dropdown Options */}
+      {canEdit && <BookingLookupsSettings />}
 
       {/* Info for non-editors */}
       {!canEdit && (

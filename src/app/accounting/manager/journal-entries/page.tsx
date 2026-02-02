@@ -1,12 +1,15 @@
 'use client';
 
 import { useState, useMemo, useEffect, useCallback } from 'react';
-import { FileDown, RefreshCw, Pencil, Plus, Trash2, Check, CheckSquare, Square, X, HelpCircle } from 'lucide-react';
+import { FileDown, RefreshCw, Pencil, Plus, Trash2, Check, CheckSquare, Square, X, HelpCircle, RotateCcw, Play, Pause, Calendar } from 'lucide-react';
 import { AppShell } from '@/components/accounting/AppShell';
 import { DataTable } from '@/components/accounting/DataTable';
 import { KPICard } from '@/components/accounting/KPICard';
 import { journalEntriesApi, chartOfAccountsApi, JournalEntryWithLines } from '@/lib/supabase/api/journalEntries';
 import { companiesApi } from '@/lib/supabase/api/companies';
+import { recurringEntriesApi, RecurringJournalTemplate } from '@/lib/supabase/api/recurringEntries';
+import { useAuth } from '@/components/auth';
+import { generateJournalReferenceNumber } from '@/lib/accounting/journalPostingService';
 import type { Database } from '@/lib/supabase/database.types';
 
 type ChartOfAccount = Database['public']['Tables']['chart_of_accounts']['Row'];
@@ -19,6 +22,337 @@ interface EditableLine {
   description: string;
   entry_type: 'debit' | 'credit';
   amount: number;
+}
+
+// Modal for creating a NEW journal entry
+function NewJournalEntryModal({
+  companies,
+  accounts,
+  onClose,
+  onCreate,
+}: {
+  companies: Company[];
+  accounts: ChartOfAccount[];
+  onClose: () => void;
+  onCreate: (data: { companyId: string; entryDate: string; description: string; lines: EditableLine[] }) => Promise<void>;
+}) {
+  const [isSaving, setIsSaving] = useState(false);
+  const [isPosting, setIsPosting] = useState(false);
+  const [companyId, setCompanyId] = useState('');
+  const [entryDate, setEntryDate] = useState(new Date().toISOString().split('T')[0]);
+  const [description, setDescription] = useState('');
+  const [lines, setLines] = useState<EditableLine[]>([
+    { account_code: '', description: '', entry_type: 'debit', amount: 0 },
+    { account_code: '', description: '', entry_type: 'credit', amount: 0 },
+  ]);
+
+  const totalDebit = lines
+    .filter((l) => l.entry_type === 'debit')
+    .reduce((sum, l) => sum + (l.amount || 0), 0);
+  const totalCredit = lines
+    .filter((l) => l.entry_type === 'credit')
+    .reduce((sum, l) => sum + (l.amount || 0), 0);
+  const isBalanced = Math.abs(totalDebit - totalCredit) < 0.01;
+
+  const handleAddLine = () => {
+    setLines([
+      ...lines,
+      { account_code: '', description: '', entry_type: 'debit', amount: 0 },
+    ]);
+  };
+
+  const handleRemoveLine = (index: number) => {
+    if (lines.length <= 2) {
+      alert('Journal entry must have at least 2 lines');
+      return;
+    }
+    setLines(lines.filter((_, i) => i !== index));
+  };
+
+  const handleLineChange = (index: number, field: keyof EditableLine, value: string | number) => {
+    const newLines = [...lines];
+    if (field === 'amount') {
+      newLines[index][field] = typeof value === 'string' ? parseFloat(value) || 0 : value;
+    } else if (field === 'entry_type') {
+      newLines[index][field] = value as 'debit' | 'credit';
+    } else {
+      newLines[index][field as 'account_code' | 'description'] = value as string;
+    }
+    setLines(newLines);
+  };
+
+  const validateForm = (): boolean => {
+    if (!companyId) {
+      alert('Please select a company');
+      return false;
+    }
+    if (!entryDate) {
+      alert('Please select a date');
+      return false;
+    }
+    if (!description.trim()) {
+      alert('Please enter a description');
+      return false;
+    }
+    if (lines.some((line) => !line.account_code)) {
+      alert('All lines must have an account selected');
+      return false;
+    }
+    if (lines.some((line) => line.amount <= 0)) {
+      alert('All lines must have an amount greater than 0');
+      return false;
+    }
+    if (!isBalanced) {
+      alert('Journal entry must be balanced (total debits = total credits)');
+      return false;
+    }
+    return true;
+  };
+
+  const handleSave = async (shouldPost: boolean = false) => {
+    if (!validateForm()) return;
+
+    if (shouldPost) {
+      setIsPosting(true);
+    } else {
+      setIsSaving(true);
+    }
+
+    try {
+      await onCreate({ companyId, entryDate, description, lines });
+      onClose();
+    } catch (error) {
+      console.error('Failed to create journal entry:', error);
+      alert('Failed to create journal entry');
+    } finally {
+      setIsSaving(false);
+      setIsPosting(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 overflow-y-auto">
+      <div
+        className="fixed inset-0 bg-black bg-opacity-50 transition-opacity"
+        onClick={onClose}
+      />
+      <div className="flex min-h-full items-center justify-center p-4">
+        <div
+          className="relative w-full max-w-4xl bg-white rounded-lg shadow-xl"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {/* Header */}
+          <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
+            <div>
+              <h2 className="text-xl font-semibold text-gray-900">
+                New Journal Entry
+              </h2>
+              <p className="text-sm text-gray-500 mt-1">
+                Create a manual journal entry
+              </p>
+            </div>
+            <button
+              onClick={onClose}
+              className="text-gray-400 hover:text-gray-600 transition-colors text-2xl"
+            >
+              &times;
+            </button>
+          </div>
+
+          {/* Content */}
+          <div className="px-6 py-6 space-y-6 max-h-[60vh] overflow-y-auto">
+            {/* Entry info */}
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+              <div>
+                <label className="text-sm font-medium text-gray-700 block mb-1">Date</label>
+                <input
+                  type="date"
+                  value={entryDate}
+                  onChange={(e) => setEntryDate(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#5A7A8F] focus:border-transparent"
+                />
+              </div>
+              <div className="col-span-2">
+                <label className="text-sm font-medium text-gray-700 block mb-1">Company</label>
+                <select
+                  value={companyId}
+                  onChange={(e) => setCompanyId(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#5A7A8F] focus:border-transparent"
+                >
+                  <option value="">Select company...</option>
+                  {companies.map((c) => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {/* Description */}
+            <div>
+              <label className="text-sm font-medium text-gray-700 block mb-1">Description</label>
+              <input
+                type="text"
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#5A7A8F] focus:border-transparent"
+                placeholder="Enter description..."
+              />
+            </div>
+
+            {/* Line items */}
+            <div>
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-lg font-medium text-gray-900">Line Items</h3>
+                <button
+                  onClick={handleAddLine}
+                  className="flex items-center gap-1 px-3 py-1.5 text-sm font-medium text-[#5A7A8F] hover:text-[#2c3e50] transition-colors"
+                >
+                  <Plus className="h-4 w-4" />
+                  Add Line
+                </button>
+              </div>
+              <div className="overflow-x-auto border border-gray-200 rounded-lg">
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                        Account
+                      </th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                        Description
+                      </th>
+                      <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">
+                        Debit
+                      </th>
+                      <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">
+                        Credit
+                      </th>
+                      <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase w-16">
+                        Action
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {lines.map((line, idx) => (
+                      <tr key={idx}>
+                        <td className="px-4 py-2">
+                          <select
+                            value={line.account_code}
+                            onChange={(e) => handleLineChange(idx, 'account_code', e.target.value)}
+                            className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-[#5A7A8F] focus:border-transparent"
+                          >
+                            <option value="">Select account...</option>
+                            {accounts.map((acc) => (
+                              <option key={acc.id} value={acc.code}>
+                                {acc.code} - {acc.name}
+                              </option>
+                            ))}
+                          </select>
+                        </td>
+                        <td className="px-4 py-2">
+                          <input
+                            type="text"
+                            value={line.description}
+                            onChange={(e) => handleLineChange(idx, 'description', e.target.value)}
+                            className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-[#5A7A8F] focus:border-transparent"
+                            placeholder="Line description..."
+                          />
+                        </td>
+                        <td className="px-4 py-2">
+                          <input
+                            type="number"
+                            value={line.entry_type === 'debit' ? line.amount || '' : ''}
+                            onChange={(e) => {
+                              handleLineChange(idx, 'entry_type', 'debit');
+                              handleLineChange(idx, 'amount', e.target.value);
+                            }}
+                            className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm text-right focus:ring-2 focus:ring-[#5A7A8F] focus:border-transparent"
+                            placeholder="0.00"
+                            min="0"
+                            step="0.01"
+                          />
+                        </td>
+                        <td className="px-4 py-2">
+                          <input
+                            type="number"
+                            value={line.entry_type === 'credit' ? line.amount || '' : ''}
+                            onChange={(e) => {
+                              handleLineChange(idx, 'entry_type', 'credit');
+                              handleLineChange(idx, 'amount', e.target.value);
+                            }}
+                            className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm text-right focus:ring-2 focus:ring-[#5A7A8F] focus:border-transparent"
+                            placeholder="0.00"
+                            min="0"
+                            step="0.01"
+                          />
+                        </td>
+                        <td className="px-4 py-2 text-center">
+                          <button
+                            onClick={() => handleRemoveLine(idx)}
+                            className="text-red-500 hover:text-red-700 transition-colors"
+                            title="Remove line"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot className="bg-gray-50">
+                    <tr>
+                      <td colSpan={2} className="px-4 py-3 text-sm font-medium text-gray-900">
+                        Totals
+                      </td>
+                      <td className="px-4 py-3 text-sm font-medium text-gray-900 text-right">
+                        {totalDebit.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                      </td>
+                      <td className="px-4 py-3 text-sm font-medium text-gray-900 text-right">
+                        {totalCredit.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                      </td>
+                      <td />
+                    </tr>
+                    {!isBalanced && (
+                      <tr>
+                        <td colSpan={5} className="px-4 py-2 text-sm text-red-600">
+                          Warning: Entry is not balanced. Difference:{' '}
+                          {Math.abs(totalDebit - totalCredit).toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                        </td>
+                      </tr>
+                    )}
+                  </tfoot>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          {/* Footer */}
+          <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-gray-200">
+            <button
+              onClick={onClose}
+              className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={() => handleSave(false)}
+              disabled={isSaving || isPosting}
+              className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50"
+            >
+              {isSaving ? 'Saving...' : 'Save as Draft'}
+            </button>
+            <button
+              onClick={() => handleSave(true)}
+              disabled={isSaving || isPosting || !isBalanced}
+              className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-green-600 rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50"
+            >
+              <Check className="h-4 w-4" />
+              {isPosting ? 'Posting...' : 'Save & Post'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 // Modal for viewing and editing journal entry details
@@ -132,7 +466,7 @@ function JournalEntryModal({
   };
 
   const handleDelete = async () => {
-    if (!confirm('Are you sure you want to delete this journal entry? This action cannot be undone.')) {
+    if (!confirm('Delete this journal entry? It will be moved to the Deleted tab.')) {
       return;
     }
     setIsDeleting(true);
@@ -168,7 +502,10 @@ function JournalEntryModal({
         onClick={onClose}
       />
       <div className="flex min-h-full items-center justify-center p-4">
-        <div className="relative w-full max-w-4xl bg-white rounded-lg shadow-xl">
+        <div
+          className="relative w-full max-w-4xl bg-white rounded-lg shadow-xl"
+          onClick={(e) => e.stopPropagation()}
+        >
           {/* Header */}
           <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
             <div>
@@ -722,8 +1059,27 @@ export default function JournalEntriesPage() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isBulkPosting, setIsBulkPosting] = useState(false);
 
+  // Tab state
+  const [activeTab, setActiveTab] = useState<'entries' | 'deleted' | 'recurring'>('entries');
+
+  // Deleted tab state
+  const [deletedEntries, setDeletedEntries] = useState<JournalEntryWithLines[]>([]);
+  const [loadingDeleted, setLoadingDeleted] = useState(false);
+
   // Help modal state
   const [showHelpModal, setShowHelpModal] = useState(false);
+
+  // New journal entry modal state
+  const [showNewEntryModal, setShowNewEntryModal] = useState(false);
+
+  // Auth
+  const { user } = useAuth();
+
+  // Recurring tab state
+  const [recurringTemplates, setRecurringTemplates] = useState<RecurringJournalTemplate[]>([]);
+  const [loadingRecurring, setLoadingRecurring] = useState(false);
+  const [executingTemplateId, setExecutingTemplateId] = useState<string | null>(null);
+  const [executingAllDue, setExecutingAllDue] = useState(false);
 
   // Filter states
   const [filterStatus, setFilterStatus] = useState<'all' | JournalEntryStatus>('all');
@@ -755,9 +1111,106 @@ export default function JournalEntriesPage() {
     loadData();
   }, [loadData]);
 
+  // Load deleted entries when tab is active
+  useEffect(() => {
+    if (activeTab !== 'deleted') return;
+    const loadDeleted = async () => {
+      setLoadingDeleted(true);
+      try {
+        const data = await journalEntriesApi.getDeleted();
+        setDeletedEntries(data);
+      } catch (error) {
+        console.error('Failed to load deleted entries:', error);
+      } finally {
+        setLoadingDeleted(false);
+      }
+    };
+    loadDeleted();
+  }, [activeTab]);
+
+  // Load recurring templates when tab is active
+  useEffect(() => {
+    if (activeTab !== 'recurring') return;
+    const loadRecurring = async () => {
+      setLoadingRecurring(true);
+      try {
+        const data = await recurringEntriesApi.getAll();
+        setRecurringTemplates(data);
+      } catch (error) {
+        console.error('Failed to load recurring templates:', error);
+      } finally {
+        setLoadingRecurring(false);
+      }
+    };
+    loadRecurring();
+  }, [activeTab]);
+
+  // Recurring handlers
+  const handleRunTemplate = async (template: RecurringJournalTemplate) => {
+    if (!confirm(`Run recurring entry "${template.description}" now?`)) return;
+    setExecutingTemplateId(template.id);
+    try {
+      await recurringEntriesApi.executeEntry(template);
+      // Refresh recurring list
+      const data = await recurringEntriesApi.getAll();
+      setRecurringTemplates(data);
+      await loadData();
+    } catch (error) {
+      console.error('Failed to execute recurring entry:', error);
+      alert('Failed to execute recurring entry');
+    } finally {
+      setExecutingTemplateId(null);
+    }
+  };
+
+  const handleRunAllDue = async () => {
+    if (!confirm('Execute all due recurring entries now?')) return;
+    setExecutingAllDue(true);
+    try {
+      const result = await recurringEntriesApi.executeDueEntries();
+      alert(`Executed ${result.executed} entries. ${result.errors > 0 ? `${result.errors} errors.` : ''}`);
+      const data = await recurringEntriesApi.getAll();
+      setRecurringTemplates(data);
+      await loadData();
+    } catch (error) {
+      console.error('Failed to execute due entries:', error);
+      alert('Failed to execute due entries');
+    } finally {
+      setExecutingAllDue(false);
+    }
+  };
+
+  const handleDeactivateTemplate = async (template: RecurringJournalTemplate) => {
+    const newState = !template.is_active;
+    if (!confirm(`${newState ? 'Activate' : 'Deactivate'} "${template.description}"?`)) return;
+    try {
+      await recurringEntriesApi.update(template.id, { is_active: newState } as any);
+      setRecurringTemplates((prev) =>
+        prev.map((t) => (t.id === template.id ? { ...t, is_active: newState } : t))
+      );
+    } catch (error) {
+      console.error('Failed to update template:', error);
+      alert('Failed to update template');
+    }
+  };
+
+  // Restore handler
+  const handleRestoreEntry = async (entryId: string) => {
+    try {
+      await journalEntriesApi.restore(entryId);
+      setDeletedEntries((prev) => prev.filter((e) => e.id !== entryId));
+      await loadData();
+    } catch (error) {
+      console.error('Failed to restore entry:', error);
+      alert('Failed to restore journal entry');
+    }
+  };
+
   // Filtered entries
   const filteredEntries = useMemo(() => {
     return entries.filter((entry) => {
+      // Safety net: never show deleted entries in normal view
+      if (entry.status === 'deleted') return false;
       if (filterStatus !== 'all' && entry.status !== filterStatus) {
         return false;
       }
@@ -909,6 +1362,46 @@ export default function JournalEntriesPage() {
 
   const handleDeleteEntry = async (entryId: string) => {
     await journalEntriesApi.delete(entryId);
+    await loadData();
+  };
+
+  const handleCreateEntry = async (data: { companyId: string; entryDate: string; description: string; lines: EditableLine[] }) => {
+    // Generate reference number
+    const referenceNumber = await generateJournalReferenceNumber(data.companyId);
+
+    // Calculate totals
+    const totalDebit = data.lines
+      .filter((l) => l.entry_type === 'debit')
+      .reduce((sum, l) => sum + (l.amount || 0), 0);
+    const totalCredit = data.lines
+      .filter((l) => l.entry_type === 'credit')
+      .reduce((sum, l) => sum + (l.amount || 0), 0);
+
+    // Create the journal entry
+    const newEntry = await journalEntriesApi.create({
+      reference_number: referenceNumber,
+      company_id: data.companyId,
+      entry_date: data.entryDate,
+      description: data.description,
+      status: 'draft',
+      total_debit: totalDebit,
+      total_credit: totalCredit,
+      is_auto_generated: false, // Manual entry
+    });
+
+    // Create the lines
+    await journalEntriesApi.updateLines(
+      newEntry.id,
+      data.lines.map((line) => ({
+        journal_entry_id: newEntry.id,
+        account_code: line.account_code,
+        description: line.description,
+        entry_type: line.entry_type,
+        amount: line.amount,
+      }))
+    );
+
+    // Refresh the list
     await loadData();
   };
 
@@ -1120,6 +1613,253 @@ export default function JournalEntriesPage() {
           />
         </div>
 
+        {/* Tabs */}
+        <div className="flex items-center gap-2 border-b border-gray-200">
+          <button
+            onClick={() => setActiveTab('entries')}
+            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+              activeTab === 'entries'
+                ? 'border-[#5A7A8F] text-[#5A7A8F]'
+                : 'border-transparent text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            Journal Entries
+          </button>
+          <button
+            onClick={() => setActiveTab('deleted')}
+            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors flex items-center gap-2 ${
+              activeTab === 'deleted'
+                ? 'border-red-500 text-red-600'
+                : 'border-transparent text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+            Deleted
+            {deletedEntries.length > 0 && (
+              <span className="px-1.5 py-0.5 text-xs bg-red-100 text-red-600 rounded-full">
+                {deletedEntries.length}
+              </span>
+            )}
+          </button>
+          <button
+            onClick={() => setActiveTab('recurring')}
+            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors flex items-center gap-2 ${
+              activeTab === 'recurring'
+                ? 'border-[#5A7A8F] text-[#5A7A8F]'
+                : 'border-transparent text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            <Calendar className="h-3.5 w-3.5" />
+            Recurring
+          </button>
+        </div>
+
+        {activeTab === 'recurring' ? (
+          /* Recurring Tab Content */
+          <div className="space-y-4">
+            {/* Action bar */}
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-semibold text-gray-900">Recurring Journal Templates</h2>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={handleRunAllDue}
+                  disabled={executingAllDue}
+                  className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-green-600 rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50"
+                >
+                  <Play className="h-4 w-4" />
+                  {executingAllDue ? 'Running...' : 'Run All Due'}
+                </button>
+                <button
+                  onClick={() => alert('New Template form coming soon')}
+                  className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-[#5A7A8F] rounded-lg hover:bg-[#4a6a7f] transition-colors"
+                >
+                  <Plus className="h-4 w-4" />
+                  New Template
+                </button>
+              </div>
+            </div>
+
+            {/* Table */}
+            <div className="bg-white rounded-lg shadow">
+              {loadingRecurring ? (
+                <div className="flex items-center justify-center py-12">
+                  <RefreshCw className="h-6 w-6 animate-spin text-gray-400" />
+                  <span className="ml-2 text-gray-500">Loading recurring templates...</span>
+                </div>
+              ) : recurringTemplates.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-12">
+                  <Calendar className="h-12 w-12 text-gray-300 mb-3" />
+                  <p className="text-sm text-gray-500">No recurring journal templates</p>
+                  <p className="text-xs text-gray-400 mt-1">Create a template to automate recurring journal entries</p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="min-w-full divide-y divide-gray-200">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Description</th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Frequency</th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Next Run</th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Last Run</th>
+                        <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Status</th>
+                        <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white divide-y divide-gray-200">
+                      {recurringTemplates.map((template) => {
+                        const isDue = template.is_active && template.next_run_date <= new Date().toISOString().split('T')[0];
+                        return (
+                          <tr key={template.id} className="hover:bg-gray-50">
+                            <td className="px-4 py-3 text-sm text-gray-900">
+                              <div>
+                                <span className="font-medium">{template.description}</span>
+                                {template.auto_post && (
+                                  <span className="ml-2 px-1.5 py-0.5 text-xs bg-blue-100 text-blue-700 rounded">Auto-post</span>
+                                )}
+                              </div>
+                              <span className="text-xs text-gray-500">
+                                {template.template_lines.length} lines | Run count: {template.run_count}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 text-sm text-gray-900 capitalize">{template.frequency}</td>
+                            <td className="px-4 py-3 text-sm">
+                              <span className={isDue ? 'text-orange-600 font-medium' : 'text-gray-900'}>
+                                {new Date(template.next_run_date).toLocaleDateString('en-US', {
+                                  year: 'numeric', month: 'short', day: 'numeric',
+                                })}
+                              </span>
+                              {isDue && <span className="ml-1 text-xs text-orange-500">(due)</span>}
+                            </td>
+                            <td className="px-4 py-3 text-sm text-gray-900">
+                              {template.last_run_date
+                                ? new Date(template.last_run_date).toLocaleDateString('en-US', {
+                                    year: 'numeric', month: 'short', day: 'numeric',
+                                  })
+                                : '-'}
+                            </td>
+                            <td className="px-4 py-3 text-center">
+                              <span
+                                className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                                  template.is_active
+                                    ? 'bg-green-100 text-green-800'
+                                    : 'bg-gray-100 text-gray-600'
+                                }`}
+                              >
+                                {template.is_active ? 'Active' : 'Inactive'}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 text-center">
+                              <div className="flex items-center justify-center gap-2">
+                                <button
+                                  onClick={() => handleRunTemplate(template)}
+                                  disabled={!template.is_active || executingTemplateId === template.id}
+                                  className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-white bg-green-600 hover:bg-green-700 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                  title="Run Now"
+                                >
+                                  <Play className="h-3 w-3" />
+                                  {executingTemplateId === template.id ? 'Running...' : 'Run Now'}
+                                </button>
+                                <button
+                                  onClick={() => alert('Edit template form coming soon')}
+                                  className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-[#5A7A8F] bg-gray-100 hover:bg-gray-200 rounded transition-colors"
+                                  title="Edit"
+                                >
+                                  <Pencil className="h-3 w-3" />
+                                  Edit
+                                </button>
+                                <button
+                                  onClick={() => handleDeactivateTemplate(template)}
+                                  className={`inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium rounded transition-colors ${
+                                    template.is_active
+                                      ? 'text-orange-700 bg-orange-50 hover:bg-orange-100'
+                                      : 'text-green-700 bg-green-50 hover:bg-green-100'
+                                  }`}
+                                  title={template.is_active ? 'Deactivate' : 'Activate'}
+                                >
+                                  <Pause className="h-3 w-3" />
+                                  {template.is_active ? 'Deactivate' : 'Activate'}
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        ) : activeTab === 'deleted' ? (
+          /* Deleted Tab Content */
+          <div className="bg-white rounded-lg shadow">
+            {loadingDeleted ? (
+              <div className="flex items-center justify-center py-12">
+                <RefreshCw className="h-6 w-6 animate-spin text-gray-400" />
+                <span className="ml-2 text-gray-500">Loading deleted entries...</span>
+              </div>
+            ) : deletedEntries.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-12">
+                <Trash2 className="h-12 w-12 text-gray-300 mb-3" />
+                <p className="text-sm text-gray-500">No deleted journal entries</p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Reference</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Company</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Description</th>
+                      <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Amount</th>
+                      <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {deletedEntries.map((entry) => {
+                      const company = companies.find((c) => c.id === entry.company_id);
+                      return (
+                        <tr key={entry.id} className="hover:bg-gray-50">
+                          <td className="px-4 py-3 text-sm font-medium text-gray-900">
+                            {entry.reference_number || '-'}
+                          </td>
+                          <td className="px-4 py-3 text-sm text-gray-900">
+                            {new Date(entry.entry_date).toLocaleDateString('en-US', {
+                              year: 'numeric', month: 'short', day: 'numeric',
+                            })}
+                          </td>
+                          <td className="px-4 py-3 text-sm text-gray-900">
+                            {company?.name || 'Unknown'}
+                          </td>
+                          <td className="px-4 py-3 text-sm text-gray-900 max-w-xs truncate">
+                            {entry.description || '-'}
+                          </td>
+                          <td className="px-4 py-3 text-sm text-gray-900 text-right font-medium">
+                            {(entry.total_debit || 0).toLocaleString('en-US', {
+                              minimumFractionDigits: 2, maximumFractionDigits: 2,
+                            })}
+                          </td>
+                          <td className="px-4 py-3 text-center">
+                            <button
+                              onClick={() => handleRestoreEntry(entry.id)}
+                              className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-blue-700 bg-blue-50 hover:bg-blue-100 rounded transition-colors"
+                            >
+                              <RotateCcw className="h-3 w-3" />
+                              Restore
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        ) : (
+        /* Normal Entries Tab */
+        <>
         {/* Filters & Actions */}
         <div className="space-y-4">
           {/* Top row: Search and Action Buttons */}
@@ -1157,6 +1897,13 @@ export default function JournalEntriesPage() {
                 </>
               ) : (
                 <>
+                  <button
+                    onClick={() => setShowNewEntryModal(true)}
+                    className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-[#5A7A8F] rounded-lg hover:bg-[#4a6a7f] transition-colors"
+                  >
+                    <Plus className="h-4 w-4" />
+                    New Entry
+                  </button>
                   <button
                     onClick={() => setIsSelectionMode(true)}
                     disabled={draftCount === 0}
@@ -1274,6 +2021,18 @@ export default function JournalEntriesPage() {
             onPost={handlePostEntry}
             onDelete={handleDeleteEntry}
           />
+        )}
+
+        {/* New Journal Entry Modal */}
+        {showNewEntryModal && (
+          <NewJournalEntryModal
+            companies={companies}
+            accounts={accounts}
+            onClose={() => setShowNewEntryModal(false)}
+            onCreate={handleCreateEntry}
+          />
+        )}
+        </>
         )}
 
         {/* Help Modal */}

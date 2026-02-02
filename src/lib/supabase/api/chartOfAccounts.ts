@@ -1,7 +1,16 @@
 import { createClient } from '../client';
 import type { Database } from '../database.types';
 
-type ChartOfAccount = Database['public']['Tables']['chart_of_accounts']['Row'];
+type ChartOfAccountRow = Database['public']['Tables']['chart_of_accounts']['Row'];
+
+// Extended type that includes columns added in migration 003
+// (sub_type, category, description, currency are not in the auto-generated types)
+export type ChartOfAccount = ChartOfAccountRow & {
+  sub_type?: string | null;
+  category?: string | null;
+  description?: string | null;
+  currency?: string | null;
+};
 
 export const chartOfAccountsApi = {
   async getAll(): Promise<ChartOfAccount[]> {
@@ -11,7 +20,8 @@ export const chartOfAccountsApi = {
       .select('*')
       .order('code');
     if (error) throw error;
-    return data ?? [];
+    // Cast to extended type that includes category and other extra columns
+    return (data ?? []) as ChartOfAccount[];
   },
 
   async getByType(type: string): Promise<ChartOfAccount[]> {
