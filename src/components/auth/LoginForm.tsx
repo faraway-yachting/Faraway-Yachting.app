@@ -24,7 +24,8 @@ export function LoginForm({ redirectTo = '/' }: LoginFormProps) {
 
     try {
       await authApi.signIn({ email, password });
-      window.location.href = redirectTo;
+      router.refresh();
+      router.push(redirectTo);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to sign in');
       setIsLoading(false);
