@@ -13,6 +13,7 @@ import type { Company, Currency } from '@/data/company/types';
 import type { BankAccount } from '@/data/banking/types';
 import type { Attachment } from '@/data/accounting/journalEntryTypes';
 import { formatCurrency, formatDate, isOverdue } from '@/lib/expenses/utils';
+import { getFiscalYear, getFiscalYearDateRange } from '@/lib/reports/projectPLCalculation';
 
 // Extended expense type with payment info
 interface ExpenseWithPaymentInfo extends ExpenseRecord {
@@ -26,14 +27,14 @@ export default function ExpenseRecordsPage() {
   const [isLoading, setIsLoading] = useState(true);
 
   const [dataScope, setDataScope] = useState('all-companies');
-  // Default date range: current year (Jan 1 to Dec 31)
+  // Default date range: fiscal year (Nov 1 to Oct 31)
   const [dateFrom, setDateFrom] = useState(() => {
-    const date = new Date();
-    return `${date.getFullYear()}-01-01`;
+    const { startDate } = getFiscalYearDateRange(getFiscalYear(new Date()));
+    return startDate;
   });
   const [dateTo, setDateTo] = useState(() => {
-    const date = new Date();
-    return `${date.getFullYear()}-12-31`;
+    const { endDate } = getFiscalYearDateRange(getFiscalYear(new Date()));
+    return endDate;
   });
   // Default status: Approved
   const [selectedStatuses, setSelectedStatuses] = useState<ExpenseStatus[]>(['approved']);

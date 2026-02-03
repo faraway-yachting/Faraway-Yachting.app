@@ -9,6 +9,7 @@ import { Loader2, ChevronDown, ChevronUp, RotateCcw, Save, Shield, Plus, X, Tras
 const MODULES = [
   { key: 'accounting', label: 'Accounting' },
   { key: 'bookings', label: 'Bookings' },
+  { key: 'hr', label: 'HR' },
 ];
 
 // Menu items per module (for visibility editor)
@@ -32,7 +33,17 @@ const MENU_ITEMS: Record<string, { key: string; label: string }[]> = {
     { key: 'calendar', label: 'Calendar' },
     { key: 'bookings', label: 'Bookings' },
     { key: 'guests', label: 'Guests' },
+    { key: 'commissions', label: 'Commissions' },
     { key: 'reports', label: 'Reports' },
+    { key: 'settings', label: 'Settings' },
+  ],
+  hr: [
+    { key: 'dashboard', label: 'Dashboard' },
+    { key: 'employees', label: 'Employees' },
+    { key: 'payroll', label: 'Payroll' },
+    { key: 'leave', label: 'Leave Management' },
+    { key: 'documents', label: 'Documents' },
+    { key: 'crew-schedule', label: 'Crew Schedule' },
   ],
 };
 
@@ -50,7 +61,14 @@ const RESOURCES: Record<string, { key: string; label: string }[]> = {
     { key: 'bookings', label: 'Bookings' },
     { key: 'calendar', label: 'Calendar' },
     { key: 'guests', label: 'Guests' },
+    { key: 'commissions', label: 'Commissions' },
     { key: 'reports', label: 'Reports' },
+  ],
+  hr: [
+    { key: 'employees', label: 'Employees' },
+    { key: 'payroll', label: 'Payroll' },
+    { key: 'leave', label: 'Leave Requests' },
+    { key: 'documents', label: 'Documents' },
   ],
 };
 

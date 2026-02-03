@@ -471,12 +471,23 @@ export function BookingFormContainer({
     return Object.keys(newErrors).length === 0;
   };
 
-  const buildSaveData = (): Partial<Booking> => ({
-    ...formData,
-    projectId: useExternalBoat ? undefined : formData.projectId,
-    externalBoatName: useExternalBoat ? formData.externalBoatName : undefined,
-    pickupLocation: formData.departureFrom || formData.pickupLocation,
-  });
+  const buildSaveData = (): Partial<Booking> => {
+    // Auto-set charter expense status for external boats
+    let charterExpenseStatus = formData.charterExpenseStatus;
+    if (useExternalBoat && (formData.charterCost ?? 0) > 0 && !formData.linkedExpenseId) {
+      charterExpenseStatus = 'pending_accounting';
+    } else if (!useExternalBoat) {
+      charterExpenseStatus = undefined;
+    }
+
+    return {
+      ...formData,
+      projectId: useExternalBoat ? undefined : formData.projectId,
+      externalBoatName: useExternalBoat ? formData.externalBoatName : undefined,
+      pickupLocation: formData.departureFrom || formData.pickupLocation,
+      charterExpenseStatus,
+    };
+  };
 
   const executeSave = async (dataToSave: Partial<Booking>) => {
     setIsSaving(true);

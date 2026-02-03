@@ -11,7 +11,12 @@ interface CommissionSectionProps {
 }
 
 export default function CommissionSection({ formData, onChange, canEdit }: CommissionSectionProps) {
-  const autoTotalCommission = (formData.charterFee || 0) * (formData.commissionRate || 0) / 100;
+  // For external boats, commission is based on profit (revenue - cost)
+  const isExternalBoat = !!formData.externalBoatName && !formData.projectId;
+  const commissionBase = isExternalBoat
+    ? (formData.charterFee || 0) + (formData.extraCharges || 0) - (formData.charterCost || 0)
+    : (formData.charterFee || 0);
+  const autoTotalCommission = commissionBase * (formData.commissionRate || 0) / 100;
   const autoCommissionReceived = (formData.totalCommission ?? autoTotalCommission) - (formData.commissionDeduction || 0);
 
   // Auto-calculate total commission when charterFee or commissionRate changes
@@ -24,8 +29,8 @@ export default function CommissionSection({ formData, onChange, canEdit }: Commi
   const handleRateChange = (value: string) => {
     const rate = value === '' ? undefined : parseFloat(value);
     onChange('commissionRate', rate);
-    // Auto-update totalCommission unless user has manually set it differently
-    const newTotal = (formData.charterFee || 0) * (rate || 0) / 100;
+    // Auto-update totalCommission
+    const newTotal = commissionBase * (rate || 0) / 100;
     onChange('totalCommission', newTotal);
     onChange('commissionReceived', newTotal - (formData.commissionDeduction || 0));
   };
@@ -53,6 +58,13 @@ export default function CommissionSection({ formData, onChange, canEdit }: Commi
         <DollarSign className="h-4 w-4 text-teal-600" />
         <h3 className="text-sm font-semibold text-teal-800">Booking Owner Commission</h3>
       </div>
+
+      {isExternalBoat && (
+        <p className="text-xs text-teal-700 mb-2">
+          Commission based on profit: {commissionBase.toLocaleString('en', { minimumFractionDigits: 2 })}
+          {' '}(Charter Fee + Extras - Boat Owner Cost)
+        </p>
+      )}
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {/* Commission Rate */}

@@ -1,7 +1,8 @@
 'use client';
 
-import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback, useRef, ReactNode } from 'react';
 import { BoatColor, defaultBoatColors, defaultExternalBoatColor } from '@/data/booking/types';
+import { bookingSettingsApi } from '@/lib/supabase/api/bookingSettings';
 
 // External yacht definition
 export interface ExternalYacht {
@@ -66,9 +67,11 @@ interface BookingSettingsContextType {
   // Calendar display settings
   calendarDisplay: CalendarDisplaySettings;
   setCalendarDisplayFields: (view: 'all' | 'boat', fields: string[]) => void;
+  // Save
+  isDirty: boolean;
+  isSaving: boolean;
+  saveSettings: () => Promise<void>;
 }
-
-const STORAGE_KEY = 'faraway-booking-settings';
 
 const BookingSettingsContext = createContext<BookingSettingsContextType | undefined>(undefined);
 
@@ -80,48 +83,57 @@ export function BookingSettingsProvider({ children }: { children: ReactNode }) {
     calendarDisplay: DEFAULT_CALENDAR_DISPLAY,
   });
   const [isLoaded, setIsLoaded] = useState(false);
+  const [isDirty, setIsDirty] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const savedSettingsRef = useRef<BookingSettings | null>(null);
 
-  // Load settings from localStorage on mount
+  // Load settings from Supabase on mount
   useEffect(() => {
-    try {
-      const stored = localStorage.getItem(STORAGE_KEY);
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        // Migrate old external boats format to new format
-        const migratedExternalBoats = (parsed.externalBoats || []).map((boat: Partial<ExternalYacht> & { name: string }) => ({
-          id: boat.id || `ext-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-          name: boat.name,
-          displayName: boat.displayName || boat.name, // Use name as displayName if not set
-          departFrom: boat.departFrom || '',
-          ownerOperator: boat.ownerOperator || '',
-        }));
-        // Merge with defaults to ensure all fields exist (for backwards compatibility)
-        setSettings({
-          boatColors: parsed.boatColors || [],
-          externalBoats: migratedExternalBoats,
-          bannerImageUrl: parsed.bannerImageUrl ?? null,
-          calendarDisplay: parsed.calendarDisplay ?? DEFAULT_CALENDAR_DISPLAY,
-        });
-      }
-    } catch (error) {
-      console.error('Error loading booking settings:', error);
-    }
-    setIsLoaded(true);
+    bookingSettingsApi.get().then((data) => {
+      const loaded: BookingSettings = {
+        boatColors: data.boatColors || [],
+        externalBoats: data.externalBoats || [],
+        bannerImageUrl: data.bannerImageUrl,
+        calendarDisplay: data.calendarDisplay || DEFAULT_CALENDAR_DISPLAY,
+      };
+      setSettings(loaded);
+      savedSettingsRef.current = loaded;
+      setIsLoaded(true);
+    }).catch((err) => {
+      console.error('Error loading booking settings:', err);
+      setIsLoaded(true);
+    });
   }, []);
 
-  // Save settings to localStorage whenever they change
+  // Track dirty state
   useEffect(() => {
-    if (isLoaded) {
-      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
-      } catch (error) {
-        console.error('Error saving booking settings:', error);
-      }
-    }
+    if (!isLoaded || !savedSettingsRef.current) return;
+    const dirty = JSON.stringify(settings) !== JSON.stringify(savedSettingsRef.current);
+    setIsDirty(dirty);
   }, [settings, isLoaded]);
 
+  // Manual save
+  const saveSettings = useCallback(async () => {
+    setIsSaving(true);
+    try {
+      await bookingSettingsApi.update({
+        boatColors: settings.boatColors,
+        externalBoats: settings.externalBoats,
+        bannerImageUrl: settings.bannerImageUrl,
+        calendarDisplay: settings.calendarDisplay,
+      });
+      savedSettingsRef.current = { ...settings };
+      setIsDirty(false);
+    } catch (err) {
+      console.error('Error saving booking settings:', err);
+      throw err;
+    } finally {
+      setIsSaving(false);
+    }
+  }, [settings]);
+
   // Get boat color by ID, return default if not set
-  const getBoatColor = (boatId: string): string => {
+  const getBoatColor = useCallback((boatId: string): string => {
     const boatColor = settings.boatColors.find(bc => bc.id === boatId);
     if (boatColor) {
       return boatColor.color;
@@ -136,7 +148,7 @@ export function BookingSettingsProvider({ children }: { children: ReactNode }) {
     const existingIds = settings.boatColors.map(bc => bc.id);
     const colorIndex = existingIds.length % defaultBoatColors.length;
     return defaultBoatColors[colorIndex];
-  };
+  }, [settings.boatColors]);
 
   // Set or update boat color
   const setBoatColor = (boatId: string, name: string, color: string) => {
@@ -237,6 +249,9 @@ export function BookingSettingsProvider({ children }: { children: ReactNode }) {
         setBannerImageUrl,
         calendarDisplay: settings.calendarDisplay ?? DEFAULT_CALENDAR_DISPLAY,
         setCalendarDisplayFields,
+        isDirty,
+        isSaving,
+        saveSettings,
       }}
     >
       {children}

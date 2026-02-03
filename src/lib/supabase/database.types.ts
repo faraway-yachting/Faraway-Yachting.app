@@ -698,6 +698,10 @@ export type Database = {
           internal_note_attachments: unknown
           updated_by: string | null
           updated_by_name: string | null
+          charter_cost: number | null
+          charter_cost_currency: string | null
+          charter_expense_status: string | null
+          linked_expense_id: string | null
         }
         Insert: {
           id?: string
@@ -754,6 +758,10 @@ export type Database = {
           internal_note_attachments?: unknown
           updated_by?: string | null
           updated_by_name?: string | null
+          charter_cost?: number | null
+          charter_cost_currency?: string | null
+          charter_expense_status?: string | null
+          linked_expense_id?: string | null
         }
         Update: {
           id?: string
@@ -810,6 +818,10 @@ export type Database = {
           internal_note_attachments?: unknown
           updated_by?: string | null
           updated_by_name?: string | null
+          charter_cost?: number | null
+          charter_cost_currency?: string | null
+          charter_expense_status?: string | null
+          linked_expense_id?: string | null
         }
         Relationships: []
       }
@@ -886,6 +898,70 @@ export type Database = {
           due_date?: string | null
           paid_date?: string | null
           note?: string | null
+        }
+        Relationships: []
+      }
+      booking_settings: {
+        Row: {
+          id: string
+          boat_colors: unknown
+          external_boats: unknown
+          banner_image_url: string | null
+          calendar_display: unknown
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          boat_colors?: unknown
+          external_boats?: unknown
+          banner_image_url?: string | null
+          calendar_display?: unknown
+        }
+        Update: {
+          boat_colors?: unknown
+          external_boats?: unknown
+          banner_image_url?: string | null
+          calendar_display?: unknown
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      notifications: {
+        Row: {
+          id: string
+          type: string
+          title: string
+          message: string
+          link: string | null
+          reference_id: string
+          reference_number: string | null
+          target_role: string
+          target_user_id: string | null
+          read: boolean
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          type: string
+          title: string
+          message: string
+          link?: string | null
+          reference_id: string
+          reference_number?: string | null
+          target_role?: string
+          target_user_id?: string | null
+          read?: boolean
+        }
+        Update: {
+          type?: string
+          title?: string
+          message?: string
+          link?: string | null
+          reference_id?: string
+          reference_number?: string | null
+          target_role?: string
+          target_user_id?: string | null
+          read?: boolean
         }
         Relationships: []
       }

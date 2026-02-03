@@ -73,6 +73,10 @@ function dbBookingToFrontend(db: DbBooking): Booking {
     updatedAt: db.updated_at,
     updatedBy: db.updated_by ?? undefined,
     updatedByName: db.updated_by_name ?? undefined,
+    charterCost: db.charter_cost ?? undefined,
+    charterCostCurrency: (db as any).charter_cost_currency ?? undefined,
+    charterExpenseStatus: db.charter_expense_status ?? undefined,
+    linkedExpenseId: db.linked_expense_id ?? undefined,
   };
 }
 
@@ -132,6 +136,10 @@ function frontendToDb(booking: Partial<Booking>): Partial<DbBookingInsert> {
   if (booking.internalNotes !== undefined) db.internal_notes = booking.internalNotes || null;
   if (booking.customerNotes !== undefined) db.customer_notes = booking.customerNotes || null;
   if (booking.internalNoteAttachments !== undefined) db.internal_note_attachments = booking.internalNoteAttachments as unknown;
+  if (booking.charterCost !== undefined) db.charter_cost = booking.charterCost;
+  if (booking.charterCostCurrency !== undefined) (db as any).charter_cost_currency = booking.charterCostCurrency;
+  if (booking.charterExpenseStatus !== undefined) db.charter_expense_status = booking.charterExpenseStatus;
+  if (booking.linkedExpenseId !== undefined) db.linked_expense_id = booking.linkedExpenseId;
   return db;
 }
 
@@ -288,6 +296,17 @@ export const bookingsApi = {
       .in('status', ['enquiry', 'hold', 'booked'])
       .order('date_from', { ascending: true })
       .limit(20);
+    if (error) throw error;
+    return (data ?? []).map(dbBookingToFrontend);
+  },
+
+  async getPendingCharterExpenses(): Promise<Booking[]> {
+    const supabase = createClient();
+    const { data, error } = await supabase
+      .from('bookings')
+      .select('*')
+      .eq('charter_expense_status', 'pending_accounting')
+      .order('date_from', { ascending: false });
     if (error) throw error;
     return (data ?? []).map(dbBookingToFrontend);
   },

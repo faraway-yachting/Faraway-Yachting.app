@@ -2,7 +2,7 @@
 
 import { ReactNode, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { AuthProvider, useAuth } from '@/components/auth';
+import { useAuth } from '@/components/auth';
 import Link from 'next/link';
 import { Shield, Users, ArrowLeft, Loader2, Key } from 'lucide-react';
 import { usePathname } from 'next/navigation';
@@ -116,8 +116,6 @@ function AdminLayoutContent({ children }: AdminLayoutProps) {
 
 export default function AdminLayout({ children }: AdminLayoutProps) {
   return (
-    <AuthProvider>
-      <AdminLayoutContent>{children}</AdminLayoutContent>
-    </AuthProvider>
+    <AdminLayoutContent>{children}</AdminLayoutContent>
   );
 }

@@ -115,6 +115,11 @@ export interface Booking {
   updatedAt: string;
   updatedBy?: string;
   updatedByName?: string;
+  // Charter expense (external boats)
+  charterCost?: number;
+  charterCostCurrency?: string;
+  charterExpenseStatus?: string;
+  linkedExpenseId?: string;
 }
 
 // Booking payment record (multiple deposits/balances in multiple currencies)

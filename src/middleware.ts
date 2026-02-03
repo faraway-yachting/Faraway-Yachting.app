@@ -62,7 +62,7 @@ export async function middleware(request: NextRequest) {
 
   const isAdminRoute = pathname.startsWith('/admin');
 
-  const authRoutes = ['/login', '/signup'];
+  const authRoutes = ['/login', '/signup', '/forgot-password'];
   const isAuthRoute = authRoutes.some((route) =>
     pathname.startsWith(route)
   );

@@ -1,7 +1,6 @@
 'use client';
 
 import { NotificationProvider } from '@/contexts/NotificationContext';
-import { AuthProvider } from '@/components/auth/AuthProvider';
 
 export default function AccountingLayout({
   children,
@@ -9,8 +8,6 @@ export default function AccountingLayout({
   children: React.ReactNode;
 }) {
   return (
-    <AuthProvider>
-      <NotificationProvider>{children}</NotificationProvider>
-    </AuthProvider>
+    <NotificationProvider>{children}</NotificationProvider>
   );
 }

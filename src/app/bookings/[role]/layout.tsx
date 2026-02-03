@@ -4,7 +4,7 @@ import { useEffect } from 'react';
 import { useParams, useRouter, usePathname } from 'next/navigation';
 import { BookingsAppShell, BookingsRole } from '@/components/bookings/BookingsAppShell';
 import { BookingSettingsProvider } from '@/contexts/BookingSettingsContext';
-import { AuthProvider, useAuth } from '@/components/auth';
+import { useAuth } from '@/components/auth';
 
 interface BookingsRoleLayoutProps {
   children: React.ReactNode;
@@ -54,10 +54,8 @@ export default function BookingsRoleLayout({
   children,
 }: BookingsRoleLayoutProps) {
   return (
-    <AuthProvider>
-      <BookingsLayoutInner>
-        {children}
-      </BookingsLayoutInner>
-    </AuthProvider>
+    <BookingsLayoutInner>
+      {children}
+    </BookingsLayoutInner>
   );
 }

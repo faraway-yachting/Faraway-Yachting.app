@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { X, Save, FileText, XCircle, AlertCircle, ChevronDown, Pencil, Printer, Loader2 } from 'lucide-react';
 import { VendorSelector } from './VendorSelector';
 import { ExpenseLineItemEditor } from './ExpenseLineItemEditor';
@@ -44,7 +44,14 @@ interface ExpenseFormProps {
 
 export default function ExpenseForm({ expense, onCancel }: ExpenseFormProps) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const isEditing = !!expense;
+
+  // Pre-fill from booking query params
+  const bookingId = searchParams.get('booking_id');
+  const prefillAmount = searchParams.get('amount');
+  const prefillAccountCode = searchParams.get('account_code');
+  const prefillVendorName = searchParams.get('vendor_name');
 
   // Async loaded data
   const [companies, setCompanies] = useState<Company[]>([]);
@@ -56,7 +63,7 @@ export default function ExpenseForm({ expense, onCancel }: ExpenseFormProps) {
   // Form state
   const [companyId, setCompanyId] = useState(expense?.companyId || '');
   const [vendorId, setVendorId] = useState(expense?.vendorId || '');
-  const [vendorName, setVendorName] = useState(expense?.vendorName || '');
+  const [vendorName, setVendorName] = useState(expense?.vendorName || prefillVendorName || '');
   const [supplierInvoiceNumber, setSupplierInvoiceNumber] = useState(
     expense?.supplierInvoiceNumber || ''
   );
@@ -83,20 +90,21 @@ export default function ExpenseForm({ expense, onCancel }: ExpenseFormProps) {
   // Initialize with 1 default line item for new expenses
   const getInitialLineItems = (): ExpenseLineItem[] => {
     if (expense?.lineItems) return expense.lineItems;
+    const amt = prefillAmount ? parseFloat(prefillAmount) : 0;
     return [{
       id: generateId(),
-      description: '',
+      description: prefillVendorName ? `Charter cost - ${prefillVendorName}` : '',
       quantity: 1,
-      unitPrice: 0,
+      unitPrice: amt,
       taxRate: 7, // Default VAT rate, will be updated by useEffect if no_vat
       whtRate: 0,
       whtBaseCalculation: 'pre_vat',
       customWhtAmount: undefined,
-      amount: 0,
-      preVatAmount: 0,
+      amount: amt,
+      preVatAmount: amt,
       whtAmount: 0,
       projectId: '',
-      accountCode: '',
+      accountCode: prefillAccountCode || '',
     }];
   };
 
@@ -519,6 +527,19 @@ export default function ExpenseForm({ expense, onCancel }: ExpenseFormProps) {
         } catch (journalError) {
           console.error('Failed to create expense approval event:', journalError);
           // Don't fail the expense save, just log the error
+        }
+      }
+
+      // Link expense back to booking if created from booking
+      if (savedExpenseId && bookingId) {
+        try {
+          const { bookingsApi } = await import('@/lib/supabase/api/bookings');
+          await bookingsApi.update(bookingId, {
+            linkedExpenseId: savedExpenseId,
+            charterExpenseStatus: 'expense_recorded',
+          } as any);
+        } catch (linkErr) {
+          console.error('Failed to link expense to booking:', linkErr);
         }
       }
 

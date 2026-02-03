@@ -12,9 +12,15 @@ import {
   Anchor,
   Plus,
   FileText,
+  AlertTriangle,
+  CreditCard,
+  Clock,
+  ExternalLink,
 } from "lucide-react";
 import { bookingsApi } from "@/lib/supabase/api/bookings";
 import { projectsApi } from "@/lib/supabase/api/projects";
+import { bookingPaymentsApi, type BookingPaymentExtended } from "@/lib/supabase/api/bookingPayments";
+import { invoicesApi } from "@/lib/supabase/api/invoices";
 import type { Booking } from "@/data/booking/types";
 import Link from "next/link";
 
@@ -34,6 +40,9 @@ export default function ManagerDashboard() {
   const [monthBookings, setMonthBookings] = useState<Booking[]>([]);
   const [upcoming, setUpcoming] = useState<Booking[]>([]);
   const [projects, setProjects] = useState<any[]>([]);
+  const [pendingExpenses, setPendingExpenses] = useState<Booking[]>([]);
+  const [paymentsNeedingAction, setPaymentsNeedingAction] = useState<BookingPaymentExtended[]>([]);
+  const [overdueInvoices, setOverdueInvoices] = useState<any[]>([]);
 
   const now = new Date();
   const monthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
@@ -44,14 +53,20 @@ export default function ManagerDashboard() {
   const loadData = useCallback(async () => {
     try {
       setLoading(true);
-      const [mb, up, pr] = await Promise.all([
+      const [mb, up, pr, pe, pa, oi] = await Promise.all([
         bookingsApi.getByDateRange(monthStart, monthEnd),
         bookingsApi.getUpcoming(),
         projectsApi.getActive(),
+        bookingsApi.getPendingCharterExpenses(),
+        bookingPaymentsApi.getNeedingAction(),
+        invoicesApi.getOverdue(),
       ]);
       setMonthBookings(mb);
       setUpcoming(up);
       setProjects(pr);
+      setPendingExpenses(pe);
+      setPaymentsNeedingAction(pa);
+      setOverdueInvoices(oi);
     } catch (error) {
       console.error("Failed to load dashboard:", error);
     } finally {
@@ -236,6 +251,173 @@ export default function ManagerDashboard() {
           </Link>
         </div>
       </div>
+
+      {/* Action Required */}
+      {(pendingExpenses.length > 0 || paymentsNeedingAction.length > 0 || overdueInvoices.length > 0) && (
+        <div className="mb-8 rounded-lg border border-amber-200 bg-amber-50 p-4">
+          <div className="flex items-center gap-2 mb-4">
+            <AlertTriangle className="h-5 w-5 text-amber-600" />
+            <h2 className="text-lg font-semibold text-amber-800">
+              Action Required
+              <span className="ml-2 inline-flex items-center justify-center rounded-full bg-amber-200 px-2.5 py-0.5 text-xs font-medium text-amber-800">
+                {pendingExpenses.length + paymentsNeedingAction.length + overdueInvoices.length}
+              </span>
+            </h2>
+          </div>
+
+          {/* Charter Expenses Pending */}
+          {pendingExpenses.length > 0 && (
+            <div className="mb-4">
+              <div className="flex items-center gap-2 mb-2">
+                <Ship className="h-4 w-4 text-amber-700" />
+                <h3 className="text-sm font-semibold text-amber-800">
+                  Charter Expenses Pending
+                  <span className="ml-1.5 inline-flex items-center justify-center rounded-full bg-amber-200 px-2 py-0.5 text-xs font-medium text-amber-800">
+                    {pendingExpenses.length}
+                  </span>
+                </h3>
+              </div>
+              <div className="space-y-2">
+                {pendingExpenses.map((b) => (
+                  <div
+                    key={b.id}
+                    className="flex items-center justify-between rounded-md bg-white border border-amber-100 px-4 py-3"
+                  >
+                    <div className="flex-1 min-w-0">
+                      <span className="text-sm font-medium text-gray-900">
+                        {b.bookingNumber || "No number"}
+                      </span>
+                      <span className="mx-2 text-gray-400">&middot;</span>
+                      <span className="text-sm text-gray-600">{b.customerName}</span>
+                      <span className="mx-2 text-gray-400">&middot;</span>
+                      <span className="text-sm text-gray-500">{b.externalBoatName || "External"}</span>
+                    </div>
+                    <div className="flex items-center gap-4 ml-4">
+                      <span className="text-sm font-medium text-gray-900">
+                        {formatMoney(b.charterCost || 0, b.currency || "THB")}
+                      </span>
+                      <Link
+                        href={`/accounting/manager/expenses/expense-records/new?booking_id=${b.id}&amount=${b.charterCost || 0}&account_code=5530&vendor_name=${encodeURIComponent(b.externalBoatName || "")}`}
+                        className="inline-flex items-center gap-1 rounded-md bg-amber-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-700 transition-colors"
+                      >
+                        <Plus className="h-3 w-3" />
+                        Record Expense
+                      </Link>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Payments Needing Action */}
+          {paymentsNeedingAction.length > 0 && (
+            <div className="mb-4">
+              <div className="flex items-center gap-2 mb-2">
+                <CreditCard className="h-4 w-4 text-amber-700" />
+                <h3 className="text-sm font-semibold text-amber-800">
+                  Payments Needing Action
+                  <span className="ml-1.5 inline-flex items-center justify-center rounded-full bg-amber-200 px-2 py-0.5 text-xs font-medium text-amber-800">
+                    {paymentsNeedingAction.length}
+                  </span>
+                </h3>
+              </div>
+              <div className="space-y-2">
+                {paymentsNeedingAction.map((p) => (
+                  <div
+                    key={p.id}
+                    className="flex items-center justify-between rounded-md bg-white border border-amber-100 px-4 py-3"
+                  >
+                    <div className="flex-1 min-w-0">
+                      <span className="text-sm font-medium text-gray-900">
+                        {p.payment_type === "receipt" ? "Receipt" : p.payment_type === "deposit" ? "Deposit" : p.payment_type || "Payment"}
+                      </span>
+                      <span className="mx-2 text-gray-400">&middot;</span>
+                      <span className="text-sm text-gray-600">
+                        {formatMoney(p.amount || 0, p.currency || "THB")}
+                      </span>
+                      {p.paid_date && (
+                        <>
+                          <span className="mx-2 text-gray-400">&middot;</span>
+                          <span className="text-sm text-gray-500">
+                            Paid {new Date(p.paid_date).toLocaleDateString("en-GB", { day: "2-digit", month: "short" })}
+                          </span>
+                        </>
+                      )}
+                      {p.payment_method && (
+                        <>
+                          <span className="mx-2 text-gray-400">&middot;</span>
+                          <span className="text-sm text-gray-500">{p.payment_method === "cash" ? "Cash" : "Bank"}</span>
+                        </>
+                      )}
+                    </div>
+                    <div className="ml-4">
+                      <Link
+                        href={`/bookings/manager/${p.booking_id}`}
+                        className="inline-flex items-center gap-1 rounded-md bg-amber-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-700 transition-colors"
+                      >
+                        <ExternalLink className="h-3 w-3" />
+                        View Booking
+                      </Link>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Overdue Invoices */}
+          {overdueInvoices.length > 0 && (
+            <div>
+              <div className="flex items-center gap-2 mb-2">
+                <Clock className="h-4 w-4 text-amber-700" />
+                <h3 className="text-sm font-semibold text-amber-800">
+                  Overdue Invoices
+                  <span className="ml-1.5 inline-flex items-center justify-center rounded-full bg-amber-200 px-2 py-0.5 text-xs font-medium text-amber-800">
+                    {overdueInvoices.length}
+                  </span>
+                </h3>
+              </div>
+              <div className="space-y-2">
+                {overdueInvoices.map((inv: any) => {
+                  const daysOverdue = Math.ceil(
+                    (Date.now() - new Date(inv.due_date).getTime()) / (1000 * 60 * 60 * 24)
+                  );
+                  return (
+                    <div
+                      key={inv.id}
+                      className="flex items-center justify-between rounded-md bg-white border border-amber-100 px-4 py-3"
+                    >
+                      <div className="flex-1 min-w-0">
+                        <span className="text-sm font-medium text-gray-900">
+                          {inv.invoice_number || "No number"}
+                        </span>
+                        <span className="mx-2 text-gray-400">&middot;</span>
+                        <span className="text-sm text-gray-600">
+                          {formatMoney(inv.total_amount || 0, inv.currency || "THB")}
+                        </span>
+                        <span className="mx-2 text-gray-400">&middot;</span>
+                        <span className="text-sm text-red-600 font-medium">
+                          {daysOverdue} day{daysOverdue !== 1 ? "s" : ""} overdue
+                        </span>
+                      </div>
+                      <div className="ml-4">
+                        <Link
+                          href={`/accounting/manager/invoices/${inv.id}`}
+                          className="inline-flex items-center gap-1 rounded-md bg-amber-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-700 transition-colors"
+                        >
+                          <ExternalLink className="h-3 w-3" />
+                          View Invoice
+                        </Link>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Boat Utilization */}
       <div className="mb-8">

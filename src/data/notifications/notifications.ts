@@ -1,9 +1,9 @@
 import type { Notification, NotificationInput, NotificationTargetRole } from './types';
+import { notificationsApi } from '@/lib/supabase/api/notifications';
 
-// In-memory notification storage (mock data layer)
+// In-memory cache (synced from Supabase on load, updated locally for instant UI)
 let notifications: Notification[] = [];
 
-// Generate unique ID
 function generateId(): string {
   return `notif-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 }
@@ -32,7 +32,12 @@ export function getUnreadCount(role: NotificationTargetRole): number {
   return getUnreadNotificationsForRole(role).length;
 }
 
-// Add a new notification
+// Set notifications from Supabase fetch (used by context on load/poll)
+export function setNotificationsFromDb(notifs: Notification[]): void {
+  notifications = notifs;
+}
+
+// Add a new notification — writes to in-memory + Supabase
 export function addNotification(input: NotificationInput): Notification {
   const notification: Notification = {
     ...input,
@@ -42,6 +47,21 @@ export function addNotification(input: NotificationInput): Notification {
   };
 
   notifications.push(notification);
+
+  // Persist to Supabase (fire-and-forget)
+  notificationsApi.create({
+    type: input.type,
+    title: input.title,
+    message: input.message,
+    link: input.link,
+    referenceId: input.referenceId,
+    referenceNumber: input.referenceNumber,
+    targetRole: input.targetRole,
+    targetUserId: input.targetUserId,
+  }).catch((err) => {
+    console.error('Failed to persist notification:', err);
+  });
+
   return notification;
 }
 
@@ -51,6 +71,7 @@ export function markNotificationAsRead(id: string): void {
   if (notification) {
     notification.read = true;
   }
+  notificationsApi.markAsRead(id).catch(() => {});
 }
 
 // Mark all notifications as read for a role
@@ -60,11 +81,13 @@ export function markAllAsReadForRole(role: NotificationTargetRole): void {
       n.read = true;
     }
   });
+  notificationsApi.markAllAsRead(role).catch(() => {});
 }
 
 // Clear/delete a notification
 export function clearNotification(id: string): void {
   notifications = notifications.filter((n) => n.id !== id);
+  notificationsApi.delete(id).catch(() => {});
 }
 
 // Clear all notifications for a role

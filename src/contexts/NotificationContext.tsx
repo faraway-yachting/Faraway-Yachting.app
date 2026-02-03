@@ -6,18 +6,21 @@ import {
   useState,
   useCallback,
   useMemo,
+  useEffect,
+  useRef,
   type ReactNode,
 } from 'react';
 import type { Notification, NotificationInput, NotificationTargetRole } from '@/data/notifications/types';
 import {
-  getAllNotifications,
   getNotificationsForRole,
   getUnreadCount,
   addNotification as addNotificationToStore,
   markNotificationAsRead,
   markAllAsReadForRole,
   clearNotification as clearNotificationFromStore,
+  setNotificationsFromDb,
 } from '@/data/notifications/notifications';
+import { notificationsApi } from '@/lib/supabase/api/notifications';
 
 interface NotificationContextType {
   notifications: Notification[];
@@ -44,26 +47,55 @@ export function NotificationProvider({
 }: NotificationProviderProps) {
   const [currentRole, setCurrentRole] = useState<NotificationTargetRole>(initialRole);
   const [refreshKey, setRefreshKey] = useState(0);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Force refresh of notifications
   const refreshNotifications = useCallback(() => {
     setRefreshKey((prev) => prev + 1);
   }, []);
 
+  // Load notifications from Supabase on mount and poll every 30s
+  const fetchFromDb = useCallback(async () => {
+    try {
+      const dbNotifs = await notificationsApi.getForRole(currentRole);
+      const mapped: Notification[] = dbNotifs.map((n) => ({
+        id: n.id,
+        type: n.type as Notification['type'],
+        title: n.title,
+        message: n.message,
+        link: n.link,
+        referenceId: n.referenceId,
+        referenceNumber: n.referenceNumber || '',
+        targetRole: n.targetRole as NotificationTargetRole,
+        targetUserId: n.targetUserId,
+        read: n.read,
+        createdAt: n.createdAt,
+      }));
+      setNotificationsFromDb(mapped);
+      refreshNotifications();
+    } catch (err) {
+      console.error('Failed to fetch notifications:', err);
+    }
+  }, [currentRole, refreshNotifications]);
+
+  useEffect(() => {
+    fetchFromDb();
+    pollRef.current = setInterval(fetchFromDb, 30000);
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+    };
+  }, [fetchFromDb]);
+
   // Get notifications for current role
   const notifications = useMemo(() => {
-    // refreshKey dependency ensures we re-fetch when state changes
     void refreshKey;
     return getNotificationsForRole(currentRole);
   }, [currentRole, refreshKey]);
 
-  // Get unread count for current role
   const unreadCount = useMemo(() => {
     void refreshKey;
     return getUnreadCount(currentRole);
   }, [currentRole, refreshKey]);
 
-  // Add notification
   const addNotification = useCallback(
     (input: NotificationInput): Notification => {
       const notification = addNotificationToStore(input);
@@ -73,7 +105,6 @@ export function NotificationProvider({
     [refreshNotifications]
   );
 
-  // Mark single notification as read
   const markAsRead = useCallback(
     (id: string) => {
       markNotificationAsRead(id);
@@ -82,13 +113,11 @@ export function NotificationProvider({
     [refreshNotifications]
   );
 
-  // Mark all as read for current role
   const markAllAsRead = useCallback(() => {
     markAllAsReadForRole(currentRole);
     refreshNotifications();
   }, [currentRole, refreshNotifications]);
 
-  // Clear/delete notification
   const clearNotification = useCallback(
     (id: string) => {
       clearNotificationFromStore(id);

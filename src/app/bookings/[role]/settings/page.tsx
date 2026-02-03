@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, ChangeEvent } from 'react';
 import { useParams } from 'next/navigation';
-import { Palette, RotateCcw, Ship, Check, Plus, Trash2, Anchor, Image, X, Upload, Link } from 'lucide-react';
+import { Palette, RotateCcw, Ship, Check, Plus, Trash2, Anchor, Image, X, Upload, Link, Save, Loader2 } from 'lucide-react';
 import { Project } from '@/data/project/types';
 import { projectsApi } from '@/lib/supabase/api/projects';
 import { dbProjectToFrontend } from '@/lib/supabase/transforms';
@@ -143,6 +143,9 @@ export default function BookingSettingsPage() {
     updateExternalYacht,
     bannerImageUrl,
     setBannerImageUrl,
+    isDirty,
+    isSaving,
+    saveSettings,
   } = useBookingSettings();
 
   const [projects, setProjects] = useState<Project[]>([]);
@@ -326,13 +329,27 @@ export default function BookingSettingsPage() {
           <p className="text-sm text-gray-500 mt-1">Configure booking calendar display options</p>
         </div>
         {canEdit && (
-          <button
-            onClick={() => setShowResetConfirm(true)}
-            className="flex items-center gap-2 px-4 py-2 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
-          >
-            <RotateCcw className="h-4 w-4" />
-            Reset to Defaults
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setShowResetConfirm(true)}
+              className="flex items-center gap-2 px-4 py-2 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
+            >
+              <RotateCcw className="h-4 w-4" />
+              Reset to Defaults
+            </button>
+            <button
+              onClick={saveSettings}
+              disabled={!isDirty || isSaving}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors ${
+                isDirty
+                  ? 'bg-blue-600 text-white hover:bg-blue-700'
+                  : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+              }`}
+            >
+              {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+              {isSaving ? 'Saving...' : 'Save Settings'}
+            </button>
+          </div>
         )}
       </div>
 

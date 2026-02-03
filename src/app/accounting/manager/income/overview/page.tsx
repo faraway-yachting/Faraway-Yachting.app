@@ -12,6 +12,7 @@ import { quotationsApi } from '@/lib/supabase/api/quotations';
 import { receiptsApi } from '@/lib/supabase/api/receipts';
 import { projectsApi } from '@/lib/supabase/api/projects';
 import { bookingPaymentsApi, BookingPaymentExtended } from '@/lib/supabase/api/bookingPayments';
+import { getFiscalYear, getFiscalYearDateRange } from '@/lib/reports/projectPLCalculation';
 import type { Database } from '@/lib/supabase/database.types';
 
 type Invoice = Database['public']['Tables']['invoices']['Row'];
@@ -26,12 +27,12 @@ export default function IncomeOverviewPage() {
   // State
   const [dataScope, setDataScope] = useState('all-companies');
   const [dateFrom, setDateFrom] = useState(() => {
-    const date = new Date();
-    return `${date.getFullYear()}-01-01`;
+    const { startDate } = getFiscalYearDateRange(getFiscalYear(new Date()));
+    return startDate;
   });
   const [dateTo, setDateTo] = useState(() => {
-    const date = new Date();
-    return `${date.getFullYear()}-12-31`;
+    const { endDate } = getFiscalYearDateRange(getFiscalYear(new Date()));
+    return endDate;
   });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);

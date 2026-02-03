@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { Loader2, Plus, Pencil, Trash2, Download, X, Check, AlertCircle, Link2, PenLine, CheckCircle, DollarSign } from 'lucide-react';
+import { Loader2, Plus, Pencil, Trash2, Download, X, Check, AlertCircle, Link2, PenLine, CheckCircle, DollarSign, Calendar, ChevronLeft, ChevronRight } from 'lucide-react';
 import { commissionRecordsApi } from '@/lib/supabase/api/commissionRecords';
 import { projectsApi } from '@/lib/supabase/api/projects';
 import { authApi } from '@/lib/supabase/api/auth';
@@ -83,6 +83,12 @@ export default function CommissionTable() {
   const [payForm, setPayForm] = useState({ paidDate: '', paidBy: '', reference: '', method: '' });
   const [payingSaving, setPayingSaving] = useState(false);
 
+  // Month selector
+  const now = new Date();
+  const [filterMonth, setFilterMonth] = useState<string>(
+    `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+  );
+
   // Filters
   const [filterBoat, setFilterBoat] = useState<string>('all');
   const [filterOwner, setFilterOwner] = useState<string>('all');
@@ -90,6 +96,25 @@ export default function CommissionTable() {
   const [filterSource, setFilterSource] = useState<string>('all');
   const [filterDateFrom, setFilterDateFrom] = useState<string>('');
   const [filterDateTo, setFilterDateTo] = useState<string>('');
+
+  // Helper: is a commission record "earned" (charter completed)?
+  const isEarned = useCallback((record: CommissionRecord) => {
+    const today = new Date().toISOString().split('T')[0];
+    return (record.charter_date_to && record.charter_date_to <= today) || !record.charter_date_to;
+  }, []);
+
+  // Month navigation helpers
+  const navigateMonth = useCallback((direction: -1 | 1) => {
+    const [y, m] = filterMonth.split('-').map(Number);
+    const d = new Date(y, m - 1 + direction, 1);
+    setFilterMonth(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+  }, [filterMonth]);
+
+  const monthLabel = useMemo(() => {
+    if (filterMonth === 'all') return 'All Time';
+    const [y, m] = filterMonth.split('-').map(Number);
+    return new Date(y, m - 1, 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+  }, [filterMonth]);
 
   const loadData = useCallback(async () => {
     try {
@@ -138,6 +163,11 @@ export default function CommissionTable() {
   // Filtered records
   const filteredRecords = useMemo(() => {
     return records.filter((r) => {
+      // Month filter
+      if (filterMonth !== 'all') {
+        const dateStr = r.charter_date_from || '';
+        if (!dateStr.startsWith(filterMonth)) return false;
+      }
       if (filterBoat !== 'all' && r.boat_id !== filterBoat) return false;
       if (filterOwner !== 'all' && r.booking_owner_id !== filterOwner) return false;
       if (filterBookingType !== 'all' && r.booking_type !== filterBookingType) return false;
@@ -146,17 +176,21 @@ export default function CommissionTable() {
       if (filterDateTo && (r.charter_date_to || r.charter_date_from || '') > filterDateTo) return false;
       return true;
     });
-  }, [records, filterBoat, filterOwner, filterBookingType, filterSource, filterDateFrom, filterDateTo]);
+  }, [records, filterMonth, filterBoat, filterOwner, filterBookingType, filterSource, filterDateFrom, filterDateTo]);
 
   // Summary
   const summary = useMemo(() => {
     const byOwner = new Map<string, { name: string; totalCommission: number; totalNetIncome: number; count: number }>();
     let totalNetIncome = 0;
     let totalCommission = 0;
+    let earnedCommission = 0;
+    let paidCommission = 0;
 
     for (const r of filteredRecords) {
       totalNetIncome += r.net_income;
       totalCommission += r.total_commission;
+      if (isEarned(r)) earnedCommission += r.total_commission;
+      if ((r as any).payment_status === 'paid') paidCommission += r.total_commission;
 
       if (r.booking_owner_id) {
         const user = userMap.get(r.booking_owner_id);
@@ -171,8 +205,8 @@ export default function CommissionTable() {
       }
     }
 
-    return { totalNetIncome, totalCommission, byOwner: Array.from(byOwner.values()) };
-  }, [filteredRecords, userMap]);
+    return { totalNetIncome, totalCommission, earnedCommission, paidCommission, byOwner: Array.from(byOwner.values()) };
+  }, [filteredRecords, userMap, isEarned]);
 
   // Unique boat options from records
   const boatOptions = useMemo(() => {
@@ -388,7 +422,7 @@ export default function CommissionTable() {
     const headers = [
       'Boat', 'Charter Date From', 'Charter Date To', 'Charter Type', 'Booking Type',
       'Charter Fee', 'Management Fee', 'Net Income to FA', 'Commission Rate (%)',
-      'Total Commission', 'Booking Owner', 'Currency', 'Source', 'Notes',
+      'Total Commission', 'Booking Owner', 'Status', 'Payment Status', 'Currency', 'Source', 'Notes',
     ];
     const rows = filteredRecords.map((r) => [
       projectMap.get(r.boat_id || '')?.name || '',
@@ -402,6 +436,8 @@ export default function CommissionTable() {
       r.commission_rate.toFixed(2),
       r.total_commission.toFixed(2),
       getUserName(r.booking_owner_id),
+      isEarned(r) ? 'Earned' : 'Pending',
+      (r as any).payment_status || 'unpaid',
       r.currency,
       r.source || 'manual',
       r.notes || '',
@@ -459,16 +495,66 @@ export default function CommissionTable() {
 
   return (
     <div className="space-y-4">
-      {/* Summary Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="border border-gray-200 rounded-lg p-4 shadow-sm">
-          <div className="text-xs text-gray-500 uppercase">Total Net Income</div>
-          <div className="text-xl font-bold text-gray-900 mt-1">{formatCurrency(summary.totalNetIncome)}</div>
-          <div className="text-xs text-gray-400">{filteredRecords.length} record{filteredRecords.length !== 1 ? 's' : ''}</div>
+      {/* Month Selector */}
+      <div className="flex items-center gap-3">
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => navigateMonth(-1)}
+            className="p-1.5 rounded-md text-gray-500 hover:bg-gray-100 transition-colors"
+          >
+            <ChevronLeft className="h-4 w-4" />
+          </button>
+          <div className="flex items-center gap-2 min-w-[160px] justify-center">
+            <Calendar className="h-4 w-4 text-gray-400" />
+            <span className="text-sm font-semibold text-gray-900">{monthLabel}</span>
+          </div>
+          <button
+            onClick={() => navigateMonth(1)}
+            className="p-1.5 rounded-md text-gray-500 hover:bg-gray-100 transition-colors"
+          >
+            <ChevronRight className="h-4 w-4" />
+          </button>
         </div>
+        <button
+          onClick={() => setFilterMonth('all')}
+          className={`px-3 py-1 text-xs font-medium rounded-full transition-colors ${
+            filterMonth === 'all'
+              ? 'bg-[#5A7A8F] text-white'
+              : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+          }`}
+        >
+          All Time
+        </button>
+        {filterMonth === 'all' && (
+          <button
+            onClick={() => setFilterMonth(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`)}
+            className="px-3 py-1 text-xs font-medium rounded-full bg-gray-100 text-gray-600 hover:bg-gray-200 transition-colors"
+          >
+            Current Month
+          </button>
+        )}
+      </div>
+
+      {/* Summary Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="border border-gray-200 rounded-lg p-4 shadow-sm">
           <div className="text-xs text-gray-500 uppercase">Total Commission</div>
           <div className="text-xl font-bold text-[#5A7A8F] mt-1">{formatCurrency(summary.totalCommission)}</div>
+          <div className="text-xs text-gray-400">{filteredRecords.length} record{filteredRecords.length !== 1 ? 's' : ''}</div>
+        </div>
+        <div className="border border-gray-200 rounded-lg p-4 shadow-sm">
+          <div className="text-xs text-gray-500 uppercase">Earned</div>
+          <div className="text-xl font-bold text-green-700 mt-1">{formatCurrency(summary.earnedCommission)}</div>
+          <div className="text-xs text-gray-400">Charter completed</div>
+        </div>
+        <div className="border border-gray-200 rounded-lg p-4 shadow-sm">
+          <div className="text-xs text-gray-500 uppercase">Paid</div>
+          <div className="text-xl font-bold text-gray-900 mt-1">{formatCurrency(summary.paidCommission)}</div>
+          <div className="text-xs text-gray-400">
+            {summary.totalCommission > 0
+              ? `${Math.round((summary.paidCommission / summary.totalCommission) * 100)}% of total`
+              : 'No commission'}
+          </div>
         </div>
         <div className="border border-gray-200 rounded-lg p-4 shadow-sm">
           <div className="text-xs text-gray-500 uppercase">By Sales Person</div>
@@ -713,6 +799,7 @@ export default function CommissionTable() {
                   <th className="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase">Rate</th>
                   <th className="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase">Commission</th>
                   <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase">Owner</th>
+                  <th className="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase">Status</th>
                   <th className="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase">Payment</th>
                   <th className="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase w-20">Actions</th>
                 </tr>
@@ -769,10 +856,17 @@ export default function CommissionTable() {
                       <td className="px-3 py-2.5 text-sm text-right text-gray-600">{r.commission_rate}%</td>
                       <td className="px-3 py-2.5 text-sm text-right font-semibold text-[#5A7A8F]">{formatCurrency(r.total_commission, r.currency)}</td>
                       <td className="px-3 py-2.5 text-sm text-gray-700">{getUserName(r.booking_owner_id)}</td>
+                      <td className="px-3 py-2.5 text-center">
+                        {isEarned(r) ? (
+                          <span className="inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-full bg-green-100 text-green-700">Earned</span>
+                        ) : (
+                          <span className="inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-full bg-gray-100 text-gray-500">Pending</span>
+                        )}
+                      </td>
                       <td className="px-3 py-2.5">
                         <div className="flex items-center justify-center gap-1.5">
                           {getPaymentStatusBadge(r)}
-                          {((r as any).payment_status || 'unpaid') === 'unpaid' && (
+                          {((r as any).payment_status || 'unpaid') === 'unpaid' && isEarned(r) && (
                             <button
                               onClick={() => handleApprove(r.id)}
                               disabled={approvingId === r.id}

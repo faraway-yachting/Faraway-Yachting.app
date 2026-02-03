@@ -172,6 +172,19 @@ export const invoicesApi = {
     return data ?? [];
   },
 
+  async getOverdue(): Promise<Invoice[]> {
+    const supabase = createClient();
+    const today = new Date().toISOString().split('T')[0];
+    const { data, error } = await supabase
+      .from('invoices')
+      .select('*')
+      .eq('status', 'issued')
+      .lt('due_date', today)
+      .order('due_date', { ascending: true });
+    if (error) throw error;
+    return data ?? [];
+  },
+
   async updateLineItems(invoiceId: string, lineItems: InvoiceLineItemInsert[]): Promise<void> {
     const supabase = createClient();
 

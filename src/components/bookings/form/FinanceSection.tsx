@@ -13,6 +13,7 @@ import {
   Banknote,
   CheckCircle2,
   AlertCircle,
+  Clock,
 } from 'lucide-react';
 import {
   Booking,
@@ -104,6 +105,22 @@ export function FinanceSection({
   const extraCharges = formData.extraCharges || 0;
   const adminFee = formData.adminFee || 0;
   const totalCost = charterFee + extraCharges + adminFee;
+
+  // Payment summary calculations
+  const paidPayments = payments.filter(p => p.paidDate && p.amount > 0);
+  const totalPaid = paidPayments.reduce((sum, p) => sum + p.amount, 0);
+  const hasPaidPayments = paidPayments.length > 0;
+  const suggestedStatus: PaymentStatus | null = payments.length === 0
+    ? null
+    : totalPaid <= 0
+      ? 'unpaid'
+      : totalPaid >= totalCost && totalCost > 0
+        ? 'paid'
+        : 'partial';
+  const formatPaymentDate = (d: string) =>
+    new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  const fmtAmt = (n: number, cur: string) =>
+    n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ` ${cur}`;
 
   const getAutoFillClass = (field: string) => {
     return autoFilledFields.has(field) ? 'bg-blue-50 ring-2 ring-blue-200' : '';
@@ -239,6 +256,57 @@ export function FinanceSection({
           />
         </div>
 
+        {/* Auto-suggest payment status */}
+        {suggestedStatus && suggestedStatus !== formData.paymentStatus && (
+          <p className="text-xs text-amber-600 -mt-2">
+            Suggested: <span className="font-medium capitalize">{suggestedStatus}</span>
+            {' '}({fmtAmt(totalPaid, formData.currency || 'THB')} / {fmtAmt(totalCost, formData.currency || 'THB')} paid)
+          </p>
+        )}
+
+        {/* Payment Summary */}
+        {hasPaidPayments && (
+          <div className="rounded-lg border border-green-200 bg-green-50/50 p-3">
+            <div className="space-y-1.5">
+              {payments.map((p, i) => {
+                if (p.paidDate && p.amount > 0) {
+                  return (
+                    <div key={i} className="flex items-center gap-2 text-sm">
+                      <CheckCircle2 className="h-3.5 w-3.5 text-green-600 shrink-0" />
+                      <span className="text-gray-700 capitalize">{p.paymentType}</span>
+                      <span className="font-medium text-gray-900">{fmtAmt(p.amount, p.currency)}</span>
+                      <span className="text-gray-500">on {formatPaymentDate(p.paidDate)}</span>
+                    </div>
+                  );
+                }
+                if (p.amount > 0 && !p.paidDate) {
+                  return (
+                    <div key={i} className="flex items-center gap-2 text-sm">
+                      <Clock className="h-3.5 w-3.5 text-gray-400 shrink-0" />
+                      <span className="text-gray-500 capitalize">{p.paymentType}</span>
+                      <span className="text-gray-500">{fmtAmt(p.amount, p.currency)}</span>
+                      <span className="text-gray-400">— not yet paid</span>
+                    </div>
+                  );
+                }
+                return null;
+              })}
+            </div>
+            <div className={`mt-2 pt-2 border-t text-sm font-medium ${
+              totalPaid >= totalCost && totalCost > 0
+                ? 'border-green-200 text-green-700'
+                : 'border-amber-200 text-amber-700'
+            }`}>
+              Total Paid: {fmtAmt(totalPaid, formData.currency || 'THB')} / {fmtAmt(totalCost, formData.currency || 'THB')}
+              {totalCost > 0 && totalPaid < totalCost && (
+                <span className="ml-2 text-gray-500 font-normal">
+                  (Remaining: {fmtAmt(totalCost - totalPaid, formData.currency || 'THB')})
+                </span>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Actions - document timeline */}
         {linkedDocuments.length > 0 && (
           <div>
@@ -304,7 +372,7 @@ export function FinanceSection({
                 key={payment.id || index}
                 className={`bg-white p-3 rounded-lg border ${payment.syncedToReceipt ? 'border-green-200' : 'border-gray-200'}`}
               >
-                {/* Row 1: Type, Amount, Currency, Due Date, Paid Date, Note, Delete */}
+                {/* Row 1: Type, Amount, Currency, Payment Method, Paid Date, Note, Delete */}
                 <div className="grid grid-cols-[100px_1fr_100px_1fr_1fr_1fr_auto] gap-2 items-end">
                   <div>
                     <label className="block text-xs text-gray-400 mb-1">Type</label>
@@ -337,14 +405,30 @@ export function FinanceSection({
                     />
                   </div>
                   <div>
-                    <label className="block text-xs text-gray-400 mb-1">Due Date</label>
-                    <input
-                      type="date"
-                      value={payment.dueDate}
-                      onChange={(e) => updatePayment(index, 'dueDate', e.target.value)}
-                      disabled={!canEdit}
+                    <label className="block text-xs text-gray-400 mb-1">Paid To</label>
+                    <select
+                      value={payment.paymentMethod === 'cash' ? 'cash' : (payment.bankAccountId || '')}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        const updated = [...payments];
+                        if (val === 'cash') {
+                          updated[index] = { ...updated[index], paymentMethod: 'cash', bankAccountId: undefined };
+                        } else if (val) {
+                          updated[index] = { ...updated[index], paymentMethod: 'bank_transfer', bankAccountId: val };
+                        } else {
+                          updated[index] = { ...updated[index], paymentMethod: undefined, bankAccountId: undefined };
+                        }
+                        onPaymentsChange(updated);
+                      }}
+                      disabled={!canEdit || payment.syncedToReceipt}
                       className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100"
-                    />
+                    >
+                      <option value="">Select...</option>
+                      <option value="cash">Cash</option>
+                      {bankAccounts.map(ba => (
+                        <option key={ba.id} value={ba.id}>{ba.account_name}</option>
+                      ))}
+                    </select>
                   </div>
                   <div>
                     <label className="block text-xs text-gray-400 mb-1">Paid Date</label>
@@ -385,27 +469,18 @@ export function FinanceSection({
                     )}
                   </div>
                 </div>
-                {/* Row 2: Link to Invoice, Payment Method, Add Payment */}
-                {canEdit && !payment.syncedToReceipt && (
-                  <div className="grid grid-cols-3 gap-2 mt-2 pt-2 border-t border-gray-100">
-                    <div>
+                {/* Row 2: Link to Invoice + Create Receipt */}
+                {canEdit && !payment.syncedToReceipt && invoiceDocuments.length > 0 && (
+                  <div className="flex items-end gap-2 mt-2 pt-2 border-t border-gray-100">
+                    <div className="flex-1">
                       <label className="block text-xs text-gray-400 mb-1">Link to Invoice</label>
                       <select
                         value={payment.receiptId || ''}
                         onChange={async (e) => {
                           const invoiceId = e.target.value || undefined;
                           const updated = [...payments];
-                          updated[index] = { ...updated[index], receiptId: invoiceId, bankAccountId: undefined, paymentMethod: undefined };
+                          updated[index] = { ...updated[index], receiptId: invoiceId };
                           onPaymentsChange(updated);
-                          if (invoiceId && loadBankAccountsForCompany) {
-                            const doc = invoiceDocuments.find(d => d.id === invoiceId);
-                            if (doc?.companyId) {
-                              const accounts = await loadBankAccountsForCompany(doc.companyId);
-                              setPaymentBankAccounts(prev => ({ ...prev, [index]: accounts }));
-                            }
-                          } else {
-                            setPaymentBankAccounts(prev => ({ ...prev, [index]: [] }));
-                          }
                         }}
                         className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                       >
@@ -415,33 +490,6 @@ export function FinanceSection({
                         ))}
                       </select>
                     </div>
-                    {payment.receiptId && (
-                      <div>
-                        <label className="block text-xs text-gray-400 mb-1">Payment Method</label>
-                        <select
-                          value={payment.paymentMethod === 'cash' ? 'cash' : (payment.bankAccountId || '')}
-                          onChange={(e) => {
-                            const val = e.target.value;
-                            const updated = [...payments];
-                            if (val === 'cash') {
-                              updated[index] = { ...updated[index], paymentMethod: 'cash', bankAccountId: undefined };
-                            } else if (val) {
-                              updated[index] = { ...updated[index], paymentMethod: 'bank_transfer', bankAccountId: val };
-                            } else {
-                              updated[index] = { ...updated[index], paymentMethod: undefined, bankAccountId: undefined };
-                            }
-                            onPaymentsChange(updated);
-                          }}
-                          className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                        >
-                          <option value="">Select...</option>
-                          <option value="cash">Cash</option>
-                          {(paymentBankAccounts[index] || []).map(ba => (
-                            <option key={ba.id} value={ba.id}>{ba.account_name}</option>
-                          ))}
-                        </select>
-                      </div>
-                    )}
                     {payment.receiptId && (payment.bankAccountId || payment.paymentMethod === 'cash') && payment.amount > 0 && payment.paidDate && (
                       <div className="flex items-end">
                         <button
@@ -519,6 +567,111 @@ export function FinanceSection({
               </div>
             ) : (
               <p className="text-xs text-gray-400 italic">No cash collected for this booking</p>
+            )}
+          </div>
+        )}
+
+        {/* Charter Expense (External Boats) */}
+        {formData.externalBoatName && (
+          <div className="border border-amber-200 bg-amber-50/50 rounded-lg p-4 space-y-3">
+            <label className="flex items-center gap-2 text-sm font-medium text-amber-800">
+              <DollarSign className="h-4 w-4" />
+              Charter Expense (External Boat)
+            </label>
+
+            {/* Charter Cost Input + Currency */}
+            <div className="grid grid-cols-[1fr_120px] gap-2">
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Charter Cost to Boat Owner</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={formData.charterCost || ''}
+                  onChange={(e) => onChange('charterCost', e.target.value ? parseFloat(e.target.value) : 0)}
+                  placeholder="0.00"
+                  disabled={!canEdit}
+                  className="w-full border rounded-lg px-3 py-2 text-sm disabled:bg-gray-50 disabled:text-gray-500"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Currency</label>
+                <DynamicSelect
+                  category="currency"
+                  value={formData.charterCostCurrency || formData.currency || 'THB'}
+                  onChange={(val) => onChange('charterCostCurrency', val)}
+                  disabled={!canEdit}
+                  placeholder="Currency..."
+                />
+              </div>
+            </div>
+
+            {/* Profit Summary */}
+            {(formData.charterCost ?? 0) > 0 && (
+              <div className="bg-white rounded-lg p-3 border border-gray-200">
+                <p className="text-xs font-medium text-gray-500 mb-2">Profit Summary</p>
+                <div className="space-y-1 text-sm">
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">Guest Paid (Charter + Extras)</span>
+                    <span className="font-medium">
+                      {((formData.charterFee || 0) + (formData.extraCharges || 0)).toLocaleString('en', { minimumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">Boat Owner Cost</span>
+                    <span className="font-medium text-red-600">
+                      -{(formData.charterCost || 0).toLocaleString('en', { minimumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                  <div className="flex justify-between border-t pt-1 mt-1">
+                    <span className="text-gray-800 font-medium">Gross Profit</span>
+                    <span className={`font-bold ${
+                      ((formData.charterFee || 0) + (formData.extraCharges || 0) - (formData.charterCost || 0)) >= 0
+                        ? 'text-green-600' : 'text-red-600'
+                    }`}>
+                      {((formData.charterFee || 0) + (formData.extraCharges || 0) - (formData.charterCost || 0)).toLocaleString('en', { minimumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Accounting Status & Action */}
+            {isEditing && booking?.id && (formData.charterCost ?? 0) > 0 && (
+              <div className="flex items-center justify-between">
+                {formData.linkedExpenseId ? (
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className="h-4 w-4 text-green-500" />
+                    <span className="text-xs text-green-700">
+                      {formData.charterExpenseStatus === 'fully_paid' ? 'Expense fully paid' : 'Expense recorded'}
+                    </span>
+                    <a
+                      href={`/accounting/manager/expenses/expense-records/${formData.linkedExpenseId}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-xs text-blue-600 hover:underline ml-2"
+                    >
+                      View Expense
+                    </a>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <AlertCircle className="h-4 w-4 text-amber-500" />
+                    <span className="text-xs text-amber-700">Pending accounting action</span>
+                  </div>
+                )}
+                {!formData.linkedExpenseId && (
+                  <a
+                    href={`/accounting/manager/expenses/expense-records/new?booking_id=${booking.id}&amount=${formData.charterCost || 0}&currency=${encodeURIComponent(formData.charterCostCurrency || formData.currency || 'THB')}&account_code=5530&vendor_name=${encodeURIComponent(formData.externalBoatName || '')}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-1 px-3 py-1.5 bg-blue-600 text-white text-xs rounded-lg hover:bg-blue-700"
+                  >
+                    <FileCheck className="h-3.5 w-3.5" />
+                    Record Expense
+                  </a>
+                )}
+              </div>
             )}
           </div>
         )}
