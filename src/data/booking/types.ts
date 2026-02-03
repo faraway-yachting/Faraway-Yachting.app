@@ -59,7 +59,8 @@ export interface Booking {
   bookingOwnerName?: string;
   agentName?: string;
   agentPlatform?: string;
-  meetAndGreeter?: string;
+  meetAndGreeter?: string; // Legacy text field
+  meetGreeterId?: string; // Reference to meet_greeters table
 
   // Location
   destination?: string;

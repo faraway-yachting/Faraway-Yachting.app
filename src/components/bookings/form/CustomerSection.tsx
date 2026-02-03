@@ -150,8 +150,67 @@ export function CustomerSection({
       </div>
 
       <div className="space-y-4">
-        {/* Customer Name with contact search */}
+        {/* Booking Type (Direct/Agency) - MOVED TO TOP */}
         <div>
+          <label className="block text-xs text-gray-500 mb-2">Booking Type</label>
+          <div className="flex items-center gap-4">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="radio"
+                checked={bookingSourceType === 'direct'}
+                onChange={() => {
+                  setBookingSourceType('direct');
+                  onChange('agentPlatform', 'Direct');
+                }}
+                disabled={!canEdit}
+                className="text-[#5A7A8F] focus:ring-[#5A7A8F]"
+              />
+              <span className="text-sm text-gray-700">Direct Booking</span>
+            </label>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="radio"
+                checked={bookingSourceType === 'agency'}
+                onChange={() => {
+                  setBookingSourceType('agency');
+                  // Clear the platform value when switching to agency mode
+                  if (formData.agentPlatform === 'Direct') {
+                    onChange('agentPlatform', '');
+                  }
+                }}
+                disabled={!canEdit}
+                className="text-[#5A7A8F] focus:ring-[#5A7A8F]"
+              />
+              <span className="text-sm text-gray-700">Agency</span>
+            </label>
+          </div>
+
+          {/* Agency dropdown - only shown when Agency is selected */}
+          {bookingSourceType === 'agency' && (
+            <div className="mt-3">
+              <label className="block text-xs text-gray-500 mb-1">Agency</label>
+              <select
+                value={formData.agentPlatform || ''}
+                onChange={(e) => onChange('agentPlatform', e.target.value)}
+                disabled={!canEdit}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100"
+              >
+                <option value="">Select agency...</option>
+                {agencies.map((agency) => (
+                  <option key={agency.id} value={agency.name}>
+                    {agency.name}
+                  </option>
+                ))}
+              </select>
+              {agencies.length === 0 && (
+                <p className="text-xs text-gray-400 mt-1">No agencies found. Add agencies in Contacts.</p>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Customer Name with contact search */}
+        <div className="pt-3 border-t border-gray-200">
           <label className="block text-xs text-gray-500 mb-1">Customer / Agency Name *</label>
           <div className="relative" ref={contactDropdownRef}>
             <div className="relative">
@@ -268,88 +327,6 @@ export function CustomerSection({
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100"
             />
           </div>
-        </div>
-
-        {/* Booking Type (Direct/Agency) */}
-        <div className="pt-3 border-t border-gray-200">
-          <label className="block text-xs text-gray-500 mb-2">Booking Type</label>
-          <div className="flex items-center gap-4">
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input
-                type="radio"
-                checked={bookingSourceType === 'direct'}
-                onChange={() => {
-                  setBookingSourceType('direct');
-                  onChange('agentPlatform', 'Direct');
-                  onChange('agentName', '');
-                }}
-                disabled={!canEdit}
-                className="text-[#5A7A8F] focus:ring-[#5A7A8F]"
-              />
-              <span className="text-sm text-gray-700">Direct Booking</span>
-            </label>
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input
-                type="radio"
-                checked={bookingSourceType === 'agency'}
-                onChange={() => {
-                  setBookingSourceType('agency');
-                  // Clear the platform value when switching to agency mode
-                  if (formData.agentPlatform === 'Direct') {
-                    onChange('agentPlatform', '');
-                  }
-                }}
-                disabled={!canEdit}
-                className="text-[#5A7A8F] focus:ring-[#5A7A8F]"
-              />
-              <span className="text-sm text-gray-700">Agency</span>
-            </label>
-          </div>
-
-          {bookingSourceType === 'agency' && (
-            <div className="grid grid-cols-3 gap-4 mt-3">
-              <div>
-                <label className="block text-xs text-gray-500 mb-1">Agency</label>
-                <select
-                  value={formData.agentPlatform || ''}
-                  onChange={(e) => onChange('agentPlatform', e.target.value)}
-                  disabled={!canEdit}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100"
-                >
-                  <option value="">Select agency...</option>
-                  {agencies.map((agency) => (
-                    <option key={agency.id} value={agency.name}>
-                      {agency.name}
-                    </option>
-                  ))}
-                </select>
-                {agencies.length === 0 && (
-                  <p className="text-xs text-gray-400 mt-1">No agencies found. Add agencies in Contacts.</p>
-                )}
-              </div>
-              <div>
-                <label className="block text-xs text-gray-500 mb-1">Agent Name</label>
-                <input
-                  type="text"
-                  value={formData.agentName || ''}
-                  onChange={(e) => onChange('agentName', e.target.value)}
-                  placeholder="Agent name"
-                  disabled={!canEdit}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100"
-                />
-              </div>
-              <div>
-                <label className="block text-xs text-gray-500 mb-1">Meet & Greeter</label>
-                <input
-                  type="text"
-                  value={formData.meetAndGreeter || ''}
-                  onChange={(e) => onChange('meetAndGreeter', e.target.value)}
-                  disabled={!canEdit}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100"
-                />
-              </div>
-            </div>
-          )}
         </div>
 
         {/* New Contact Form */}

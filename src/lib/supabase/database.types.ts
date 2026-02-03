@@ -702,6 +702,7 @@ export type Database = {
           charter_cost_currency: string | null
           charter_expense_status: string | null
           linked_expense_id: string | null
+          meet_greeter_id: string | null
         }
         Insert: {
           id?: string
@@ -762,6 +763,7 @@ export type Database = {
           charter_cost_currency?: string | null
           charter_expense_status?: string | null
           linked_expense_id?: string | null
+          meet_greeter_id?: string | null
         }
         Update: {
           id?: string
@@ -822,6 +824,37 @@ export type Database = {
           charter_cost_currency?: string | null
           charter_expense_status?: string | null
           linked_expense_id?: string | null
+          meet_greeter_id?: string | null
+        }
+        Relationships: []
+      }
+      meet_greeters: {
+        Row: {
+          id: string
+          name: string
+          phone: string | null
+          email: string | null
+          is_active: boolean
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          name: string
+          phone?: string | null
+          email?: string | null
+          is_active?: boolean
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          name?: string
+          phone?: string | null
+          email?: string | null
+          is_active?: boolean
+          created_at?: string
+          updated_at?: string
         }
         Relationships: []
       }

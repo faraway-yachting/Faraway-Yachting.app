@@ -27,6 +27,7 @@ import { FinanceSection, PaymentRecord, LinkedDocument, BankAccountOption } from
 import { cashCollectionsApi, CashCollection } from '@/lib/supabase/api/cashCollections';
 import { bankAccountsApi } from '@/lib/supabase/api/bankAccounts';
 import { employeesApi } from '@/lib/supabase/api/employees';
+import { meetGreetersApi, MeetGreeter } from '@/lib/supabase/api/meetGreeters';
 import RecordCashModal from '@/components/cash-collections/RecordCashModal';
 import CommissionSection from './CommissionSection';
 import CrewSection from './CrewSection';
@@ -63,19 +64,41 @@ export function BookingFormContainer({
 }: BookingFormContainerProps) {
   const isEditing = !!booking;
   const [externalBoats, setExternalBoats] = useState<{ id: string; name: string; displayName?: string }[]>([]);
+  const [meetGreeters, setMeetGreeters] = useState<MeetGreeter[]>([]);
 
-  // Load external boats from database
+  // Load external boats and meet greeters from database
   useEffect(() => {
-    async function loadExternalBoats() {
+    async function loadData() {
       try {
-        const boats = await externalBoatsApi.getActive();
+        const [boats, greeters] = await Promise.all([
+          externalBoatsApi.getActive(),
+          meetGreetersApi.getActive(),
+        ]);
         setExternalBoats(boats.map(b => ({ id: b.id, name: b.name, displayName: b.display_name })));
+        setMeetGreeters(greeters);
       } catch (err) {
-        console.error('Failed to load external boats:', err);
+        console.error('Failed to load data:', err);
       }
     }
-    loadExternalBoats();
+    loadData();
   }, []);
+
+  // Create new meet greeter
+  const handleCreateMeetGreeter = async (name: string, phone: string, email: string): Promise<MeetGreeter | null> => {
+    try {
+      const newGreeter = await meetGreetersApi.create({
+        name,
+        phone: phone || null,
+        email: email || null,
+        is_active: true,
+      });
+      setMeetGreeters(prev => [...prev, newGreeter]);
+      return newGreeter;
+    } catch (err) {
+      console.error('Failed to create meet greeter:', err);
+      return null;
+    }
+  };
 
   const getInitialValue = <T,>(
     prefilledVal: T | undefined,
@@ -953,6 +976,8 @@ export function BookingFormContainer({
               onClearProduct={() => { setSelectedProduct(null); setAutoFilledFields(new Set()); }}
               autoFilledFields={autoFilledFields}
               users={users}
+              meetGreeters={meetGreeters}
+              onCreateMeetGreeter={handleCreateMeetGreeter}
             />
 
             {/* Section 2: Customer Information */}

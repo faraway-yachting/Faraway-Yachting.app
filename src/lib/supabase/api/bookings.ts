@@ -34,6 +34,7 @@ function dbBookingToFrontend(db: DbBooking): Booking {
     agentName: db.agent_name ?? undefined,
     agentPlatform: db.agent_platform ?? undefined,
     meetAndGreeter: db.meet_and_greeter ?? undefined,
+    meetGreeterId: db.meet_greeter_id ?? undefined,
     destination: db.destination ?? undefined,
     pickupLocation: db.pickup_location ?? undefined,
     departureFrom: db.departure_from ?? undefined,
@@ -102,6 +103,7 @@ function frontendToDb(booking: Partial<Booking>): Partial<DbBookingInsert> {
   if (booking.agentName !== undefined) db.agent_name = booking.agentName || null;
   if (booking.agentPlatform !== undefined) db.agent_platform = booking.agentPlatform || null;
   if (booking.meetAndGreeter !== undefined) db.meet_and_greeter = booking.meetAndGreeter || null;
+  if (booking.meetGreeterId !== undefined) db.meet_greeter_id = booking.meetGreeterId || null;
   if (booking.destination !== undefined) db.destination = booking.destination || null;
   if (booking.pickupLocation !== undefined) db.pickup_location = booking.pickupLocation || null;
   if (booking.departureFrom !== undefined) db.departure_from = booking.departureFrom || null;
