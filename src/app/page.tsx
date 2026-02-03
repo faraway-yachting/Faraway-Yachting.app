@@ -33,8 +33,12 @@ function useHomeAuth(): UserAccess {
   useEffect(() => {
     const supabase = createClient();
 
-    const loadUser = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
+    const loadUser = async (sessionUser?: SupabaseUser | null) => {
+      let user = sessionUser;
+      if (!user) {
+        const { data: { session } } = await supabase.auth.getSession();
+        user = session?.user ?? null;
+      }
       
       if (!user) {
         setState({ user: null, isSuperAdmin: false, moduleAccess: [], isLoaded: true });
@@ -54,13 +58,11 @@ function useHomeAuth(): UserAccess {
       });
     };
 
-    loadUser();
-
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (event === 'SIGNED_OUT') {
         setState({ user: null, isSuperAdmin: false, moduleAccess: [], isLoaded: true });
-      } else if (session?.user) {
-        loadUser();
+      } else if (event === 'INITIAL_SESSION' || event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+        loadUser(session?.user);
       }
     });
 
