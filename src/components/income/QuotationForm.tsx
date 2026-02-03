@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { X, Save, FileText, Printer, XCircle, Building2, AlertCircle, Share2, Receipt, ChevronDown, Pencil, Loader2 } from 'lucide-react';
 import ClientSelector from './ClientSelector';
@@ -48,9 +48,6 @@ export default function QuotationForm({ quotation, onCancel }: QuotationFormProp
   // Booking modal state
   const [showBookingModal, setShowBookingModal] = useState(false);
   const [prefilledBooking, setPrefilledBooking] = useState<Partial<Booking> | null>(null);
-
-  // Auto-draft ref
-  const autoDraftTriggeredRef = useRef(false);
 
   // Form state
   const [companyId, setCompanyId] = useState(quotation?.companyId || '');
@@ -263,16 +260,6 @@ export default function QuotationForm({ quotation, onCancel }: QuotationFormProp
 
     fetchRate();
   }, [currency, dateCreated]);
-
-  // Auto-save as draft when creating a new quotation and companyId is set
-  useEffect(() => {
-    if (isEditing || autoDraftTriggeredRef.current || !companyId) return;
-    autoDraftTriggeredRef.current = true;
-    const timer = setTimeout(() => {
-      handleSave('draft');
-    }, 500);
-    return () => clearTimeout(timer);
-  }, [companyId]);
 
   // Calculate totals
   const totals = calculateDocumentTotals(lineItems, effectivePricingType);

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { X, Save, FileText, Printer, XCircle, Building2, AlertCircle, Share2, ChevronDown, Receipt, Pencil, Loader2, CheckCircle2 } from 'lucide-react';
 import ClientSelector from './ClientSelector';
@@ -64,9 +64,6 @@ export default function InvoiceForm({ invoice, quotationId, charterPrefill, onCa
   // Booking modal state
   const [showBookingModal, setShowBookingModal] = useState(false);
   const [prefilledBooking, setPrefilledBooking] = useState<Partial<Booking> | null>(null);
-
-  // Auto-draft ref
-  const autoDraftTriggeredRef = useRef(false);
 
   // Form state - initialized from invoice or defaults (quotation data loaded async)
   const [companyId, setCompanyId] = useState(invoice?.companyId || '');
@@ -312,16 +309,6 @@ export default function InvoiceForm({ invoice, quotationId, charterPrefill, onCa
 
     fetchRate();
   }, [currency, invoiceDate]);
-
-  // Auto-save as draft when creating a new invoice and companyId is set
-  useEffect(() => {
-    if (isEditing || autoDraftTriggeredRef.current || !companyId) return;
-    autoDraftTriggeredRef.current = true;
-    const timer = setTimeout(() => {
-      handleSave('draft');
-    }, 500);
-    return () => clearTimeout(timer);
-  }, [companyId]);
 
   // Calculate totals
   const totals = calculateDocumentTotals(lineItems, effectivePricingType);

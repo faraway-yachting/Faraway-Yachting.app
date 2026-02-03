@@ -635,19 +635,6 @@ Destination: `;
     fetchRate();
   }, [currency, receiptDate]);
 
-  // Auto-save as draft when company is selected (new receipts only)
-  const autoDraftTriggeredRef = useRef(false);
-  useEffect(() => {
-    if (isEditing || autoDraftTriggeredRef.current || !companyId) return;
-    autoDraftTriggeredRef.current = true;
-    // Small delay to let other state settle
-    const timer = setTimeout(() => {
-      handleSave('draft');
-    }, 500);
-    return () => clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [companyId]);
-
   // Handle save
   const handleSave = async (status: 'draft' | 'paid') => {
     // Clear previous errors

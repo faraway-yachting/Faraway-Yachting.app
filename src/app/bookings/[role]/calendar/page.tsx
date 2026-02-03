@@ -182,7 +182,7 @@ export default function BookingCalendarPage() {
   };
 
   // Booking handlers
-  const handleDateClick = async (date: string) => {
+  const handleDateClick = (date: string) => {
     if (!canCreate) return;
     let prefill = buildBoatPrefill();
     // If no boat selected in filter, default to first project to satisfy DB constraint
@@ -190,13 +190,16 @@ export default function BookingCalendarPage() {
       prefill = { projectId: projects[0].id };
     }
     if (!prefill) return; // No projects available at all
-    const draft = await createDraftBooking(date, prefill);
-    if (draft) {
-      setSelectedBooking(draft);
-      setSelectedDate(null);
-      setPrefilledBooking(null);
-      setShowBookingForm(true);
-    }
+
+    // Open form with prefilled data - NO database record yet
+    setPrefilledBooking({
+      ...prefill,
+      dateFrom: date,
+      dateTo: date,
+    });
+    setSelectedBooking(null);
+    setSelectedDate(date);
+    setShowBookingForm(true);
   };
 
   const handleBookingClick = (booking: Booking) => {
@@ -205,43 +208,15 @@ export default function BookingCalendarPage() {
     setShowBookingForm(true);
   };
 
-  // Auto-create draft booking when opening new form
-  const createDraftBooking = async (date?: string, prefill?: Partial<Booking> | null) => {
-    const now = new Date();
-    const year = now.getFullYear();
-    const month = String(now.getMonth() + 1).padStart(2, '0');
-    const day = String(now.getDate()).padStart(2, '0');
-    const rand = String(Math.floor(Math.random() * 10000)).padStart(4, '0');
-    const today = `${year}-${month}-${day}`;
-    const draftData: Partial<Booking> = {
-      ...prefill,
-      status: 'enquiry' as BookingStatus,
-      type: prefill?.type || 'day_charter' as BookingType,
-      title: prefill?.title || 'Draft',
-      customerName: prefill?.customerName || '-',
-      dateFrom: date || prefill?.dateFrom || today,
-      dateTo: date || prefill?.dateTo || today,
-      bookingNumber: `FA-${year}${month}${rand}`,
-    };
-    try {
-      const created = await bookingsApi.create(draftData);
-      setBookings(prev => [...prev, created]);
-      return created;
-    } catch (err: any) {
-      console.error('Failed to create draft booking:', err?.message || err?.code || JSON.stringify(err));
-      return null;
-    }
-  };
-
   const handleSaveBooking = async (bookingData: Partial<Booking>) => {
     if (selectedBooking) {
-      // Update existing (including auto-created drafts)
+      // Update existing booking
       const updated = await bookingsApi.update(selectedBooking.id, bookingData);
       setBookings(prev =>
         prev.map(b => b.id === selectedBooking.id ? updated : b)
       );
     } else {
-      // Fallback: Create new if no selectedBooking (shouldn't happen with auto-draft)
+      // Create NEW booking (only happens on explicit save)
       const now = new Date();
       const year = now.getFullYear();
       const month = String(now.getMonth() + 1).padStart(2, '0');
@@ -257,6 +232,7 @@ export default function BookingCalendarPage() {
     setShowBookingForm(false);
     setSelectedBooking(null);
     setSelectedDate(null);
+    setPrefilledBooking(null);
   };
 
   const handleDeleteBooking = async (id: string) => {
@@ -362,15 +338,12 @@ export default function BookingCalendarPage() {
           {/* Add booking button */}
           {canCreate && (
             <button
-              onClick={async () => {
+              onClick={() => {
                 const prefill = buildBoatPrefill();
-                const draft = await createDraftBooking(undefined, prefill);
-                if (draft) {
-                  setSelectedBooking(draft);
-                  setSelectedDate(null);
-                  setPrefilledBooking(null);
-                  setShowBookingForm(true);
-                }
+                setPrefilledBooking(prefill);
+                setSelectedBooking(null);
+                setSelectedDate(null);
+                setShowBookingForm(true);
               }}
               className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors shadow-sm"
             >
