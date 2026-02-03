@@ -58,17 +58,24 @@ export function CustomerSection({
     formData.agentPlatform && formData.agentPlatform !== 'Direct' ? 'agency' : 'direct'
   );
 
-  // Load contacts on mount
+  // Agency state for booking source dropdown
+  const [agencies, setAgencies] = useState<Contact[]>([]);
+
+  // Load contacts and agencies on mount
   useEffect(() => {
-    async function loadContacts() {
+    async function loadData() {
       try {
-        const data = await contactsApi.getCustomers();
-        setContacts(data as Contact[]);
+        const [customersData, agenciesData] = await Promise.all([
+          contactsApi.getCustomers(),
+          contactsApi.getAgencies(),
+        ]);
+        setContacts(customersData as Contact[]);
+        setAgencies(agenciesData as Contact[]);
       } catch (error) {
         console.error('Error loading contacts:', error);
       }
     }
-    loadContacts();
+    loadData();
   }, []);
 
   // Sync contactSearch when formData.customerName changes externally
@@ -287,7 +294,10 @@ export function CustomerSection({
                 checked={bookingSourceType === 'agency'}
                 onChange={() => {
                   setBookingSourceType('agency');
-                  onChange('agentPlatform', 'Charter Agency');
+                  // Clear the platform value when switching to agency mode
+                  if (formData.agentPlatform === 'Direct') {
+                    onChange('agentPlatform', '');
+                  }
                 }}
                 disabled={!canEdit}
                 className="text-[#5A7A8F] focus:ring-[#5A7A8F]"
@@ -299,14 +309,23 @@ export function CustomerSection({
           {bookingSourceType === 'agency' && (
             <div className="grid grid-cols-3 gap-4 mt-3">
               <div>
-                <label className="block text-xs text-gray-500 mb-1">Agent/Platform</label>
-                <DynamicSelect
-                  category="agent_platform"
-                  value={formData.agentPlatform || 'Charter Agency'}
-                  onChange={(val) => onChange('agentPlatform', val)}
+                <label className="block text-xs text-gray-500 mb-1">Agency</label>
+                <select
+                  value={formData.agentPlatform || ''}
+                  onChange={(e) => onChange('agentPlatform', e.target.value)}
                   disabled={!canEdit}
-                  placeholder="Select platform..."
-                />
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100"
+                >
+                  <option value="">Select agency...</option>
+                  {agencies.map((agency) => (
+                    <option key={agency.id} value={agency.name}>
+                      {agency.name}
+                    </option>
+                  ))}
+                </select>
+                {agencies.length === 0 && (
+                  <p className="text-xs text-gray-400 mt-1">No agencies found. Add agencies in Contacts.</p>
+                )}
               </div>
               <div>
                 <label className="block text-xs text-gray-500 mb-1">Agent Name</label>
