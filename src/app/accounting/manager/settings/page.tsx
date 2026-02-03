@@ -19,13 +19,8 @@ import { BankAccountFormModal } from "@/components/banking/BankAccountFormModal"
 import { BankAccount } from "@/data/banking/types";
 import { ProjectFormModal } from "@/components/project/ProjectFormModal";
 import { Project } from "@/data/project/types";
-import {
-  getDocumentPdfSettings,
-  updateDocumentFieldSettings,
-  updateDefaultTermsAndConditions,
-  updateDefaultValidityDays,
-} from "@/data/settings/pdfSettings";
-import type { DocumentType, PdfFieldSettings } from "@/data/settings/types";
+import type { DocumentType, PdfFieldSettings, PdfSettings } from "@/data/settings/types";
+import { pdfSettingsApi } from "@/lib/supabase/api/pdfSettings";
 import { PdfPreviewPanel } from "@/components/settings/PdfPreviewPanel";
 import { pettyCashApi } from "@/lib/supabase/api/pettyCash";
 import type { PettyCashWallet } from "@/data/petty-cash/types";
@@ -116,6 +111,14 @@ export default function SettingsPage() {
         if (!selectedCompanyId) {
           setSelectedCompanyId('all');
         }
+
+        // Load PDF settings from database
+        const pdfData = await pdfSettingsApi.get();
+        setAllPdfSettings(pdfData);
+        // Initialize local state with quotation settings (default selected type)
+        setPdfFields(pdfData.quotation.fields);
+        setDefaultTerms(pdfData.quotation.defaultTermsAndConditions);
+        setDefaultValidityDays(pdfData.quotation.defaultValidityDays ?? 2);
       } catch (e) {
         setError(e instanceof Error ? e.message : 'Failed to load data');
       } finally {
@@ -269,37 +272,81 @@ export default function SettingsPage() {
 
   // PDF Settings state
   const [pdfDocumentType, setPdfDocumentType] = useState<DocumentType>('quotation');
-  const currentPdfSettings = getDocumentPdfSettings(pdfDocumentType);
-  const [pdfFields, setPdfFields] = useState<PdfFieldSettings>(currentPdfSettings.fields);
-  const [defaultTerms, setDefaultTerms] = useState(currentPdfSettings.defaultTermsAndConditions);
-  const [defaultValidityDays, setDefaultValidityDays] = useState(currentPdfSettings.defaultValidityDays ?? 2);
+  const [allPdfSettings, setAllPdfSettings] = useState<PdfSettings | null>(null);
+  const [pdfFields, setPdfFields] = useState<PdfFieldSettings>({
+    showCompanyAddress: true,
+    showCompanyPhone: true,
+    showCompanyEmail: true,
+    showCompanyTaxId: true,
+    showClientAddress: true,
+    showClientEmail: true,
+    showClientTaxId: false,
+    showValidUntil: true,
+    showVatColumn: true,
+    showWhtColumn: true,
+    showSubtotal: true,
+    showVatAmount: true,
+    showWhtAmount: true,
+    showNetAmountToPay: true,
+    showPaymentDetails: true,
+    showTermsAndConditions: true,
+    showCreatedBySignature: true,
+  });
+  const [defaultTerms, setDefaultTerms] = useState('');
+  const [defaultValidityDays, setDefaultValidityDays] = useState(2);
 
   // Update local state when document type changes
   const handlePdfDocumentTypeChange = (docType: DocumentType) => {
     setPdfDocumentType(docType);
-    const settings = getDocumentPdfSettings(docType);
-    setPdfFields(settings.fields);
-    setDefaultTerms(settings.defaultTermsAndConditions);
-    setDefaultValidityDays(settings.defaultValidityDays ?? 2);
+    if (allPdfSettings) {
+      const settings = allPdfSettings[docType];
+      setPdfFields(settings.fields);
+      setDefaultTerms(settings.defaultTermsAndConditions);
+      setDefaultValidityDays(settings.defaultValidityDays ?? 2);
+    }
+  };
+
+  // Save current PDF settings to database
+  const savePdfSettings = async (fields: PdfFieldSettings, terms: string, validityDays: number) => {
+    try {
+      await pdfSettingsApi.update(pdfDocumentType, {
+        fields,
+        defaultTermsAndConditions: terms,
+        defaultValidityDays: validityDays,
+      });
+      // Update local cache
+      if (allPdfSettings) {
+        setAllPdfSettings({
+          ...allPdfSettings,
+          [pdfDocumentType]: {
+            fields,
+            defaultTermsAndConditions: terms,
+            defaultValidityDays: validityDays,
+          },
+        });
+      }
+    } catch (e) {
+      console.error('Failed to save PDF settings:', e);
+    }
   };
 
   // Update field setting
   const handleFieldToggle = (field: keyof PdfFieldSettings) => {
     const newFields = { ...pdfFields, [field]: !pdfFields[field] };
     setPdfFields(newFields);
-    updateDocumentFieldSettings(pdfDocumentType, { [field]: newFields[field] });
+    savePdfSettings(newFields, defaultTerms, defaultValidityDays);
   };
 
   // Update default terms
   const handleTermsChange = (terms: string) => {
     setDefaultTerms(terms);
-    updateDefaultTermsAndConditions(pdfDocumentType, terms);
+    savePdfSettings(pdfFields, terms, defaultValidityDays);
   };
 
   // Update default validity days
   const handleValidityDaysChange = (days: number) => {
     setDefaultValidityDays(days);
-    updateDefaultValidityDays(pdfDocumentType, days);
+    savePdfSettings(pdfFields, defaultTerms, days);
   };
 
   // Refresh functions
