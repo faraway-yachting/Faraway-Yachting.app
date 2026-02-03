@@ -29,6 +29,7 @@ export const bookingPaymentsApi = {
     receipt_id?: string;
     payment_method?: string;
     bank_account_id?: string;
+    paid_to_company_id?: string;
     synced_to_receipt?: boolean;
     needs_accounting_action?: boolean;
   }): Promise<BookingPaymentExtended> {

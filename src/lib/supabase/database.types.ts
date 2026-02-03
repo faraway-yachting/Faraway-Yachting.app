@@ -909,6 +909,7 @@ export type Database = {
           due_date: string | null
           paid_date: string | null
           note: string | null
+          paid_to_company_id: string | null
           created_at: string
           updated_at: string
         }
@@ -921,6 +922,7 @@ export type Database = {
           due_date?: string | null
           paid_date?: string | null
           note?: string | null
+          paid_to_company_id?: string | null
         }
         Update: {
           id?: string
@@ -931,6 +933,7 @@ export type Database = {
           due_date?: string | null
           paid_date?: string | null
           note?: string | null
+          paid_to_company_id?: string | null
         }
         Relationships: []
       }

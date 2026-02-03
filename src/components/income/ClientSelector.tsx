@@ -27,14 +27,14 @@ export default function ClientSelector({
   const [loading, setLoading] = useState(true);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  // Fetch customers from Supabase
+  // Fetch all contacts from Supabase
   const fetchCustomers = async () => {
     setLoading(true);
     try {
-      const data = await contactsApi.getCustomers();
+      const data = await contactsApi.getAll();
       setCustomers(data.map(dbContactToFrontend));
     } catch (e) {
-      console.error('Failed to load customers:', e);
+      console.error('Failed to load contacts:', e);
     } finally {
       setLoading(false);
     }
@@ -111,7 +111,7 @@ export default function ClientSelector({
         <div className="flex items-center gap-2">
           <User className="h-4 w-4 text-gray-400" />
           <span className="truncate">
-            {loading ? 'Loading...' : selectedClient ? selectedClient.name : 'Select customer...'}
+            {loading ? 'Loading...' : selectedClient ? selectedClient.name : 'Select contact...'}
           </span>
           {required && !selectedClient && (
             <span className="text-red-500 ml-1">*</span>
@@ -135,7 +135,7 @@ export default function ClientSelector({
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search customers..."
+                placeholder="Search contacts..."
                 className="w-full pl-10 pr-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#5A7A8F]/20 focus:border-[#5A7A8F]"
                 autoFocus
               />
@@ -147,11 +147,11 @@ export default function ClientSelector({
             {loading ? (
               <div className="px-4 py-8 text-center text-sm text-gray-500">
                 <Loader2 className="h-5 w-5 animate-spin mx-auto mb-2" />
-                Loading customers...
+                Loading contacts...
               </div>
             ) : sortedClients.length === 0 ? (
               <div className="px-4 py-8 text-center text-sm text-gray-500">
-                No customers found
+                No contacts found
               </div>
             ) : (
               <ul className="py-1">

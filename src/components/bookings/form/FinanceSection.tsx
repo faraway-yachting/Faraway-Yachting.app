@@ -30,11 +30,17 @@ export interface PaymentRecord {
   dueDate: string;
   paidDate: string;
   note: string;
+  paidToCompanyId?: string;
   receiptId?: string;
   paymentMethod?: string;
   bankAccountId?: string;
   syncedToReceipt?: boolean;
   needsAccountingAction?: boolean;
+}
+
+export interface CompanyOption {
+  id: string;
+  name: string;
 }
 
 export interface BankAccountOption {
@@ -73,6 +79,7 @@ interface FinanceSectionProps {
   cashCollections?: CashCollection[];
   onRecordCash?: () => void;
   bankAccounts?: BankAccountOption[];
+  companies?: CompanyOption[];
   onAddPaymentFromInvoice?: (paymentIndex: number) => void;
   loadBankAccountsForCompany?: (companyId: string) => Promise<BankAccountOption[]>;
 }
@@ -96,6 +103,7 @@ export function FinanceSection({
   cashCollections = [],
   onRecordCash,
   bankAccounts = [],
+  companies = [],
   onAddPaymentFromInvoice,
   loadBankAccountsForCompany,
 }: FinanceSectionProps) {
@@ -407,6 +415,20 @@ export function FinanceSection({
                   <div>
                     <label className="block text-xs text-gray-400 mb-1">Paid To</label>
                     <select
+                      value={payment.paidToCompanyId || ''}
+                      onChange={(e) => updatePayment(index, 'paidToCompanyId', e.target.value || undefined)}
+                      disabled={!canEdit || payment.syncedToReceipt}
+                      className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100"
+                    >
+                      <option value="">Select company...</option>
+                      {companies.map(c => (
+                        <option key={c.id} value={c.id}>{c.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-400 mb-1">Bank Account</label>
+                    <select
                       value={payment.paymentMethod === 'cash' ? 'cash' : (payment.bankAccountId || '')}
                       onChange={(e) => {
                         const val = e.target.value;
@@ -436,17 +458,6 @@ export function FinanceSection({
                       type="date"
                       value={payment.paidDate}
                       onChange={(e) => updatePayment(index, 'paidDate', e.target.value)}
-                      disabled={!canEdit}
-                      className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs text-gray-400 mb-1">Note</label>
-                    <input
-                      type="text"
-                      value={payment.note}
-                      onChange={(e) => updatePayment(index, 'note', e.target.value)}
-                      placeholder="Note..."
                       disabled={!canEdit}
                       className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100"
                     />

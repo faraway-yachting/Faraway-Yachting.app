@@ -23,9 +23,10 @@ import { createClient } from '@/lib/supabase/client';
 import { HeaderSection } from './HeaderSection';
 import { CustomerSection } from './CustomerSection';
 import { BookingDetailsSection } from './BookingDetailsSection';
-import { FinanceSection, PaymentRecord, LinkedDocument, BankAccountOption } from './FinanceSection';
+import { FinanceSection, PaymentRecord, LinkedDocument, BankAccountOption, CompanyOption } from './FinanceSection';
 import { cashCollectionsApi, CashCollection } from '@/lib/supabase/api/cashCollections';
 import { bankAccountsApi } from '@/lib/supabase/api/bankAccounts';
+import { companiesApi } from '@/lib/supabase/api/companies';
 import { employeesApi } from '@/lib/supabase/api/employees';
 import { meetGreetersApi, MeetGreeter } from '@/lib/supabase/api/meetGreeters';
 import RecordCashModal from '@/components/cash-collections/RecordCashModal';
@@ -65,17 +66,20 @@ export function BookingFormContainer({
   const isEditing = !!booking;
   const [externalBoats, setExternalBoats] = useState<{ id: string; name: string; displayName?: string }[]>([]);
   const [meetGreeters, setMeetGreeters] = useState<MeetGreeter[]>([]);
+  const [companies, setCompanies] = useState<CompanyOption[]>([]);
 
-  // Load external boats and meet greeters from database
+  // Load external boats, meet greeters, and companies from database
   useEffect(() => {
     async function loadData() {
       try {
-        const [boats, greeters] = await Promise.all([
+        const [boats, greeters, companiesData] = await Promise.all([
           externalBoatsApi.getActive(),
           meetGreetersApi.getActive(),
+          companiesApi.getAll(),
         ]);
         setExternalBoats(boats.map(b => ({ id: b.id, name: b.name, displayName: b.display_name })));
         setMeetGreeters(greeters);
+        setCompanies(companiesData.map(c => ({ id: c.id, name: c.name })));
       } catch (err) {
         console.error('Failed to load data:', err);
       }
@@ -1021,6 +1025,7 @@ export function BookingFormContainer({
                 cashCollections={cashCollections}
                 onRecordCash={() => setShowCashModal(true)}
                 bankAccounts={bankAccounts}
+                companies={companies}
                 onAddPaymentFromInvoice={handleAddPaymentFromInvoice}
                 loadBankAccountsForCompany={loadBankAccountsForCompany}
               />
