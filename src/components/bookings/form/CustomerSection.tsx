@@ -191,7 +191,27 @@ export function CustomerSection({
               <label className="block text-xs text-gray-500 mb-1">Agency</label>
               <select
                 value={formData.agentPlatform || ''}
-                onChange={(e) => onChange('agentPlatform', e.target.value)}
+                onChange={(e) => {
+                  const agencyName = e.target.value;
+                  onChange('agentPlatform', agencyName);
+
+                  // Auto-fill contact details from selected agency
+                  const selectedAgency = agencies.find(a => a.name === agencyName);
+                  if (selectedAgency) {
+                    onChange('customerName', selectedAgency.name);
+                    setContactSearch(selectedAgency.name);
+                    setSelectedContactId(selectedAgency.id);
+                    if (selectedAgency.email) onChange('customerEmail', selectedAgency.email);
+                    if (selectedAgency.phone) onChange('customerPhone', selectedAgency.phone);
+                  } else {
+                    // Clear fields if no agency selected
+                    onChange('customerName', '');
+                    setContactSearch('');
+                    setSelectedContactId(null);
+                    onChange('customerEmail', '');
+                    onChange('customerPhone', '');
+                  }
+                }}
                 disabled={!canEdit}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100"
               >
