@@ -2867,42 +2867,26 @@ export type Database = {
       pdf_settings: {
         Row: {
           id: string
-          company_id: string | null
-          document_type: 'quotation' | 'invoice' | 'receipt'
-          fields: Json
-          default_terms_and_conditions: string | null
-          default_validity_days: number
-          created_at: string
-          updated_at: string
+          quotation: Json
+          invoice: Json
+          receipt: Json
+          updated_at: string | null
         }
         Insert: {
           id?: string
-          company_id?: string | null
-          document_type: 'quotation' | 'invoice' | 'receipt'
-          fields: Json
-          default_terms_and_conditions?: string | null
-          default_validity_days?: number
-          created_at?: string
-          updated_at?: string
+          quotation?: Json
+          invoice?: Json
+          receipt?: Json
+          updated_at?: string | null
         }
         Update: {
           id?: string
-          company_id?: string | null
-          document_type?: 'quotation' | 'invoice' | 'receipt'
-          fields?: Json
-          default_terms_and_conditions?: string | null
-          default_validity_days?: number
-          created_at?: string
-          updated_at?: string
+          quotation?: Json
+          invoice?: Json
+          receipt?: Json
+          updated_at?: string | null
         }
-        Relationships: [
-          {
-            foreignKeyName: "pdf_settings_company_id_fkey"
-            columns: ["company_id"]
-            referencedRelation: "companies"
-            referencedColumns: ["id"]
-          }
-        ]
+        Relationships: []
       }
       accounting_events: {
         Row: {
