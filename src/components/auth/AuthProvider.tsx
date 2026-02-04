@@ -467,9 +467,14 @@ export function AuthProvider({ children }: AuthProviderProps) {
         }
 
         if (authError || !currentUser) {
-          setUser(null);
-          setSession(null);
-          setIsLoading(false);
+          // Only set user to null if onAuthStateChange hasn't already loaded a user
+          // This prevents the race condition where getUser() times out but
+          // onAuthStateChange has already successfully authenticated the user
+          if (!authLoadedRef.current) {
+            setUser(null);
+            setSession(null);
+            setIsLoading(false);
+          }
           return;
         }
 
@@ -492,10 +497,16 @@ export function AuthProvider({ children }: AuthProviderProps) {
         authLoadedRef.current = true;
       } catch (error) {
         console.error('Error getting session:', error);
-        setUser(null);
-        setSession(null);
+        // Only reset if onAuthStateChange hasn't already loaded a user
+        if (!authLoadedRef.current) {
+          setUser(null);
+          setSession(null);
+        }
       } finally {
-        setIsLoading(false);
+        // Only set isLoading false if not already loaded by onAuthStateChange
+        if (!authLoadedRef.current) {
+          setIsLoading(false);
+        }
       }
     };
 
@@ -543,6 +554,18 @@ export function AuthProvider({ children }: AuthProviderProps) {
         if (event === 'TOKEN_REFRESHED' && currentSession) {
           setSession(currentSession);
           // Don't refetch auth data on token refresh - use cached data
+          return;
+        }
+
+        // For INITIAL_SESSION (page load with existing session), load auth data
+        // This is critical - without this, authLoadedRef stays false and getInitialSession
+        // will overwrite the user with null when it times out
+        if (event === 'INITIAL_SESSION' && currentSession?.user) {
+          setSession(currentSession);
+          setUser(currentSession.user);
+          await loadAuthData(currentSession.user.id); // Use cache if available
+          authLoadedRef.current = true;
+          setIsLoading(false);
           return;
         }
 

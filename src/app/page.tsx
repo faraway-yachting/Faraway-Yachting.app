@@ -41,6 +41,14 @@ export default function Home() {
     return () => clearTimeout(timer);
   }, [isLoading]);
 
+  // Clear authTimedOut when user is authenticated (handles onAuthStateChange race condition)
+  // This fixes the case where initial getUser() times out but onAuthStateChange later sets the user
+  useEffect(() => {
+    if (user) {
+      setAuthTimedOut(false);
+    }
+  }, [user]);
+
   // Derive module access from moduleRoles
   const moduleAccess = useMemo(() =>
     moduleRoles.map(r => r.module as ModuleName),
