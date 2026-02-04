@@ -11,79 +11,29 @@ import { NotifyMeModal } from "@/components/NotifyMeModal";
 import { appConfig } from "@/config/app.config";
 import { modules, Module } from "@/data/modules";
 import { User, LogOut, Shield } from "lucide-react";
-import { createClient } from "@/lib/supabase/client";
-import type { User as SupabaseUser } from "@supabase/supabase-js";
+import { useAuth } from "@/components/auth/AuthProvider";
 import type { ModuleName } from "@/lib/supabase/api/userModuleRoles";
-
-interface UserAccess {
-  user: SupabaseUser | null;
-  isSuperAdmin: boolean;
-  moduleAccess: ModuleName[];
-  isLoaded: boolean;
-}
-
-function useHomeAuth(): UserAccess {
-  const [state, setState] = useState<UserAccess>({
-    user: null,
-    isSuperAdmin: false,
-    moduleAccess: [],
-    isLoaded: false,
-  });
-
-  useEffect(() => {
-    const supabase = createClient();
-
-    const loadUser = async (sessionUser?: SupabaseUser | null) => {
-      let user = sessionUser;
-      if (!user) {
-        const { data: { session } } = await supabase.auth.getSession();
-        user = session?.user ?? null;
-      }
-      
-      if (!user) {
-        setState({ user: null, isSuperAdmin: false, moduleAccess: [], isLoaded: true });
-        return;
-      }
-
-      const [profileRes, rolesRes] = await Promise.all([
-        supabase.from('user_profiles').select('is_super_admin').eq('id', user.id).single(),
-        supabase.from('user_module_roles').select('module').eq('user_id', user.id).eq('is_active', true),
-      ]);
-
-      setState({
-        user,
-        isSuperAdmin: profileRes.data?.is_super_admin ?? false,
-        moduleAccess: (rolesRes.data || []).map((r: { module: string }) => r.module as ModuleName),
-        isLoaded: true,
-      });
-    };
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      if (event === 'SIGNED_OUT') {
-        setState({ user: null, isSuperAdmin: false, moduleAccess: [], isLoaded: true });
-      } else if (event === 'INITIAL_SESSION' || event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
-        loadUser(session?.user);
-      }
-    });
-
-    return () => subscription.unsubscribe();
-  }, []);
-
-  return state;
-}
 
 export default function Home() {
   const [modalOpen, setModalOpen] = useState(false);
   const [selectedModule, setSelectedModule] = useState("");
   const router = useRouter();
-  const { user, isSuperAdmin, moduleAccess, isLoaded } = useHomeAuth();
+
+  // Use the centralized AuthProvider instead of a duplicate listener
+  const { user, isSuperAdmin, moduleRoles, isLoading, signOut } = useAuth();
+
+  // Derive module access from moduleRoles
+  const moduleAccess = useMemo(() =>
+    moduleRoles.map(r => r.module as ModuleName),
+    [moduleRoles]
+  );
 
   const visibleModules = useMemo((): Module[] => {
     if (!user) return modules;
-    if (!isLoaded) return modules;
+    if (isLoading) return modules;
     if (isSuperAdmin) return modules;
     return modules.filter((m) => moduleAccess.includes(m.moduleKey));
-  }, [user, isSuperAdmin, moduleAccess, isLoaded]);
+  }, [user, isSuperAdmin, moduleAccess, isLoading]);
 
   useEffect(() => {
     const hash = window.location.hash;
@@ -102,11 +52,8 @@ export default function Home() {
     setModalOpen(true);
   };
 
-  const handleSignOut = async () => {
-    const supabase = createClient();
-    await supabase.auth.signOut();
-    window.location.href = '/';
-  };
+  // Use the centralized signOut from AuthProvider (handles global scope + client cleanup)
+  const handleSignOut = () => signOut();
 
   return (
     <div className="min-h-screen bg-[#A8C5D6] flex flex-col">

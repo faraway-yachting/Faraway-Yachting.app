@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
+import { createContext, useContext, useEffect, useState, ReactNode, useCallback, useRef } from 'react';
 import { createClient, clearSupabaseClient } from '@/lib/supabase/client';
 import type { User, Session } from '@supabase/supabase-js';
 import type { Database } from '@/lib/supabase/database.types';
@@ -29,6 +29,55 @@ type DataScopeType = 'own' | 'project' | 'company' | 'all';
 interface RoleConfig {
   menuVisibility: Record<string, Record<string, boolean>>; // module -> menuKey -> visible
   dataScopes: Record<string, Record<string, DataScopeType>>; // module -> resource -> scope
+}
+
+// Session storage cache for auth data
+const AUTH_CACHE_KEY = 'faraway_auth_cache';
+const AUTH_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+interface AuthCache {
+  userId: string;
+  profile: UserProfile | null;
+  moduleRoles: UserModuleRole[];
+  permissions: string[];
+  companyAccess: UserCompanyAccess[];
+  projectAccess: UserProjectAccess[];
+  roleConfig: RoleConfig;
+  timestamp: number;
+}
+
+function getCachedAuth(userId: string): AuthCache | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const cached = sessionStorage.getItem(AUTH_CACHE_KEY);
+    if (!cached) return null;
+    const data: AuthCache = JSON.parse(cached);
+    // Check if cache is for same user and not expired
+    if (data.userId === userId && Date.now() - data.timestamp < AUTH_CACHE_TTL) {
+      return data;
+    }
+  } catch (e) {
+    // Cache read failed, proceed without cache
+  }
+  return null;
+}
+
+function setCachedAuth(data: AuthCache): void {
+  if (typeof window === 'undefined') return;
+  try {
+    sessionStorage.setItem(AUTH_CACHE_KEY, JSON.stringify(data));
+  } catch (e) {
+    // Cache write failed, continue without caching
+  }
+}
+
+function clearCachedAuth(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    sessionStorage.removeItem(AUTH_CACHE_KEY);
+  } catch (e) {
+    // Ignore cache clear errors
+  }
 }
 
 interface AuthContextType {
@@ -189,52 +238,68 @@ export function AuthProvider({ children }: AuthProviderProps) {
       dataScopes: {},
     };
 
+    if (roles.length === 0) return config;
+
+    // Collect all role keys for batch query
+    const roleKeys = roles.map(r => r.role);
+
     try {
-      // For each module role, fetch the role's menu visibility and data scopes
-      for (const moduleRole of roles) {
-        const module = moduleRole.module;
-        const roleKey = moduleRole.role;
+      // Single query for ALL menu visibility settings (instead of per-role)
+      try {
+        const { data: visibilityDataRaw, error: visError } = await supabase
+          .from('role_menu_visibility' as any)
+          .select('module, role_key, menu_key, is_visible')
+          .in('role_key', roleKeys);
 
-        // Fetch menu visibility for this role
-        // Wrap in try-catch to handle case where table doesn't exist yet
-        try {
-          const { data: visibilityDataRaw, error: visError } = await supabase
-            .from('role_menu_visibility' as any)
-            .select('menu_key, is_visible')
-            .eq('module', module)
-            .eq('role_key', roleKey);
+        const visibilityData = visibilityDataRaw as unknown as {
+          module: string;
+          role_key: string;
+          menu_key: string;
+          is_visible: boolean
+        }[] | null;
 
-          const visibilityData = visibilityDataRaw as unknown as { menu_key: string; is_visible: boolean }[] | null;
-          if (!visError && visibilityData) {
-            config.menuVisibility[module] = config.menuVisibility[module] || {};
-            for (const item of visibilityData) {
-              config.menuVisibility[module][item.menu_key] = item.is_visible;
+        if (!visError && visibilityData) {
+          for (const item of visibilityData) {
+            // Only include if this module-role combo is in the user's roles
+            const hasRole = roles.some(r => r.module === item.module && r.role === item.role_key);
+            if (hasRole) {
+              config.menuVisibility[item.module] = config.menuVisibility[item.module] || {};
+              config.menuVisibility[item.module][item.menu_key] = item.is_visible;
             }
           }
-        } catch (e) {
-          // Table might not exist yet, continue gracefully
-          console.warn('role_menu_visibility table not available:', e);
         }
+      } catch (e) {
+        // Table might not exist yet, continue gracefully
+        console.warn('role_menu_visibility table not available:', e);
+      }
 
-        // Fetch data scopes for this role
-        try {
-          const { data: scopeDataRaw, error: scopeError } = await supabase
-            .from('role_data_scope' as any)
-            .select('resource, scope_type')
-            .eq('module', module)
-            .eq('role_key', roleKey);
+      // Single query for ALL data scope settings (instead of per-role)
+      try {
+        const { data: scopeDataRaw, error: scopeError } = await supabase
+          .from('role_data_scope' as any)
+          .select('module, role_key, resource, scope_type')
+          .in('role_key', roleKeys);
 
-          const scopeData = scopeDataRaw as unknown as { resource: string; scope_type: string }[] | null;
-          if (!scopeError && scopeData) {
-            config.dataScopes[module] = config.dataScopes[module] || {};
-            for (const item of scopeData) {
-              config.dataScopes[module][item.resource] = item.scope_type as DataScopeType;
+        const scopeData = scopeDataRaw as unknown as {
+          module: string;
+          role_key: string;
+          resource: string;
+          scope_type: string
+        }[] | null;
+
+        if (!scopeError && scopeData) {
+          for (const item of scopeData) {
+            // Only include if this module-role combo is in the user's roles
+            const hasRole = roles.some(r => r.module === item.module && r.role === item.role_key);
+            if (hasRole) {
+              config.dataScopes[item.module] = config.dataScopes[item.module] || {};
+              config.dataScopes[item.module][item.resource] = item.scope_type as DataScopeType;
             }
           }
-        } catch (e) {
-          // Table might not exist yet, continue gracefully
-          console.warn('role_data_scope table not available:', e);
         }
+      } catch (e) {
+        // Table might not exist yet, continue gracefully
+        console.warn('role_data_scope table not available:', e);
       }
     } catch (error) {
       console.error('Error fetching role config:', error);
@@ -315,35 +380,77 @@ export function AuthProvider({ children }: AuthProviderProps) {
     return roleConfig.dataScopes[module][resource] ?? 'company';
   };
 
+  // Track if we've already loaded auth data to prevent duplicate fetches
+  const authLoadedRef = useRef(false);
+
+  // Consolidated function to load all auth data for a user
+  const loadAuthData = useCallback(async (userId: string, skipCache = false): Promise<void> => {
+    // Check cache first (unless explicitly skipping)
+    if (!skipCache) {
+      const cached = getCachedAuth(userId);
+      if (cached) {
+        setProfile(cached.profile);
+        setModuleRoles(cached.moduleRoles);
+        setPermissions(cached.permissions);
+        setCompanyAccess(cached.companyAccess);
+        setProjectAccess(cached.projectAccess);
+        setRoleConfig(cached.roleConfig);
+        return;
+      }
+    }
+
+    // Fetch all data in parallel
+    const [profileData, rolesData, permsData, companyData, projectData] = await Promise.all([
+      fetchProfile(userId),
+      fetchModuleRoles(userId),
+      fetchPermissions(userId),
+      fetchCompanyAccess(userId),
+      fetchProjectAccess(userId)
+    ]);
+
+    // Fetch role config (only if there are roles)
+    let config: RoleConfig = { menuVisibility: {}, dataScopes: {} };
+    if (rolesData.length > 0) {
+      config = await fetchRoleConfig(rolesData);
+    }
+
+    // Update state
+    setProfile(profileData);
+    setModuleRoles(rolesData);
+    setPermissions(permsData);
+    setCompanyAccess(companyData);
+    setProjectAccess(projectData);
+    setRoleConfig(config);
+
+    // Cache the result
+    setCachedAuth({
+      userId,
+      profile: profileData,
+      moduleRoles: rolesData,
+      permissions: permsData,
+      companyAccess: companyData,
+      projectAccess: projectData,
+      roleConfig: config,
+      timestamp: Date.now(),
+    });
+  }, []);
+
   const refreshProfile = async () => {
     if (user) {
-      const [profileData, rolesData, permsData, companyData, projectData] = await Promise.all([
-        fetchProfile(user.id),
-        fetchModuleRoles(user.id),
-        fetchPermissions(user.id),
-        fetchCompanyAccess(user.id),
-        fetchProjectAccess(user.id)
-      ]);
-      setProfile(profileData);
-      setModuleRoles(rolesData);
-      setPermissions(permsData);
-      setCompanyAccess(companyData);
-      setProjectAccess(projectData);
-
-      // Fetch role config after getting module roles
-      if (rolesData.length > 0) {
-        const config = await fetchRoleConfig(rolesData);
-        setRoleConfig(config);
-      }
+      // Skip cache when explicitly refreshing
+      await loadAuthData(user.id, true);
     }
   };
 
   useEffect(() => {
     const getInitialSession = async () => {
+      // Prevent duplicate loads
+      if (authLoadedRef.current) return;
+
       try {
         const client = createClient();
         const { data: { user: currentUser }, error } = await client.auth.getUser();
-        
+
         if (error || !currentUser) {
           setUser(null);
           setSession(null);
@@ -355,23 +462,9 @@ export function AuthProvider({ children }: AuthProviderProps) {
         setSession(currentSession);
         setUser(currentUser);
 
-        const [profileData, rolesData, permsData, companyData, projectData] = await Promise.all([
-          fetchProfile(currentUser.id),
-          fetchModuleRoles(currentUser.id),
-          fetchPermissions(currentUser.id),
-          fetchCompanyAccess(currentUser.id),
-          fetchProjectAccess(currentUser.id)
-        ]);
-        setProfile(profileData);
-        setModuleRoles(rolesData);
-        setPermissions(permsData);
-        setCompanyAccess(companyData);
-        setProjectAccess(projectData);
-
-        if (rolesData.length > 0) {
-          const config = await fetchRoleConfig(rolesData);
-          setRoleConfig(config);
-        }
+        // Load auth data (will use cache if available)
+        await loadAuthData(currentUser.id);
+        authLoadedRef.current = true;
       } catch (error) {
         console.error('Error getting session:', error);
         setUser(null);
@@ -386,45 +479,60 @@ export function AuthProvider({ children }: AuthProviderProps) {
     const client = createClient();
     const { data: { subscription } } = client.auth.onAuthStateChange(
       async (event, currentSession) => {
-        setSession(currentSession);
-        setUser(currentSession?.user ?? null);
-
-        if (currentSession?.user) {
-          const [profileData, rolesData, permsData, companyData, projectData] = await Promise.all([
-            fetchProfile(currentSession.user.id),
-            fetchModuleRoles(currentSession.user.id),
-            fetchPermissions(currentSession.user.id),
-            fetchCompanyAccess(currentSession.user.id),
-            fetchProjectAccess(currentSession.user.id)
-          ]);
-          setProfile(profileData);
-          setModuleRoles(rolesData);
-          setPermissions(permsData);
-          setCompanyAccess(companyData);
-          setProjectAccess(projectData);
-
-          // Fetch role config after getting module roles
-          if (rolesData.length > 0) {
-            const config = await fetchRoleConfig(rolesData);
-            setRoleConfig(config);
-          }
-        } else {
+        // Only handle significant auth events
+        if (event === 'SIGNED_OUT') {
+          setSession(null);
+          setUser(null);
           setProfile(null);
           setModuleRoles([]);
           setPermissions([]);
           setCompanyAccess([]);
           setProjectAccess([]);
           setRoleConfig({ menuVisibility: {}, dataScopes: {} });
+          clearCachedAuth();
+          authLoadedRef.current = false;
+          setIsLoading(false);
+
+          // Redirect ALL tabs to login when sign out is detected (including other tabs)
+          if (typeof window !== 'undefined') {
+            const authPages = ['/login', '/signup', '/forgot-password', '/auth/'];
+            const isOnAuthPage = authPages.some(page => window.location.pathname.startsWith(page));
+            if (!isOnAuthPage) {
+              window.location.href = '/login';
+            }
+          }
+          return;
         }
 
-        setIsLoading(false);
+        // For SIGNED_IN, load fresh data
+        if (event === 'SIGNED_IN' && currentSession?.user) {
+          setSession(currentSession);
+          setUser(currentSession.user);
+          await loadAuthData(currentSession.user.id, true); // Skip cache on sign in
+          authLoadedRef.current = true;
+          setIsLoading(false);
+          return;
+        }
+
+        // For TOKEN_REFRESHED, just update session - no need to refetch all data
+        if (event === 'TOKEN_REFRESHED' && currentSession) {
+          setSession(currentSession);
+          // Don't refetch auth data on token refresh - use cached data
+          return;
+        }
+
+        // For other events, update session if present
+        if (currentSession) {
+          setSession(currentSession);
+          setUser(currentSession.user);
+        }
       }
     );
 
     return () => {
       subscription.unsubscribe();
     };
-  }, []);
+  }, [loadAuthData]);
 
   const signOut = async () => {
     setUser(null);

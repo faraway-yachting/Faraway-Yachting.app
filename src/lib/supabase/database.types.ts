@@ -2508,7 +2508,7 @@ export type Database = {
           id: string
           expense_number: string
           wallet_id: string
-          company_id: string
+          company_id: string | null
           expense_date: string
           description: string | null
           project_id: string
@@ -2521,7 +2521,7 @@ export type Database = {
           id?: string
           expense_number: string
           wallet_id: string
-          company_id: string
+          company_id?: string | null
           expense_date: string
           description?: string | null
           project_id: string
@@ -2534,7 +2534,7 @@ export type Database = {
           id?: string
           expense_number?: string
           wallet_id?: string
-          company_id?: string
+          company_id?: string | null
           expense_date?: string
           description?: string | null
           project_id?: string

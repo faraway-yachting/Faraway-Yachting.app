@@ -102,6 +102,13 @@ export default function ReimbursementApprovalModal({
     loadData();
   }, []);
 
+  // Initialize bank account selection from reimbursement data (for approved/paid claims)
+  useEffect(() => {
+    if (reimbursement.bankAccountId && (reimbursement.status === 'approved' || reimbursement.status === 'paid')) {
+      setBankAccountId(reimbursement.bankAccountId);
+    }
+  }, [reimbursement.bankAccountId, reimbursement.status]);
+
   // Filter bank accounts by selected company (use editCompanyId for filtering)
   const bankAccounts = useMemo(() => {
     if (!editCompanyId) {

@@ -77,7 +77,7 @@ export interface PettyCashExpenseLineItem {
 // EXPENSE
 // ============================================
 export type ReceiptStatus = 'pending' | 'original_received';
-export type ExpenseStatus = 'draft' | 'submitted';
+export type ExpenseStatus = 'draft' | 'submitted' | 'rejected';
 
 export interface PettyCashExpense {
   id: string;

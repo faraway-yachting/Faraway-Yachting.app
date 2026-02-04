@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo, useCallback, useEffect } from 'react';
+import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { AppShell } from '@/components/accounting/AppShell';
 import { KPICard } from '@/components/accounting/KPICard';
@@ -71,7 +71,7 @@ import {
 } from '@/data/petty-cash/reimbursements';
 import { createTopUp, completeTopUp, getTopUpsByWallet } from '@/data/petty-cash/topups';
 import { notifyAccountantNewReimbursement } from '@/data/notifications/notifications';
-import type { PettyCashWallet, PettyCashReimbursement, PettyCashExpense, PettyCashTransaction, TransactionType, ReceiptStatus } from '@/data/petty-cash/types';
+import type { PettyCashWallet, PettyCashReimbursement, PettyCashExpense, PettyCashTransaction, TransactionType, ReceiptStatus, ExpenseStatus, Attachment } from '@/data/petty-cash/types';
 import {
   formatCurrency,
   formatDate,
@@ -85,7 +85,18 @@ import {
 // Types for Supabase data
 type SupabaseWallet = Database['public']['Tables']['petty_cash_wallets']['Row'];
 type SupabaseWalletWithBalance = SupabaseWallet & { calculated_balance: number };
-type SupabaseExpense = Database['public']['Tables']['petty_cash_expenses']['Row'];
+// Extend expense type to include columns that exist in DB but aren't in generated types
+type SupabaseExpenseBase = Database['public']['Tables']['petty_cash_expenses']['Row'];
+type SupabaseExpense = SupabaseExpenseBase & {
+  attachments?: string | unknown[] | null;
+  updated_at?: string;
+  // Accounting fields (added in migration 093)
+  expense_account_code?: string | null;
+  accounting_vat_type?: string | null;
+  accounting_vat_rate?: number | null;
+  accounting_completed_by?: string | null;
+  accounting_completed_at?: string | null;
+};
 type DbCompany = Database['public']['Tables']['companies']['Row'];
 type DbProject = Database['public']['Tables']['projects']['Row'];
 
@@ -199,6 +210,18 @@ export default function PettyCashManagementPage() {
   const [myWalletExpenseFilters, setMyWalletExpenseFilters] = useState<ExpenseFilterValues>(initialMyWalletFilters);
   const [myWalletReimbursementFilters, setMyWalletReimbursementFilters] = useState<ExpenseFilterValues>(initialMyWalletFilters);
 
+  // Resubmit state - pre-filled data and tracking to prevent duplicate resubmits
+  const [resubmitPrefilledData, setResubmitPrefilledData] = useState<{
+    projectId: string;
+    projectName?: string;
+    expenseDate: string;
+    amount: number;
+    description: string;
+    originalReimbursementId: string;
+  } | null>(null);
+  const [editingExpenseId, setEditingExpenseId] = useState<string | null>(null); // Track when editing existing expense for resubmit
+  const [resubmittedIds, setResubmittedIds] = useState<Set<string>>(new Set());
+
   // Transaction filter state
   const [txnDateFrom, setTxnDateFrom] = useState('');
   const [txnDateTo, setTxnDateTo] = useState('');
@@ -211,26 +234,171 @@ export default function PettyCashManagementPage() {
   const [showReceiptConfirmDialog, setShowReceiptConfirmDialog] = useState(false);
   const [pendingReceiptUncheck, setPendingReceiptUncheck] = useState<PettyCashTransaction | null>(null);
 
-  // Fetch companies and projects from Supabase
-  useEffect(() => {
-    async function loadDropdownData() {
-      try {
-        const [companiesData, projectsData] = await Promise.all([
-          companiesApi.getActive(),
-          projectsApi.getActive(),
-        ]);
-        setCompanies(companiesData.map((c: DbCompany) => ({ id: c.id, name: c.name })));
-        setProjects(projectsData.map((p: DbProject) => ({ id: p.id, name: p.name, code: p.code })));
-      } catch (error) {
-        console.error('Error loading dropdown data:', error);
-      } finally {
-        setIsLoadingData(false);
-      }
+  // Fetch guard to prevent duplicate API calls
+  const isFetchingRef = useRef(false);
+  const autoCreateInProgressRef = useRef(false);
+  const hasAutoCreatedOnceRef = useRef(false); // Only allow auto-creation once per page load
+  const lastFetchTimeRef = useRef(0);
+
+  // Consolidated data loading function with fetch guard
+  const loadAllData = useCallback(async (forceRefresh = false) => {
+    // Prevent concurrent fetches (debounce 500ms unless forced)
+    const now = Date.now();
+    if (!forceRefresh && now - lastFetchTimeRef.current < 500) {
+      return;
     }
-    loadDropdownData();
+    if (isFetchingRef.current) {
+      return;
+    }
+    isFetchingRef.current = true;
+    lastFetchTimeRef.current = now;
+
+    try {
+      // Phase 1: Load dropdown data (companies, projects) - these are needed by other queries
+      const [companiesData, projectsData] = await Promise.all([
+        companiesApi.getActive(),
+        projectsApi.getActive(),
+      ]);
+      const mappedCompanies = companiesData.map((c: DbCompany) => ({ id: c.id, name: c.name }));
+      const mappedProjects = projectsData.map((p: DbProject) => ({ id: p.id, name: p.name, code: p.code }));
+      setCompanies(mappedCompanies);
+      setProjects(mappedProjects);
+      setIsLoadingData(false);
+
+      // Phase 2: Load all wallets, expenses, and reimbursements in parallel
+      const [
+        walletsData,
+        allExpensesData,
+        reimbursementsData,
+        approvedData,
+        transferSummaryData,
+      ] = await Promise.all([
+        pettyCashApi.getAllWalletsWithCalculatedBalances(),
+        pettyCashApi.getAllExpenses(),
+        pettyCashApi.getPendingReimbursementsWithDetails(),
+        pettyCashApi.getReimbursementsByStatus('approved'),
+        pettyCashApi.getApprovedReimbursementsGroupedForTransfer(),
+      ]);
+
+      setAllWalletsDb(walletsData);
+      setAllExpensesDb(allExpensesData);
+      setIsLoadingAllWallets(false);
+
+      // Set transfer summary data
+      setTransferSummary(transferSummaryData);
+      setIsLoadingTransferSummary(false);
+
+      // Transform pending reimbursements
+      const transformedPending = reimbursementsData.map((r) => ({
+        id: r.id,
+        reimbursementNumber: r.reimbursement_number || '',
+        walletId: r.wallet_id,
+        walletHolderName: r.wallet_holder_name || '',
+        expenseId: r.expense_id || '',
+        companyId: '',
+        companyName: r.company_name || '',
+        amount: Number(r.amount) || 0,
+        finalAmount: Number(r.final_amount) || Number(r.amount) || 0,
+        status: r.status as 'pending' | 'approved' | 'paid' | 'rejected',
+        createdAt: r.created_at || '',
+        createdBy: r.created_by || '',
+        updatedAt: r.updated_at || '',
+        notes: '',
+        expenseNumber: '',
+      }));
+      setPendingReimbursements(transformedPending);
+      setIsLoadingPendingReimbursements(false);
+
+      // Transform approved reimbursements
+      const transformedApproved = approvedData.map((r) => ({
+        id: r.id,
+        reimbursementNumber: r.reimbursement_number || '',
+        walletId: r.wallet_id,
+        walletHolderName: '',
+        expenseId: r.expense_id || '',
+        companyId: r.company_id || '',
+        companyName: '',
+        amount: Number(r.amount) || 0,
+        finalAmount: Number(r.final_amount) || Number(r.amount) || 0,
+        status: r.status as 'pending' | 'approved' | 'paid' | 'rejected',
+        createdAt: r.created_at || '',
+        createdBy: r.created_by || '',
+        updatedAt: r.updated_at || '',
+        notes: '',
+        expenseNumber: '',
+      }));
+      setApprovedReimbursements(transformedApproved);
+      setIsLoadingApprovedReimbursements(false);
+
+      // Background: Auto-create reimbursements for submitted expenses (non-blocking)
+      // Only run ONCE per page load to prevent duplicate creation attempts
+      if (!hasAutoCreatedOnceRef.current && !autoCreateInProgressRef.current) {
+        hasAutoCreatedOnceRef.current = true; // Mark as attempted - never retry
+        autoCreateInProgressRef.current = true;
+        const existingExpenseIds = new Set(reimbursementsData.map(r => r.expense_id));
+        const submittedWithoutReimb = allExpensesData.filter(
+          e => e.status === 'submitted' && !existingExpenseIds.has(e.id) && e.company_id
+        );
+
+        if (submittedWithoutReimb.length > 0) {
+          // Process in background without blocking UI - one at a time to avoid duplicates
+          (async () => {
+            for (const expense of submittedWithoutReimb) {
+              try {
+                await pettyCashApi.createReimbursementWithNumber({
+                  wallet_id: expense.wallet_id,
+                  expense_id: expense.id,
+                  amount: expense.amount || 0,
+                  final_amount: expense.amount || 0,
+                  company_id: expense.company_id!,
+                  status: 'pending' as const,
+                  bank_account_id: null,
+                  payment_date: null,
+                  payment_reference: null,
+                  adjustment_amount: null,
+                  adjustment_reason: null,
+                  approved_by: null,
+                  rejected_by: null,
+                  rejection_reason: null,
+                  bank_feed_line_id: null,
+                  created_by: null,
+                });
+                console.log(`Auto-created reimbursement for expense ${expense.expense_number}`);
+              } catch (err) {
+                // Ignore duplicate errors (already handled in API)
+                console.log(`Skipped expense ${expense.expense_number}:`, err);
+              }
+            }
+            autoCreateInProgressRef.current = false;
+          })();
+        } else {
+          autoCreateInProgressRef.current = false;
+        }
+      }
+    } catch (error) {
+      console.error('Error loading petty cash data:', error);
+      setIsLoadingData(false);
+      setIsLoadingAllWallets(false);
+      setIsLoadingPendingReimbursements(false);
+      setIsLoadingApprovedReimbursements(false);
+    } finally {
+      isFetchingRef.current = false;
+    }
   }, []);
 
-  // Fetch user's own wallet from Supabase (with calculated balance)
+  // Single effect for initial data load
+  useEffect(() => {
+    loadAllData(true);
+  }, [loadAllData]);
+
+  // Refresh when refreshKey changes (but debounced)
+  useEffect(() => {
+    if (refreshKey > 0) {
+      loadAllData(false);
+    }
+  }, [refreshKey, loadAllData]);
+
+  // Fetch user's own wallet from Supabase (with calculated balance) - separate for My Wallet view
   useEffect(() => {
     async function fetchMyWallet() {
       if (!user?.id) {
@@ -293,25 +461,6 @@ export default function PettyCashManagementPage() {
   const [allExpensesDb, setAllExpensesDb] = useState<SupabaseExpense[]>([]);
   const [isLoadingAllWallets, setIsLoadingAllWallets] = useState(true);
 
-  // Fetch all wallets and expenses from Supabase
-  useEffect(() => {
-    async function fetchAllWalletsData() {
-      try {
-        const [walletsData, expensesData] = await Promise.all([
-          pettyCashApi.getAllWalletsWithCalculatedBalances(), // Use calculated balance method
-          pettyCashApi.getAllExpenses(),
-        ]);
-        setAllWalletsDb(walletsData);
-        setAllExpensesDb(expensesData);
-      } catch (error) {
-        console.error('Error fetching all wallets data:', error);
-      } finally {
-        setIsLoadingAllWallets(false);
-      }
-    }
-    fetchAllWalletsData();
-  }, [refreshKey]);
-
   // Transform wallets for display (using calculated balance)
   const wallets = useMemo(() => {
     return allWalletsDb.map(transformWalletWithCalculatedBalance);
@@ -345,148 +494,31 @@ export default function PettyCashManagementPage() {
   // Still using mock data for all reimbursements list
   const reimbursements = useMemo(() => getAllReimbursements(), [refreshKey]);
 
-  // Fetch pending reimbursements from Supabase
+  // State for pending and approved reimbursements (loaded by consolidated loadAllData)
   const [pendingReimbursements, setPendingReimbursements] = useState<PettyCashReimbursement[]>([]);
   const [isLoadingPendingReimbursements, setIsLoadingPendingReimbursements] = useState(true);
-
-  useEffect(() => {
-    const fetchPendingReimbursements = async () => {
-      setIsLoadingPendingReimbursements(true);
-      try {
-        // Fetch reimbursements and all expenses in parallel
-        const [reimbursementsData, expensesData] = await Promise.all([
-          pettyCashApi.getPendingReimbursementsWithDetails(),
-          pettyCashApi.getAllExpenses(),
-        ]);
-
-        // Find submitted expenses that don't have reimbursements
-        const existingExpenseIds = new Set(reimbursementsData.map(r => r.expense_id));
-        const submittedExpensesWithoutReimbursement = expensesData.filter(
-          e => e.status === 'submitted' && !existingExpenseIds.has(e.id) && e.company_id
-        );
-
-        // Auto-create reimbursements for submitted expenses that don't have them
-        const createdReimbursements = await Promise.all(
-          submittedExpensesWithoutReimbursement.map(async (expense) => {
-            try {
-              const reimbursement = await pettyCashApi.createReimbursementWithNumber({
-                wallet_id: expense.wallet_id,
-                expense_id: expense.id,
-                amount: expense.amount || 0,
-                final_amount: expense.amount || 0,
-                company_id: expense.company_id!,
-                status: 'pending' as const,
-                // Optional fields - set to null for auto-created reimbursements
-                bank_account_id: null,
-                payment_date: null,
-                payment_reference: null,
-                adjustment_amount: null,
-                adjustment_reason: null,
-                approved_by: null,
-                rejected_by: null,
-                rejection_reason: null,
-                bank_feed_line_id: null,
-                created_by: null,
-              });
-              console.log(`Auto-created reimbursement for expense ${expense.expense_number}`);
-              return reimbursement;
-            } catch (error) {
-              console.error(`Failed to auto-create reimbursement for expense ${expense.expense_number}:`, error);
-              return null;
-            }
-          })
-        );
-
-        // If we created any new reimbursements, refresh the data
-        let finalData = reimbursementsData;
-        if (createdReimbursements.some(r => r !== null)) {
-          // Refetch to get complete data with wallet/company details
-          finalData = await pettyCashApi.getPendingReimbursementsWithDetails();
-        }
-
-        const transformed = finalData.map((r) => ({
-          id: r.id,
-          reimbursementNumber: r.reimbursement_number || '',
-          walletId: r.wallet_id,
-          walletHolderName: r.wallet_holder_name || '',
-          expenseId: r.expense_id || '',
-          companyId: '',
-          companyName: r.company_name || '',
-          amount: Number(r.amount) || 0,
-          finalAmount: Number(r.final_amount) || Number(r.amount) || 0,
-          status: r.status as 'pending' | 'approved' | 'paid' | 'rejected',
-          createdAt: r.created_at || '',
-          createdBy: r.created_by || '',
-          updatedAt: r.updated_at || '',
-          notes: '',
-          expenseNumber: '',
-        }));
-        setPendingReimbursements(transformed);
-      } catch (error) {
-        console.error('Failed to fetch pending reimbursements:', error);
-        setPendingReimbursements([]);
-      } finally {
-        setIsLoadingPendingReimbursements(false);
-      }
-    };
-    fetchPendingReimbursements();
-  }, [refreshKey]);
-
-  // Fetch approved reimbursements (Payment Queue) from Supabase
   const [approvedReimbursements, setApprovedReimbursements] = useState<PettyCashReimbursement[]>([]);
   const [isLoadingApprovedReimbursements, setIsLoadingApprovedReimbursements] = useState(true);
 
-  useEffect(() => {
-    const fetchApprovedReimbursements = async () => {
-      setIsLoadingApprovedReimbursements(true);
-      try {
-        const data = await pettyCashApi.getReimbursementsByStatus('approved');
-        const transformed = data.map((r) => ({
-          id: r.id,
-          reimbursementNumber: r.reimbursement_number || '',
-          walletId: r.wallet_id,
-          walletHolderName: '',
-          expenseId: r.expense_id || '',
-          companyId: r.company_id || '',
-          companyName: '',
-          amount: Number(r.amount) || 0,
-          finalAmount: Number(r.final_amount) || Number(r.amount) || 0,
-          status: r.status as 'pending' | 'approved' | 'paid' | 'rejected',
-          createdAt: r.created_at || '',
-          createdBy: r.created_by || '',
-          updatedAt: r.updated_at || '',
-          notes: '',
-          expenseNumber: '',
-        }));
-        setApprovedReimbursements(transformed);
-      } catch (error) {
-        console.error('Failed to fetch approved reimbursements:', error);
-        setApprovedReimbursements([]);
-      } finally {
-        setIsLoadingApprovedReimbursements(false);
-      }
-    };
-    fetchApprovedReimbursements();
-  }, [refreshKey]);
-
-  // Group approved reimbursements by company for Payment Queue
-  const paymentQueueByCompany = useMemo(() => {
-    const grouped = new Map<string, { companyId: string; companyName: string; claims: typeof approvedReimbursements; total: number }>();
-    approvedReimbursements.forEach((rmb) => {
-      const companyId = rmb.companyId || 'unassigned';
-      const company = companies.find(c => c.id === companyId);
-      const existing = grouped.get(companyId) || {
-        companyId,
-        companyName: company?.name || 'Unassigned',
-        claims: [],
-        total: 0,
-      };
-      existing.claims.push(rmb);
-      existing.total += rmb.finalAmount;
-      grouped.set(companyId, existing);
-    });
-    return Array.from(grouped.values());
-  }, [approvedReimbursements, companies]);
+  // Transfer Summary state - groups approved reimbursements by wallet → bank account
+  type TransferGroup = {
+    walletId: string;
+    walletName: string;
+    holderName: string;
+    bankAccountGroups: {
+      bankAccountId: string;
+      bankAccountName: string;
+      companyId: string;
+      companyName: string;
+      amount: number;
+      reimbursementIds: string[];
+    }[];
+    totalAmount: number;
+  };
+  const [transferSummary, setTransferSummary] = useState<TransferGroup[]>([]);
+  const [isLoadingTransferSummary, setIsLoadingTransferSummary] = useState(true);
+  const [selectedTransfers, setSelectedTransfers] = useState<Set<string>>(new Set()); // Set of "walletId-bankAccountId" keys
+  const [isProcessingTransfer, setIsProcessingTransfer] = useState(false);
 
   // Calculate low balance wallets from Supabase data
   const lowBalanceWallets = useMemo(() => {
@@ -592,6 +624,7 @@ export default function PettyCashManagementPage() {
       updatedAt: r.updated_at || '',
       notes: '',
       expenseNumber: '',
+      rejectionReason: r.rejection_reason || '',
     }));
   }, [myWalletReimbursementsDb, myWallet]);
 
@@ -673,13 +706,9 @@ export default function PettyCashManagementPage() {
         return;
       }
 
-      // Validate required fields with user-friendly error messages
-      const companyId = expenseData.companyId || myWallet.company_id;
-      if (!companyId) {
-        alert('No company is associated with your wallet. Please contact your manager.');
-        console.error('Failed to create expense: No company_id available. Wallet:', myWallet);
-        return;
-      }
+      // Note: Company is NOT required at submission time
+      // Accountant will assign the company when reviewing/approving the claim
+      const companyId = expenseData.companyId || null; // Don't fall back to wallet company
       if (!expenseData.projectId) {
         alert('Please select a project for this expense.');
         console.error('Failed to create expense: No project_id specified');
@@ -758,6 +787,103 @@ export default function PettyCashManagementPage() {
     [transformedMyWallet, myWallet, companies]
   );
 
+  // Handle resubmit for rejected claims - opens form to EDIT the same expense
+  const handleResubmitClaim = useCallback(
+    (reimbursement: PettyCashReimbursement) => {
+      // Check if already resubmitted AND not rejected again
+      // If status is 'rejected', allow resubmit regardless (supports multiple reject cycles)
+      if (resubmittedIds.has(reimbursement.id) && reimbursement.status !== 'rejected') {
+        alert('This claim has already been resubmitted. Please check your pending claims.');
+        return;
+      }
+
+      if (!transformedMyWallet || !myWallet) {
+        alert('Wallet not available. Please refresh and try again.');
+        return;
+      }
+
+      // Find the original expense by ID
+      const originalExpense = myWalletExpensesDb.find((e) => e.id === reimbursement.expenseId);
+      if (!originalExpense) {
+        alert('Original expense not found. Please refresh and try again.');
+        return;
+      }
+
+      // Set the expense ID for editing (NOT creating new)
+      setEditingExpenseId(originalExpense.id);
+
+      // Look up project name from projects array
+      const project = projects.find(p => p.id === originalExpense.project_id);
+
+      // Set pre-filled data and open the form for user review
+      setResubmitPrefilledData({
+        projectId: originalExpense.project_id || '',
+        projectName: project?.name || '',
+        expenseDate: originalExpense.expense_date,
+        amount: originalExpense.amount || 0,
+        description: originalExpense.description || '',
+        originalReimbursementId: reimbursement.id,
+      });
+      setShowExpenseForm(true);
+    },
+    [transformedMyWallet, myWallet, myWalletExpensesDb, resubmittedIds, projects]
+  );
+
+  // Handle expense form save - used for both new claims and resubmits
+  const handleExpenseFormSave = useCallback(
+    async (expenseData: SimplifiedExpenseInput) => {
+      try {
+        if (editingExpenseId) {
+          // RESUBMIT: Update existing expense and create new reimbursement
+          const { expense: updatedExpense, reimbursement: newReimbursement } = await pettyCashApi.resubmitExpense(editingExpenseId, {
+            amount: expenseData.amount,
+            description: expenseData.description,
+            projectId: expenseData.projectId,
+            projectName: expenseData.projectName,
+            expenseDate: expenseData.expenseDate,
+          });
+
+          // Update local state: replace the old expense with the updated one
+          setMyWalletExpensesDb(prev => prev.map(e =>
+            e.id === editingExpenseId ? updatedExpense : e
+          ));
+
+          // Add the new reimbursement to local state
+          setMyWalletReimbursementsDb(prev => [newReimbursement, ...prev]);
+
+          // Mark the original reimbursement as resubmitted to prevent duplicates in UI
+          if (resubmitPrefilledData?.originalReimbursementId) {
+            setResubmittedIds((prev) => new Set(prev).add(resubmitPrefilledData.originalReimbursementId));
+          }
+
+          // Clear editing state
+          setEditingExpenseId(null);
+          setResubmitPrefilledData(null);
+
+          // Close form and refresh
+          setShowExpenseForm(false);
+          setRefreshKey((prev) => prev + 1);
+        } else {
+          // NEW: Create new expense and reimbursement (existing logic)
+          // Clear pre-filled data
+          setResubmitPrefilledData(null);
+          await handleCreateMyExpense(expenseData);
+        }
+      } catch (error) {
+        console.error('Error saving expense:', error);
+        alert('Failed to save expense. Please try again.');
+      }
+    },
+    [editingExpenseId, resubmitPrefilledData, handleCreateMyExpense]
+  );
+
+  // Handle expense form cancel
+  const handleExpenseFormCancel = useCallback(() => {
+    setShowExpenseForm(false);
+    setResubmitPrefilledData(null);
+    setEditingExpenseId(null);
+  }, []);
+
   // ========== End My Wallet View Data ==========
 
   // Handle top-up
@@ -796,54 +922,185 @@ export default function PettyCashManagementPage() {
 
   // Handle reimbursement approval
   const handleApproveReimbursement = useCallback(
-    (
+    async (
       reimbursementId: string,
       bankAccountId: string,
       bankAccountName: string,
       paymentDate: string,
-      _expenseAccountCode: string,
-      _companyId: string,
-      _vatType: VatType,
-      _vatRate: number,
+      expenseAccountCode: string,
+      companyId: string,
+      vatType: VatType,
+      vatRate: number,
       adjustmentAmount?: number,
       adjustmentReason?: string
     ) => {
-      // Approve the reimbursement
-      // Note: expenseAccountCode, companyId, vatType, vatRate are saved via the modal's onExpenseUpdated
-      const approved = approveReimbursement(
-        reimbursementId,
-        'Manager',
-        bankAccountId,
-        bankAccountName,
-        adjustmentAmount,
-        adjustmentReason
-      );
+      // Check if this is a Supabase reimbursement
+      const isDbReimbursement = pendingReimbursements.some(r => r.id === reimbursementId);
 
-      if (approved) {
-        // Process payment immediately
-        processReimbursementPayment(approved.id, paymentDate, `PAY-${Date.now()}`);
+      if (isDbReimbursement && user?.id) {
+        try {
+          // Approve with bank account info in Supabase (status becomes 'approved')
+          // Note: Wallet credit happens later when batch is marked paid
+          await pettyCashApi.approveReimbursement(
+            reimbursementId,
+            bankAccountId,
+            user.id,
+            adjustmentAmount,
+            adjustmentReason
+          );
 
-        // Add to wallet balance
-        addToWallet(approved.walletId, approved.finalAmount);
+          // Save accounting details to the petty cash expense record
+          // This ensures Company, Expense Account, VAT settings are persisted
+          if (selectedExpense?.id) {
+            await pettyCashApi.updateExpense(selectedExpense.id, {
+              company_id: companyId || null,
+              expense_account_code: expenseAccountCode || null,
+              accounting_vat_type: vatType || null,
+              accounting_vat_rate: vatRate || 0,
+              accounting_completed_by: user.id,
+              accounting_completed_at: new Date().toISOString(),
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            } as any);
+          }
+        } catch (error) {
+          console.error('Failed to approve reimbursement:', error);
+          alert('Failed to approve reimbursement. Please try again.');
+          return;
+        }
+      } else {
+        // Fall back to mock data handlers
+        const approved = approveReimbursement(
+          reimbursementId,
+          'Manager',
+          bankAccountId,
+          bankAccountName,
+          adjustmentAmount,
+          adjustmentReason
+        );
+
+        if (approved) {
+          // Process payment immediately for mock data
+          processReimbursementPayment(approved.id, paymentDate, `PAY-${Date.now()}`);
+          addToWallet(approved.walletId, approved.finalAmount);
+        }
       }
 
       setSelectedReimbursement(null);
       setSelectedExpense(null);
       setRefreshKey((prev) => prev + 1);
     },
-    []
+    [pendingReimbursements, user?.id, selectedExpense]
   );
 
   // Handle reimbursement rejection
   const handleRejectReimbursement = useCallback(
-    (reimbursementId: string, reason: string) => {
-      rejectReimbursement(reimbursementId, 'Manager', reason);
+    async (reimbursementId: string, reason: string) => {
+      // Check if this is a Supabase reimbursement
+      const isDbReimbursement = pendingReimbursements.some(r => r.id === reimbursementId);
+
+      if (isDbReimbursement && user?.id) {
+        try {
+          // Reject in Supabase - this also updates the expense status to 'rejected'
+          await pettyCashApi.rejectReimbursement(reimbursementId, user.id, reason);
+        } catch (error) {
+          console.error('Failed to reject reimbursement:', error);
+          alert('Failed to reject reimbursement. Please try again.');
+          return;
+        }
+      } else {
+        // Fall back to mock data handler
+        rejectReimbursement(reimbursementId, 'Manager', reason);
+      }
+
       setSelectedReimbursement(null);
       setSelectedExpense(null);
       setRefreshKey((prev) => prev + 1);
     },
-    []
+    [pendingReimbursements, user?.id]
   );
+
+  // Handle transfer from Transfer Summary - creates top-up and marks reimbursements as paid
+  const handleTransfer = useCallback(
+    async () => {
+      if (selectedTransfers.size === 0) {
+        alert('Please select at least one transfer group.');
+        return;
+      }
+
+      setIsProcessingTransfer(true);
+
+      try {
+        // Process each selected transfer group
+        for (const key of selectedTransfers) {
+          const [walletId, bankAccountId] = key.split('-');
+
+          // Find the corresponding group
+          const walletGroup = transferSummary.find(wg => wg.walletId === walletId);
+          const bankGroup = walletGroup?.bankAccountGroups.find(bg => bg.bankAccountId === bankAccountId);
+
+          if (!walletGroup || !bankGroup) continue;
+
+          // Create a top-up for this wallet
+          await pettyCashApi.createTopUp({
+            wallet_id: walletId,
+            amount: bankGroup.amount,
+            company_id: bankGroup.companyId || null,
+            bank_account_id: bankAccountId,
+            top_up_date: new Date().toISOString().split('T')[0],
+            reference: `Reimbursement transfer`,
+            notes: `Transfer for ${bankGroup.reimbursementIds.length} approved reimbursement(s)`,
+            status: 'completed',
+            created_by: user?.id || null,
+          });
+
+          // Mark each reimbursement as paid
+          const today = new Date().toISOString().split('T')[0];
+          for (const reimbursementId of bankGroup.reimbursementIds) {
+            await pettyCashApi.markReimbursementPaid(reimbursementId, today);
+          }
+        }
+
+        // Clear selection and refresh
+        setSelectedTransfers(new Set());
+        setRefreshKey((prev) => prev + 1);
+        alert('Transfer completed successfully! Wallet balances have been updated.');
+      } catch (error) {
+        console.error('Failed to process transfer:', error);
+        alert('Failed to process transfer. Please try again.');
+      } finally {
+        setIsProcessingTransfer(false);
+      }
+    },
+    [selectedTransfers, transferSummary, user?.id]
+  );
+
+  // Toggle transfer selection
+  const toggleTransferSelection = useCallback((walletId: string, bankAccountId: string) => {
+    const key = `${walletId}-${bankAccountId}`;
+    setSelectedTransfers(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  }, []);
+
+  // Calculate selected transfer amount
+  const selectedTransferAmount = useMemo(() => {
+    let total = 0;
+    for (const key of selectedTransfers) {
+      const [walletId, bankAccountId] = key.split('-');
+      const walletGroup = transferSummary.find(wg => wg.walletId === walletId);
+      const bankGroup = walletGroup?.bankAccountGroups.find(bg => bg.bankAccountId === bankAccountId);
+      if (bankGroup) {
+        total += bankGroup.amount;
+      }
+    }
+    return total;
+  }, [selectedTransfers, transferSummary]);
 
   // Handle receipt status checkbox change
   const handleReceiptStatusChange = useCallback(
@@ -880,13 +1137,114 @@ export default function PettyCashManagementPage() {
   // Open reimbursement for review
   const handleViewReimbursement = useCallback(
     (reimbursement: PettyCashReimbursement) => {
-      const expense = getExpenseById(reimbursement.expenseId);
-      if (expense) {
+      // First try to find the expense in Supabase data
+      const dbExpense = allExpensesDb.find((e) => e.id === reimbursement.expenseId);
+
+      if (dbExpense) {
+        try {
+          // Transform Supabase expense to frontend format
+          const company = companies.find((c) => c.id === dbExpense.company_id);
+          const project = projects.find((p) => p.id === dbExpense.project_id);
+          const wallet = allWalletsDb.find((w) => w.id === dbExpense.wallet_id);
+
+          // Safely parse attachments - could be string, array, or null
+          let parsedAttachments: Attachment[] = [];
+          if (dbExpense.attachments) {
+            if (typeof dbExpense.attachments === 'string') {
+              try {
+                parsedAttachments = JSON.parse(dbExpense.attachments);
+              } catch {
+                console.warn('Failed to parse attachments JSON:', dbExpense.attachments);
+                parsedAttachments = [];
+              }
+            } else if (Array.isArray(dbExpense.attachments)) {
+              parsedAttachments = dbExpense.attachments as Attachment[];
+            }
+          }
+
+          const expenseAmount = dbExpense.amount || 0;
+          const transformedExpense: PettyCashExpense = {
+            id: dbExpense.id,
+            expenseNumber: dbExpense.expense_number || '',
+            walletId: dbExpense.wallet_id,
+            walletHolderName: wallet?.user_name || '',
+            companyId: dbExpense.company_id || '',
+            companyName: company?.name || '',
+            expenseDate: dbExpense.expense_date,
+            description: dbExpense.description || '',
+            amount: expenseAmount,
+            projectId: dbExpense.project_id,
+            projectName: project?.name || '',
+            receiptStatus: 'pending' as const,
+            attachments: parsedAttachments,
+            lineItems: [],
+            // For simplified expenses, all totals equal the amount
+            subtotal: expenseAmount,
+            vatAmount: 0,
+            totalAmount: expenseAmount,
+            whtAmount: 0,
+            netAmount: expenseAmount,
+            status: (dbExpense.status as ExpenseStatus) || 'submitted',
+            createdBy: dbExpense.created_by || '',
+            createdAt: dbExpense.created_at,
+            updatedAt: dbExpense.updated_at || dbExpense.created_at,
+            // Accounting details (filled by accountant during approval)
+            expenseAccountCode: dbExpense.expense_account_code || undefined,
+            accountingVatType: (dbExpense.accounting_vat_type as 'include' | 'exclude' | 'no_vat') || undefined,
+            accountingVatRate: dbExpense.accounting_vat_rate ?? undefined,
+            accountingCompletedBy: dbExpense.accounting_completed_by || undefined,
+            accountingCompletedAt: dbExpense.accounting_completed_at || undefined,
+          };
+
+          setSelectedReimbursement(reimbursement);
+          setSelectedExpense(transformedExpense);
+          return;
+        } catch (error) {
+          console.error('Error transforming expense:', error);
+          // Fall through to mock data
+        }
+      }
+
+      // Fall back to mock data if not found in Supabase
+      const mockExpense = getExpenseById(reimbursement.expenseId);
+      if (mockExpense) {
         setSelectedReimbursement(reimbursement);
-        setSelectedExpense(expense);
+        setSelectedExpense(mockExpense);
+      } else {
+        // Create a minimal expense object from reimbursement data to allow modal to open
+        console.warn('Expense not found for reimbursement, using minimal data:', reimbursement.id);
+        const reimbAmount = reimbursement.amount || 0;
+        const minimalExpense: PettyCashExpense = {
+          id: reimbursement.expenseId || reimbursement.id,
+          expenseNumber: reimbursement.expenseNumber || '',
+          walletId: reimbursement.walletId,
+          walletHolderName: reimbursement.walletHolderName,
+          companyId: reimbursement.companyId || '',
+          companyName: reimbursement.companyName || '',
+          expenseDate: reimbursement.createdAt.split('T')[0] || new Date().toISOString().split('T')[0],
+          description: '',
+          amount: reimbAmount,
+          projectId: '',
+          projectName: '',
+          receiptStatus: 'pending' as const,
+          attachments: [],
+          lineItems: [],
+          // For simplified expenses, all totals equal the amount
+          subtotal: reimbAmount,
+          vatAmount: 0,
+          totalAmount: reimbAmount,
+          whtAmount: 0,
+          netAmount: reimbAmount,
+          status: 'submitted' as ExpenseStatus,
+          createdBy: (reimbursement as PettyCashReimbursement & { createdBy?: string }).createdBy || '',
+          createdAt: reimbursement.createdAt,
+          updatedAt: reimbursement.updatedAt,
+        };
+        setSelectedReimbursement(reimbursement);
+        setSelectedExpense(minimalExpense);
       }
     },
-    []
+    [allExpensesDb, companies, projects, allWalletsDb]
   );
 
   // Status badge helper
@@ -1204,9 +1562,36 @@ export default function PettyCashManagementPage() {
       ),
     },
     {
+      key: 'rejectionReason',
+      header: 'Rejection Reason',
+      render: (row: PettyCashReimbursement) => (
+        row.status === 'rejected' && row.rejectionReason ? (
+          <span className="text-sm text-red-600">{row.rejectionReason}</span>
+        ) : (
+          <span className="text-gray-400">-</span>
+        )
+      ),
+    },
+    {
       key: 'createdAt',
       header: 'Requested',
       render: (row: PettyCashReimbursement) => formatDate(row.createdAt),
+    },
+    {
+      key: 'actions',
+      header: '',
+      align: 'right' as const,
+      render: (row: PettyCashReimbursement) => (
+        row.status === 'rejected' ? (
+          <button
+            onClick={() => handleResubmitClaim(row)}
+            className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-amber-700 bg-amber-100 rounded hover:bg-amber-200"
+          >
+            <RefreshCw className="h-3 w-3" />
+            Edit & Resubmit
+          </button>
+        ) : null
+      ),
     },
   ];
 
@@ -1359,6 +1744,51 @@ export default function PettyCashManagementPage() {
             </div>
           </div>
 
+          {/* Rejected Claims Alert - Show prominently when there are rejected claims */}
+          {myWalletReimbursements.filter(r => r.status === 'rejected').length > 0 && (
+            <div className="mb-6 rounded-lg border border-red-300 bg-red-50 p-4">
+              <div className="flex items-start gap-3">
+                <AlertTriangle className="h-5 w-5 text-red-600 flex-shrink-0 mt-0.5" />
+                <div className="flex-1">
+                  <p className="text-sm font-medium text-red-900">
+                    Action Required: {myWalletReimbursements.filter(r => r.status === 'rejected').length} Claim{myWalletReimbursements.filter(r => r.status === 'rejected').length !== 1 ? 's' : ''} Rejected
+                  </p>
+                  <p className="text-sm text-red-700 mt-1">
+                    Your claim{myWalletReimbursements.filter(r => r.status === 'rejected').length !== 1 ? 's have' : ' has'} been rejected by the accountant. Please review the reason and resubmit if needed.
+                  </p>
+                  <div className="mt-3 space-y-2">
+                    {myWalletReimbursements
+                      .filter(r => r.status === 'rejected')
+                      .map((r) => (
+                        <div key={r.id} className="flex items-center justify-between p-2 bg-white rounded border border-red-200">
+                          <div>
+                            <span className="text-sm font-medium text-gray-900">{r.reimbursementNumber}</span>
+                            <span className="text-sm text-gray-500 ml-2">• {formatCurrency(r.amount)}</span>
+                            {r.rejectionReason && (
+                              <p className="text-xs text-red-600 mt-0.5">Reason: {r.rejectionReason}</p>
+                            )}
+                          </div>
+                          <button
+                            onClick={() => handleResubmitClaim(r)}
+                            className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-white bg-red-600 rounded hover:bg-red-700"
+                          >
+                            <RefreshCw className="h-3 w-3" />
+                            Edit & Resubmit
+                          </button>
+                        </div>
+                      ))}
+                  </div>
+                  <button
+                    onClick={() => setMyWalletTab('reimbursements')}
+                    className="mt-3 text-sm font-medium text-red-700 hover:text-red-800 underline"
+                  >
+                    View all in Claim History →
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Wallet Summary Card */}
           <div className="mb-6">
             <WalletSummaryCard
@@ -1423,9 +1853,9 @@ export default function PettyCashManagementPage() {
           <div className="border-b border-gray-200 mb-6">
             <nav className="-mb-px flex gap-6">
               {[
-                { id: 'expenses', label: 'My Claims', icon: Receipt },
-                { id: 'reimbursements', label: 'Claim History', icon: Clock },
-                { id: 'history', label: 'Transaction History', icon: FileText },
+                { id: 'expenses', label: 'My Claims', icon: Receipt, badge: 0 },
+                { id: 'reimbursements', label: 'Claim History', icon: Clock, badge: myWalletReimbursements.filter(r => r.status === 'rejected').length },
+                { id: 'history', label: 'Transaction History', icon: FileText, badge: 0 },
               ].map((tab) => (
                 <button
                   key={tab.id}
@@ -1438,6 +1868,11 @@ export default function PettyCashManagementPage() {
                 >
                   <tab.icon className="h-4 w-4" />
                   {tab.label}
+                  {tab.badge > 0 && (
+                    <span className="ml-1 px-1.5 py-0.5 text-xs font-bold bg-red-500 text-white rounded-full">
+                      {tab.badge}
+                    </span>
+                  )}
                 </button>
               ))}
             </nav>
@@ -1536,8 +1971,15 @@ export default function PettyCashManagementPage() {
             <ExpenseForm
               walletId={transformedMyWallet.id}
               walletHolderName={transformedMyWallet.userName}
-              onSave={handleCreateMyExpense}
-              onCancel={() => setShowExpenseForm(false)}
+              onSave={handleExpenseFormSave}
+              onCancel={handleExpenseFormCancel}
+              initialData={resubmitPrefilledData ? {
+                projectId: resubmitPrefilledData.projectId,
+                expenseDate: resubmitPrefilledData.expenseDate,
+                amount: resubmitPrefilledData.amount,
+                description: resubmitPrefilledData.description,
+              } : undefined}
+              isResubmit={!!resubmitPrefilledData}
             />
           )}
         </>
@@ -1667,61 +2109,108 @@ export default function PettyCashManagementPage() {
           </div>
         </div>
 
-        {/* Payment Queue - Approved claims ready for payment */}
+        {/* Transfer Summary - Approved claims grouped by wallet and bank account */}
         <div className="bg-white border border-gray-200 rounded-lg shadow-sm">
           <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between">
             <h3 className="text-sm font-semibold text-gray-900">
-              Payment Queue
+              Transfer Summary
             </h3>
             <span className="px-2 py-1 text-xs font-medium bg-green-100 text-green-800 rounded-full">
               {approvedReimbursements.length} approved
             </span>
           </div>
           <div className="p-4">
-            {paymentQueueByCompany.length === 0 ? (
+            {isLoadingTransferSummary ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="h-5 w-5 animate-spin text-gray-400" />
+              </div>
+            ) : transferSummary.length === 0 ? (
               <p className="text-sm text-gray-500 text-center py-8">
-                No claims ready for payment
+                No pending transfers
               </p>
             ) : (
               <div className="space-y-4">
-                {paymentQueueByCompany.map((group) => (
+                {transferSummary.map((walletGroup) => (
                   <div
-                    key={group.companyId}
+                    key={walletGroup.walletId}
                     className="border border-gray-200 rounded-lg overflow-hidden"
                   >
+                    {/* Wallet Header */}
                     <div className="px-3 py-2 bg-gray-50 flex items-center justify-between">
                       <div className="flex items-center gap-2">
-                        <Building2 className="h-4 w-4 text-[#5A7A8F]" />
+                        <Wallet className="h-4 w-4 text-[#5A7A8F]" />
                         <span className="text-sm font-medium text-gray-900">
-                          {group.companyName}
+                          {walletGroup.walletName} ({walletGroup.holderName})
                         </span>
                       </div>
                       <span className="text-sm font-bold text-green-700">
-                        {formatCurrency(group.total)}
+                        Total: {formatCurrency(walletGroup.totalAmount)}
                       </span>
                     </div>
+                    {/* Bank Account Groups */}
                     <div className="divide-y divide-gray-100">
-                      {group.claims.slice(0, 3).map((claim) => (
-                        <div
-                          key={claim.id}
-                          className="px-3 py-2 flex items-center justify-between text-sm"
-                        >
-                          <span className="text-gray-600">
-                            {claim.reimbursementNumber}
-                          </span>
-                          <span className="font-medium text-gray-900">
-                            {formatCurrency(claim.finalAmount)}
-                          </span>
-                        </div>
-                      ))}
-                      {group.claims.length > 3 && (
-                        <div className="px-3 py-2 text-xs text-gray-500 text-center">
-                          +{group.claims.length - 3} more claim{group.claims.length - 3 !== 1 ? 's' : ''}
-                        </div>
-                      )}
+                      {walletGroup.bankAccountGroups.map((bankGroup) => {
+                        const isSelected = selectedTransfers.has(`${walletGroup.walletId}-${bankGroup.bankAccountId}`);
+                        return (
+                          <div
+                            key={bankGroup.bankAccountId}
+                            className={`px-3 py-2 flex items-center justify-between text-sm cursor-pointer transition-colors ${
+                              isSelected ? 'bg-green-50' : 'hover:bg-gray-50'
+                            }`}
+                            onClick={() => toggleTransferSelection(walletGroup.walletId, bankGroup.bankAccountId)}
+                          >
+                            <div className="flex items-center gap-3">
+                              <input
+                                type="checkbox"
+                                checked={isSelected}
+                                onChange={() => {}}
+                                className="h-4 w-4 text-[#5A7A8F] border-gray-300 rounded focus:ring-[#5A7A8F]"
+                              />
+                              <div>
+                                <div className="font-medium text-gray-900">
+                                  {bankGroup.companyName}
+                                </div>
+                                <div className="text-xs text-gray-500">
+                                  {bankGroup.bankAccountName}
+                                </div>
+                              </div>
+                            </div>
+                            <div className="text-right">
+                              <div className="font-medium text-gray-900">
+                                {formatCurrency(bankGroup.amount)}
+                              </div>
+                              <div className="text-xs text-gray-500">
+                                {bankGroup.reimbursementIds.length} claim{bankGroup.reimbursementIds.length !== 1 ? 's' : ''}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
                 ))}
+                {/* Transfer Button */}
+                {selectedTransfers.size > 0 && (
+                  <div className="pt-2 border-t border-gray-200">
+                    <button
+                      onClick={handleTransfer}
+                      disabled={isProcessingTransfer}
+                      className="w-full flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium text-white bg-green-600 rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {isProcessingTransfer ? (
+                        <>
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          Processing...
+                        </>
+                      ) : (
+                        <>
+                          <ArrowUpCircle className="h-4 w-4" />
+                          Transfer Selected: {formatCurrency(selectedTransferAmount)}
+                        </>
+                      )}
+                    </button>
+                  </div>
+                )}
               </div>
             )}
           </div>

@@ -22,6 +22,9 @@ import {
 } from '@/data/notifications/notifications';
 import { notificationsApi } from '@/lib/supabase/api/notifications';
 
+// BroadcastChannel name for cross-tab coordination
+const NOTIFICATION_CHANNEL = 'faraway_notifications';
+
 interface NotificationContextType {
   notifications: Notification[];
   unreadCount: number;
@@ -48,15 +51,28 @@ export function NotificationProvider({
   const [currentRole, setCurrentRole] = useState<NotificationTargetRole>(initialRole);
   const [refreshKey, setRefreshKey] = useState(0);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const channelRef = useRef<BroadcastChannel | null>(null);
+  const isLeaderRef = useRef(false);
+  const tabIdRef = useRef<string>('');
+  // Use ref for currentRole inside effect to avoid dependency cycle
+  const currentRoleRef = useRef(currentRole);
+  // Track if initial fetch has been done
+  const initialFetchDoneRef = useRef(false);
+
+  // Keep ref in sync with state
+  useEffect(() => {
+    currentRoleRef.current = currentRole;
+  }, [currentRole]);
 
   const refreshNotifications = useCallback(() => {
     setRefreshKey((prev) => prev + 1);
   }, []);
 
-  // Load notifications from Supabase on mount and poll every 30s
-  const fetchFromDb = useCallback(async () => {
+  // Load notifications from Supabase - uses ref to avoid dependency on currentRole
+  const fetchFromDb = useCallback(async (broadcast = true) => {
     try {
-      const dbNotifs = await notificationsApi.getForRole(currentRole);
+      const role = currentRoleRef.current;
+      const dbNotifs = await notificationsApi.getForRole(role);
       const mapped: Notification[] = dbNotifs.map((n) => ({
         id: n.id,
         type: n.type as Notification['type'],
@@ -71,19 +87,128 @@ export function NotificationProvider({
         createdAt: n.createdAt,
       }));
       setNotificationsFromDb(mapped);
-      refreshNotifications();
+      setRefreshKey((prev) => prev + 1);
+
+      // Broadcast to other tabs if we're the leader
+      if (broadcast && isLeaderRef.current && channelRef.current) {
+        channelRef.current.postMessage({
+          type: 'notifications_update',
+          data: mapped,
+          role: role,
+        });
+      }
     } catch (err) {
       console.error('Failed to fetch notifications:', err);
     }
-  }, [currentRole, refreshNotifications]);
+  }, []); // No dependencies - uses refs
 
+  // Setup effect - runs once on mount
   useEffect(() => {
-    fetchFromDb();
-    pollRef.current = setInterval(fetchFromDb, 30000);
+    // Generate unique tab ID
+    tabIdRef.current = Math.random().toString(36).substring(2);
+
+    const tryBecomeLeader = () => {
+      // Announce we want to be leader
+      channelRef.current?.postMessage({ type: 'leader_ping', tabId: tabIdRef.current });
+
+      // Wait a bit to see if anyone responds
+      setTimeout(() => {
+        // If no one responded, we become leader
+        if (!isLeaderRef.current) {
+          isLeaderRef.current = true;
+          startPolling();
+        }
+      }, 50);
+    };
+
+    // Start polling (only if we're leader)
+    const startPolling = () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+      if (isLeaderRef.current) {
+        pollRef.current = setInterval(() => {
+          if (isLeaderRef.current && !document.hidden) {
+            fetchFromDb(true);
+          }
+        }, 30000);
+      }
+    };
+
+    // Setup BroadcastChannel for cross-tab coordination
+    if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+      channelRef.current = new BroadcastChannel(NOTIFICATION_CHANNEL);
+
+      channelRef.current.onmessage = (event) => {
+        const { type, data, role } = event.data;
+
+        if (type === 'notifications_update' && role === currentRoleRef.current) {
+          // Another tab fetched notifications - update our local state
+          setNotificationsFromDb(data);
+          setRefreshKey((prev) => prev + 1);
+        } else if (type === 'leader_ping') {
+          // Another tab is asking who's the leader
+          if (isLeaderRef.current) {
+            channelRef.current?.postMessage({ type: 'leader_pong', tabId: tabIdRef.current });
+          }
+        } else if (type === 'leader_pong') {
+          // Another tab claimed leadership - we're not the leader
+          isLeaderRef.current = false;
+        } else if (type === 'leader_resign') {
+          // Leader resigned - try to become leader
+          setTimeout(() => tryBecomeLeader(), Math.random() * 100);
+        }
+      };
+    }
+
+    // Stop polling when tab is hidden
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        // If we're leader and going hidden, resign leadership
+        if (isLeaderRef.current) {
+          isLeaderRef.current = false;
+          if (pollRef.current) {
+            clearInterval(pollRef.current);
+            pollRef.current = null;
+          }
+          channelRef.current?.postMessage({ type: 'leader_resign' });
+        }
+      } else {
+        // Tab became visible - try to become leader if there isn't one
+        setTimeout(() => tryBecomeLeader(), Math.random() * 100);
+        // Always fetch fresh data when becoming visible
+        fetchFromDb(false);
+      }
+    };
+
+    // Initial fetch (don't wait for leadership) - only once
+    if (!initialFetchDoneRef.current) {
+      initialFetchDoneRef.current = true;
+      fetchFromDb(false);
+    }
+
+    // Try to become leader
+    tryBecomeLeader();
+
+    // Listen for visibility changes
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+
+      // Resign leadership on unmount
+      if (isLeaderRef.current) {
+        channelRef.current?.postMessage({ type: 'leader_resign' });
+      }
+      channelRef.current?.close();
     };
-  }, [fetchFromDb]);
+  }, [fetchFromDb]); // Only depends on fetchFromDb which is now stable
+
+  // Refetch when role changes
+  useEffect(() => {
+    if (initialFetchDoneRef.current) {
+      fetchFromDb(false);
+    }
+  }, [currentRole, fetchFromDb]);
 
   // Get notifications for current role
   const notifications = useMemo(() => {

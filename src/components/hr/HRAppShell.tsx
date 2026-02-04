@@ -2,21 +2,19 @@
 
 import { useState, ReactNode } from "react";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { useAuth } from "@/components/auth";
+import { UserDropdown } from "@/components/shared/UserDropdown";
 import {
   LayoutDashboard,
   Users,
-  LogOut,
   Menu,
   X,
-  ChevronDown,
   Home,
   Calendar,
   CalendarDays,
   Banknote,
   Ship,
-  User,
   Shield,
   Settings,
 } from "lucide-react";
@@ -65,21 +63,9 @@ const menuItems = [
 
 export function HRAppShell({ children }: HRAppShellProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [userDropdownOpen, setUserDropdownOpen] = useState(false);
   const pathname = usePathname();
-  const router = useRouter();
 
-  const { user, profile, signOut, isSuperAdmin } = useAuth();
-
-  const handleSignOut = async () => {
-    try {
-      await signOut();
-      router.push('/');
-      router.refresh();
-    } catch (error) {
-      console.error('Sign out error:', error);
-    }
-  };
+  const { isSuperAdmin } = useAuth();
 
   const canAccessAdmin = isSuperAdmin;
 
@@ -237,49 +223,7 @@ export function HRAppShell({ children }: HRAppShellProps) {
               <div className="hidden lg:block h-8 w-px bg-gray-200" aria-hidden="true" />
 
               {/* User profile dropdown */}
-              <div className="relative">
-                <button
-                  type="button"
-                  className="flex items-center gap-x-3 rounded-lg px-3 py-2 hover:bg-gray-100 transition-colors"
-                  onClick={() => setUserDropdownOpen(!userDropdownOpen)}
-                >
-                  <div className="flex items-center gap-x-3">
-                    <div className="h-8 w-8 rounded-full bg-gradient-to-br from-[#5A7A8F] to-[#4a6a7f] flex items-center justify-center shadow-sm">
-                      <User className="h-4 w-4 text-white" />
-                    </div>
-                    <div className="hidden lg:block text-left">
-                      <p className="text-sm font-semibold text-gray-900">
-                        {profile?.full_name || user?.email?.split('@')[0] || 'User'}
-                      </p>
-                      <p className="text-xs text-gray-500">HR Manager</p>
-                    </div>
-                  </div>
-                  <ChevronDown className="hidden lg:block h-4 w-4 text-gray-400" />
-                </button>
-
-                {userDropdownOpen && (
-                  <>
-                    <div className="fixed inset-0 z-10" onClick={() => setUserDropdownOpen(false)} />
-                    <div className="absolute right-0 z-20 mt-2 w-64 origin-top-right rounded-xl bg-white shadow-xl ring-1 ring-black ring-opacity-5 border border-gray-100">
-                      <div className="p-3 border-b border-gray-100">
-                        <p className="text-sm font-semibold text-gray-900">
-                          {profile?.full_name || 'User'}
-                        </p>
-                        <p className="text-xs text-gray-500">{user?.email}</p>
-                      </div>
-                      <div className="border-t border-gray-100 py-2">
-                        <button
-                          onClick={() => { setUserDropdownOpen(false); handleSignOut(); }}
-                          className="flex w-full items-center gap-3 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
-                        >
-                          <LogOut className="h-4 w-4 text-gray-400" />
-                          Sign Out
-                        </button>
-                      </div>
-                    </div>
-                  </>
-                )}
-              </div>
+              <UserDropdown module="hr" />
             </div>
           </div>
         </div>

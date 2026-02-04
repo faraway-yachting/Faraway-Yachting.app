@@ -880,7 +880,7 @@ export function BookingFormContainer({
     const boatName = formData.projectId
       ? projects.find(p => p.id === formData.projectId)?.name
       : formData.externalBoatName || undefined;
-    const doc = generateBookingSummaryPdf({
+    const doc = await generateBookingSummaryPdf({
       bookingNumber: formData.bookingNumber || '',
       type: formData.type || 'day_charter',
       status: formData.status || 'enquiry',

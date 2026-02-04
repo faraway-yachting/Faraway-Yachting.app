@@ -5,6 +5,7 @@ import { useParams } from 'next/navigation';
 import {
   Anchor, Plus, Pencil, Trash2, Search, Ship, X,
   ChevronDown, ChevronUp, Upload, Loader2, User, Phone, Users, LayoutList,
+  Eye, Download, FileText,
 } from 'lucide-react';
 import { externalBoatsApi, DbExternalBoat } from '@/lib/supabase/api/externalBoats';
 import { contactsApi } from '@/lib/supabase/api/contacts';
@@ -183,9 +184,10 @@ export default function BoatsPage() {
     setModalOpen(true);
   }
 
-  const filteredOperatorContacts = operatorContacts.filter(
-    (c) => c.name.toLowerCase().includes(operatorSearch.toLowerCase())
-  );
+  // Show all operators when search is empty, otherwise filter by search term
+  const filteredOperatorContacts = operatorSearch.trim()
+    ? operatorContacts.filter((c) => c.name.toLowerCase().includes(operatorSearch.toLowerCase()))
+    : operatorContacts;
 
   function handleOperatorSelect(contact: OperatorContact) {
     setSelectedOperatorContactId(contact.id);
@@ -593,12 +595,16 @@ export default function BoatsPage() {
                       setSelectedOperatorContactId(null);
                     }}
                     onFocus={() => setShowOperatorDropdown(true)}
+                    onBlur={() => {
+                      // Delay closing to allow click on dropdown items
+                      setTimeout(() => setShowOperatorDropdown(false), 200);
+                    }}
                     className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:border-transparent"
                     style={{ '--tw-ring-color': PRIMARY } as React.CSSProperties}
-                    placeholder="Search existing operator or type new..."
+                    placeholder="Select or type operator name..."
                   />
                 </div>
-                {showOperatorDropdown && operatorSearch && filteredOperatorContacts.length > 0 && (
+                {showOperatorDropdown && filteredOperatorContacts.length > 0 && (
                   <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg overflow-hidden max-h-48 overflow-y-auto">
                     {filteredOperatorContacts.map((contact) => (
                       <button
@@ -666,9 +672,30 @@ export default function BoatsPage() {
                     />
                   </label>
                   {form.picture_url && (
-                    <span className="text-sm text-gray-500 truncate max-w-[200px]">
+                    <span className="text-sm text-gray-500 truncate max-w-[150px]">
                       Image selected
                     </span>
+                  )}
+                  {/* View/Download buttons for existing picture (not blob URL) */}
+                  {form.picture_url && !form.picture_url.startsWith('blob:') && (
+                    <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() => window.open(form.picture_url, '_blank')}
+                        className="p-2 text-gray-500 hover:text-[#5A7A8F] hover:bg-gray-100 rounded-lg transition-colors"
+                        title="View image"
+                      >
+                        <Eye className="h-4 w-4" />
+                      </button>
+                      <a
+                        href={form.picture_url}
+                        download
+                        className="p-2 text-gray-500 hover:text-[#5A7A8F] hover:bg-gray-100 rounded-lg transition-colors"
+                        title="Download image"
+                      >
+                        <Download className="h-4 w-4" />
+                      </a>
+                    </div>
                   )}
                 </div>
               </div>
@@ -696,9 +723,31 @@ export default function BoatsPage() {
                     />
                   </label>
                   {form.contract_filename && (
-                    <span className="text-sm text-gray-500 truncate max-w-[200px]">
+                    <span className="text-sm text-gray-500 truncate max-w-[150px] flex items-center gap-1">
+                      <FileText className="h-3.5 w-3.5 flex-shrink-0" />
                       {form.contract_filename}
                     </span>
+                  )}
+                  {/* View/Download buttons for existing contract (valid URL) */}
+                  {form.contract_url && form.contract_url.startsWith('http') && (
+                    <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() => window.open(form.contract_url, '_blank')}
+                        className="p-2 text-gray-500 hover:text-[#5A7A8F] hover:bg-gray-100 rounded-lg transition-colors"
+                        title="View contract"
+                      >
+                        <Eye className="h-4 w-4" />
+                      </button>
+                      <a
+                        href={form.contract_url}
+                        download={form.contract_filename || 'contract'}
+                        className="p-2 text-gray-500 hover:text-[#5A7A8F] hover:bg-gray-100 rounded-lg transition-colors"
+                        title="Download contract"
+                      >
+                        <Download className="h-4 w-4" />
+                      </a>
+                    </div>
                   )}
                 </div>
               </div>

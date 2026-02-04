@@ -1,7 +1,24 @@
-import jsPDF from 'jspdf';
-import autoTable from 'jspdf-autotable';
 import type { PayrollSlip } from '@/lib/supabase/api/payrollSlips';
 import { companiesApi } from '@/lib/supabase/api/companies';
+
+// Type for jsPDF instance
+type JsPDFInstance = InstanceType<typeof import('jspdf').default>;
+
+// Dynamic imports for heavy PDF libraries - only loaded when needed
+let jsPDFClass: typeof import('jspdf').default | null = null;
+let autoTableFn: typeof import('jspdf-autotable').default | null = null;
+
+const getPDFLibs = async () => {
+  if (!jsPDFClass || !autoTableFn) {
+    const [{ default: jsPDF }, { default: autoTable }] = await Promise.all([
+      import('jspdf'),
+      import('jspdf-autotable'),
+    ]);
+    jsPDFClass = jsPDF;
+    autoTableFn = autoTable;
+  }
+  return { jsPDF: jsPDFClass, autoTable: autoTableFn };
+};
 
 const BRAND_COLOR: [number, number, number] = [90, 122, 143]; // #5A7A8F
 const AWAY_CHARTERS = {
@@ -23,7 +40,8 @@ function formatAddress(addr: any): string {
 // ──────────────────────────────────────────────
 // 1. Total Salary Summary PDF
 // ──────────────────────────────────────────────
-export async function generateSummaryPDF(slip: PayrollSlip, period: string, thaiCompany: any): Promise<jsPDF> {
+export async function generateSummaryPDF(slip: PayrollSlip, period: string, thaiCompany: any): Promise<JsPDFInstance> {
+  const { jsPDF, autoTable } = await getPDFLibs();
   const doc = new jsPDF();
   const emp = slip.employee || {};
   const empName = emp.full_name_en || 'Employee';
@@ -174,9 +192,10 @@ export async function generateSummaryPDF(slip: PayrollSlip, period: string, thai
 // ──────────────────────────────────────────────
 // 2. Thai Company Payslip PDF
 // ──────────────────────────────────────────────
-export async function generateThaiPayslipPDF(slip: PayrollSlip, period: string, thaiCompany: any): Promise<jsPDF | null> {
+export async function generateThaiPayslipPDF(slip: PayrollSlip, period: string, thaiCompany: any): Promise<JsPDFInstance | null> {
   if (!thaiCompany || Number(slip.thai_company_amount) <= 0) return null;
 
+  const { jsPDF, autoTable } = await getPDFLibs();
   const doc = new jsPDF();
   const emp = slip.employee || {};
 
@@ -289,9 +308,10 @@ export async function generateThaiPayslipPDF(slip: PayrollSlip, period: string, 
 // ──────────────────────────────────────────────
 // 3. Away Charter Invoice PDF
 // ──────────────────────────────────────────────
-export async function generateAwayCharterInvoicePDF(slip: PayrollSlip, period: string): Promise<jsPDF | null> {
+export async function generateAwayCharterInvoicePDF(slip: PayrollSlip, period: string): Promise<JsPDFInstance | null> {
   if (Number(slip.away_charter_amount) <= 0) return null;
 
+  const { jsPDF, autoTable } = await getPDFLibs();
   const doc = new jsPDF();
   const emp = slip.employee || {};
   const description = emp.away_charter_description || 'Guest service';

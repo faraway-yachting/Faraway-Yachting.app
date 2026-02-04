@@ -5,6 +5,14 @@ type Contact = Database['public']['Tables']['contacts']['Row'];
 type ContactInsert = Database['public']['Tables']['contacts']['Insert'];
 type ContactUpdate = Database['public']['Tables']['contacts']['Update'];
 
+export interface PaginatedContacts {
+  data: Contact[];
+  total: number;
+  page: number;
+  pageSize: number;
+  hasMore: boolean;
+}
+
 export const contactsApi = {
   async getAll(): Promise<Contact[]> {
     const supabase = createClient();
@@ -14,6 +22,41 @@ export const contactsApi = {
       .order('name');
     if (error) throw error;
     return data ?? [];
+  },
+
+  // Paginated version with optional search
+  async getPage(
+    page: number = 1,
+    pageSize: number = 50,
+    search?: string
+  ): Promise<PaginatedContacts> {
+    const supabase = createClient();
+    const from = (page - 1) * pageSize;
+    const to = from + pageSize - 1;
+
+    let query = supabase
+      .from('contacts')
+      .select('*', { count: 'exact' });
+
+    // Add search filter if provided
+    if (search && search.trim()) {
+      query = query.or(`name.ilike.%${search}%,email.ilike.%${search}%,contact_person.ilike.%${search}%`);
+    }
+
+    const { data, error, count } = await query
+      .order('name')
+      .range(from, to);
+
+    if (error) throw error;
+
+    const total = count ?? 0;
+    return {
+      data: data ?? [],
+      total,
+      page,
+      pageSize,
+      hasMore: from + (data?.length ?? 0) < total,
+    };
   },
 
   async getById(id: string): Promise<Contact | null> {

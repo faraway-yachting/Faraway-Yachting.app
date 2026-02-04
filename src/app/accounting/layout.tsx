@@ -1,13 +1,9 @@
-'use client';
-
-import { NotificationProvider } from '@/contexts/NotificationContext';
+import { ClientProviders } from './ClientProviders';
 
 export default function AccountingLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  return (
-    <NotificationProvider>{children}</NotificationProvider>
-  );
+  return <ClientProviders>{children}</ClientProviders>;
 }

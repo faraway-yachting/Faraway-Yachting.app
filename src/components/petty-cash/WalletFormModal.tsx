@@ -109,7 +109,7 @@ export function WalletFormModal({
         setUserName("");
         setUserEmail("");
         setUserRole("");
-        setCompanyId(companies[0]?.id || "");
+        setCompanyId(""); // No default - user must select
         setCurrency("THB");
         setBeginningBalance("");
         setBalanceLimit("");

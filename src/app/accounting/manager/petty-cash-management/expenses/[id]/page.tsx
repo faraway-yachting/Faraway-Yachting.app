@@ -112,7 +112,7 @@ export default function PettyCashExpenseDetailsPage() {
             expenseNumber: dbExpense.expense_number,
             walletId: dbExpense.wallet_id,
             walletHolderName: wallet?.user_name || 'Unknown',
-            companyId: dbExpense.company_id,
+            companyId: dbExpense.company_id || '',
             companyName: '', // Will be filled from companies list
             projectId: dbExpense.project_id,
             projectName: '', // Will be filled from projects list
@@ -414,7 +414,7 @@ export default function PettyCashExpenseDetailsPage() {
                   Company
                 </label>
                 <select
-                  value={companyId}
+                  value={companyId || ''}
                   onChange={(e) => setCompanyId(e.target.value)}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#5A7A8F]/20 focus:border-[#5A7A8F]"
                 >

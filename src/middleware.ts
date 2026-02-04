@@ -49,13 +49,22 @@ export async function middleware(request: NextRequest) {
     }
   );
 
-  const {
-    data: { user }
-  } = await supabase.auth.getUser();
+  // Get user with error handling - if token refresh fails, treat as unauthenticated
+  let user = null;
+  try {
+    const { data, error } = await supabase.auth.getUser();
+    if (!error) {
+      user = data.user;
+    }
+    // If error, user stays null - will redirect to login for protected routes
+  } catch (err) {
+    // Network error or other failure - treat as unauthenticated
+    console.error('Middleware auth error:', err);
+  }
 
   const pathname = request.nextUrl.pathname;
 
-  const protectedRoutes = ['/accounting', '/bookings', '/admin'];
+  const protectedRoutes = ['/accounting', '/bookings', '/admin', '/hr'];
   const isProtectedRoute = protectedRoutes.some((route) =>
     pathname.startsWith(route)
   );
@@ -67,6 +76,7 @@ export async function middleware(request: NextRequest) {
     pathname.startsWith(route)
   );
 
+  // Redirect to login if not authenticated
   if (isProtectedRoute && !user) {
     const url = request.nextUrl.clone();
     url.pathname = '/login';
@@ -74,38 +84,48 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  if (isAdminRoute && user) {
+  // Redirect logged-in users away from auth pages
+  if (isAuthRoute && user) {
+    const url = request.nextUrl.clone();
+    url.pathname = '/';
+    return NextResponse.redirect(url);
+  }
+
+  // Get target module for permission check
+  const targetModule = getModuleFromPath(pathname);
+
+  // Only fetch user data if needed (admin or module routes)
+  const needsPermissionCheck = (isAdminRoute || targetModule) && user;
+
+  if (needsPermissionCheck && user) {
+    // Single consolidated query: fetch profile + module roles together
     const { data: profile } = await supabase
       .from('user_profiles')
       .select('is_super_admin')
       .eq('id', user.id)
       .single();
 
-    if (!profile?.is_super_admin) {
+    const isSuperAdmin = profile?.is_super_admin === true;
+
+    // Admin route - requires super admin
+    if (isAdminRoute && !isSuperAdmin) {
       const url = request.nextUrl.clone();
       url.pathname = '/unauthorized';
       return NextResponse.redirect(url);
     }
-  }
 
-  const targetModule = getModuleFromPath(pathname);
-  if (targetModule && user && !isAdminRoute) {
-    const { data: profile } = await supabase
-      .from('user_profiles')
-      .select('is_super_admin')
-      .eq('id', user.id)
-      .single();
-
-    if (!profile?.is_super_admin) {
-      const { data: moduleRole } = await supabase
+    // Module route - check module access (skip if super admin)
+    if (targetModule && !isAdminRoute && !isSuperAdmin) {
+      const { data: moduleRoles } = await supabase
         .from('user_module_roles')
-        .select('role')
+        .select('module, role, is_active')
         .eq('user_id', user.id)
         .eq('module', targetModule)
-        .eq('is_active', true)
-        .single();
+        .eq('is_active', true);
 
-      if (!moduleRole) {
+      const hasModuleAccess = moduleRoles && moduleRoles.length > 0;
+
+      if (!hasModuleAccess) {
         const url = request.nextUrl.clone();
         url.pathname = '/unauthorized';
         url.searchParams.set('module', targetModule);
@@ -113,16 +133,6 @@ export async function middleware(request: NextRequest) {
       }
     }
   }
-
-  if (isAuthRoute && user) {
-    const url = request.nextUrl.clone();
-    url.pathname = '/';
-    return NextResponse.redirect(url);
-  }
-
-  supabaseResponse.headers.set('Cache-Control', 'no-cache, no-store, must-revalidate');
-  supabaseResponse.headers.set('Pragma', 'no-cache');
-  supabaseResponse.headers.set('Expires', '0');
 
   return supabaseResponse;
 }

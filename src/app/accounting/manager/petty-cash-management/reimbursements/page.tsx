@@ -65,7 +65,7 @@ function transformReimbursement(
     expenseNumber: expenseNumber,
     walletId: db.wallet_id,
     walletHolderName: walletName,
-    companyId: db.company_id,
+    companyId: db.company_id || '',
     companyName: companyName,
     amount: db.amount,
     adjustmentAmount: db.adjustment_amount || undefined,
@@ -174,7 +174,7 @@ export default function ReimbursementsPage() {
         const transformed = allReimbursementsData.map(r => {
           const wallet = walletMap.get(r.wallet_id);
           const expense = expenseMap.get(r.expense_id);
-          const company = companyMap.get(r.company_id);
+          const company = r.company_id ? companyMap.get(r.company_id) : null;
           const project = expense?.project_id ? projectMap.get(expense.project_id) : null;
 
           return transformReimbursement(
@@ -189,6 +189,7 @@ export default function ReimbursementsPage() {
 
         setDbReimbursements(transformed);
         setCompanies(companiesData.map(c => ({ id: c.id, name: c.name })));
+
       } catch (error) {
         console.error('Error loading reimbursements from Supabase:', error);
         // Fall back to mock data
@@ -328,13 +329,21 @@ export default function ReimbursementsPage() {
         }
 
         // Transform Supabase expense to frontend format
+        // Cast to extended type to access accounting fields (may not be in auto-generated types)
+        const extendedExp = supabaseExpense as typeof supabaseExpense & {
+          expense_account_code?: string | null;
+          accounting_vat_type?: string | null;
+          accounting_vat_rate?: number | null;
+          accounting_completed_by?: string | null;
+          accounting_completed_at?: string | null;
+        };
         const amount = supabaseExpense.amount || 0;
         const transformedExpense: PettyCashExpense = {
           id: supabaseExpense.id,
           expenseNumber: supabaseExpense.expense_number,
           walletId: supabaseExpense.wallet_id,
           walletHolderName: reimbursement.walletHolderName,
-          companyId: supabaseExpense.company_id,
+          companyId: supabaseExpense.company_id || '',
           companyName: reimbursement.companyName,
           expenseDate: supabaseExpense.expense_date,
           description: supabaseExpense.description || '',
@@ -353,6 +362,12 @@ export default function ReimbursementsPage() {
           createdBy: supabaseExpense.created_by || '',
           createdAt: supabaseExpense.created_at,
           updatedAt: supabaseExpense.created_at,
+          // Accounting details (filled by accountant during approval)
+          expenseAccountCode: extendedExp.expense_account_code || undefined,
+          accountingVatType: (extendedExp.accounting_vat_type as 'include' | 'exclude' | 'no_vat') || undefined,
+          accountingVatRate: extendedExp.accounting_vat_rate ?? undefined,
+          accountingCompletedBy: extendedExp.accounting_completed_by || undefined,
+          accountingCompletedAt: extendedExp.accounting_completed_at || undefined,
         };
         setSelectedExpense(transformedExpense);
       } else {
@@ -389,7 +404,8 @@ export default function ReimbursementsPage() {
         const isDbReimbursement = dbReimbursements.some(r => r.id === reimbursementId);
 
         if (isDbReimbursement && user?.id) {
-          // Approve with bank account info in Supabase
+          // Approve with bank account info in Supabase (status becomes 'approved')
+          // Note: Payment step is now separate - done via batch payment after bank transfer
           await pettyCashApi.approveReimbursement(
             reimbursementId,
             bankAccountId,
@@ -398,13 +414,24 @@ export default function ReimbursementsPage() {
             adjustmentReason
           );
 
-          // Then mark as paid
-          await pettyCashApi.markReimbursementPaid(
-            reimbursementId,
-            paymentDate,
-            `PAY-${Date.now()}`
-          );
-          // Note: The trigger in the database automatically updates wallet balance when status changes to 'paid'
+          // Save accounting details to the petty cash expense record
+          // This ensures Company, Expense Account, VAT settings are persisted
+          if (selectedExpense?.id) {
+            try {
+              await pettyCashApi.updateExpense(selectedExpense.id, {
+                company_id: companyId || null,
+                expense_account_code: expenseAccountCode || null,
+                accounting_vat_type: vatType || null,
+                accounting_vat_rate: vatRate || 0,
+                accounting_completed_by: user.id,
+                accounting_completed_at: new Date().toISOString(),
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              } as any);
+            } catch (updateError) {
+              console.warn('Could not update expense accounting details:', updateError);
+              // Don't fail the approval if update fails
+            }
+          }
 
           // Create linked expense in main expenses table for P&L/Finances
           // This ensures the expense shows in Finances and Reports
@@ -433,17 +460,8 @@ export default function ReimbursementsPage() {
             }
           }
 
-          // Notify wallet holder that their claim has been processed
-          if (selectedReimbursement) {
-            const finalAmount = adjustmentAmount !== undefined
-              ? selectedReimbursement.amount + adjustmentAmount
-              : selectedReimbursement.amount;
-            notifyWalletHolderClaimPaid(
-              reimbursementId,
-              selectedReimbursement.reimbursementNumber,
-              finalAmount
-            );
-          }
+          // Note: Wallet credit happens later when batch is marked as paid (after bank transfer)
+          // Notification will be sent when batch payment is completed
         } else {
           // Fall back to mock data handlers
           approveMockReimbursement(
@@ -916,6 +934,7 @@ export default function ReimbursementsPage() {
           </div>
         </div>
       )}
+
     </AppShell>
   );
 }

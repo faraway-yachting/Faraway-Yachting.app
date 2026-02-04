@@ -223,33 +223,28 @@ export default function InvoicesPage() {
   const handlePdfPreview = async (invoice: Invoice) => {
     setLoadingPdf(true);
     try {
-      // Fetch full invoice with line items
-      const invoiceWithItems = await invoicesApi.getByIdWithLineItems(invoice.id);
+      // Get company from local state (no API call needed)
+      const company = companies.find(c => c.id === invoice.companyId);
+
+      // Fetch all data in parallel - invoice, bank accounts, and client contact
+      const [invoiceWithItems, bankAccountsData, contactData] = await Promise.all([
+        invoicesApi.getByIdWithLineItems(invoice.id),
+        company ? bankAccountsApi.getByCompanyActive(company.id) : Promise.resolve([]),
+        invoice.clientId ? contactsApi.getById(invoice.clientId) : Promise.resolve(null),
+      ]);
+
       if (!invoiceWithItems) {
         console.error('Invoice not found');
         return;
       }
 
-      // Get company
-      const company = companies.find(c => c.id === invoice.companyId);
+      // Process bank account
+      const bankAccount = bankAccountsData
+        .map(dbBankAccountToFrontend)
+        .find(ba => ba.currency === invoice.currency);
 
-      // Get bank account for the currency
-      let bankAccount: BankAccount | undefined;
-      if (company) {
-        const bankAccounts = await bankAccountsApi.getByCompanyActive(company.id);
-        bankAccount = bankAccounts
-          .map(dbBankAccountToFrontend)
-          .find(ba => ba.currency === invoice.currency);
-      }
-
-      // Get client contact
-      let client: Contact | undefined;
-      if (invoice.clientId) {
-        const contactData = await contactsApi.getById(invoice.clientId);
-        if (contactData) {
-          client = dbContactToFrontend(contactData);
-        }
-      }
+      // Process client contact
+      const client = contactData ? dbContactToFrontend(contactData) : undefined;
 
       // Transform line items
       const lineItems = invoiceWithItems.line_items?.map(dbInvoiceLineItemToFrontend) || [];

@@ -181,7 +181,7 @@ export default function PettyCashExpenseDetailsPage() {
             id: dbExpense.id,
             expenseNumber: dbExpense.expense_number,
             walletId: dbExpense.wallet_id,
-            companyId: dbExpense.company_id,
+            companyId: dbExpense.company_id || '',
             companyName: '', // Will be filled from companies list
             projectId: dbExpense.project_id,
             projectName: '', // Will be filled from projects list
@@ -545,7 +545,7 @@ export default function PettyCashExpenseDetailsPage() {
                   Company
                 </label>
                 <select
-                  value={companyId}
+                  value={companyId || ''}
                   onChange={(e) => {
                     setCompanyId(e.target.value);
                     // Reset project if company changes

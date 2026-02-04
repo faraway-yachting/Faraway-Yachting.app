@@ -1,19 +1,17 @@
 "use client";
 
-import { useState, ReactNode } from "react";
+import { useState, useMemo, ReactNode } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useAuth } from "@/components/auth";
+import { UserDropdown } from "@/components/shared/UserDropdown";
 import {
   Calendar,
   List,
   Settings,
-  LogOut,
   Menu,
   X,
-  ChevronDown,
   Home,
-  User,
   Shield,
   Users,
   Anchor,
@@ -79,11 +77,10 @@ function getRoleDisplayName(role: string | null, isSuperAdmin: boolean): string 
 
 export function BookingsAppShell({ children, currentRole }: BookingsAppShellProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [userDropdownOpen, setUserDropdownOpen] = useState(false);
   const pathname = usePathname();
 
   // Get auth context for real user data
-  const { user, profile, signOut, isSuperAdmin, getModuleRole, isMenuVisible } = useAuth();
+  const { isSuperAdmin, getModuleRole, isMenuVisible } = useAuth();
 
   // Get user's actual role in bookings module
   const bookingsRole = getModuleRole('bookings');
@@ -93,21 +90,18 @@ export function BookingsAppShell({ children, currentRole }: BookingsAppShellProp
   const effectiveRole = isSuperAdmin ? 'manager' : (bookingsRole as BookingsRole) || 'viewer';
   const config = roleConfig[effectiveRole] || roleConfig['viewer'];
 
-  const handleSignOut = async () => {
-    try {
-      await signOut();
-    } catch (error) {
-      console.error('Sign out error:', error);
-    }
-  };
+  // Unused but keeping for reference
+  void roleDisplayName; // Used by UserDropdown internally
 
-  // Filter menu items based on role permissions
-  const navigation = allMenuItems
-    .filter((item) => config.allowedMenus.includes(item.name))
-    .map((item) => ({
-      ...item,
-      href: item.href.replace("{role}", currentRole),
-    }));
+  // Filter menu items based on role permissions - memoized
+  const navigation = useMemo(() => {
+    return allMenuItems
+      .filter((item) => config.allowedMenus.includes(item.name))
+      .map((item) => ({
+        ...item,
+        href: item.href.replace("{role}", currentRole),
+      }));
+  }, [config.allowedMenus, currentRole]);
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -277,67 +271,7 @@ export function BookingsAppShell({ children, currentRole }: BookingsAppShellProp
               />
 
               {/* User profile dropdown */}
-              <div className="relative">
-                <button
-                  type="button"
-                  className="flex items-center gap-x-3 rounded-lg px-3 py-2 hover:bg-gray-100 transition-colors"
-                  onClick={() => setUserDropdownOpen(!userDropdownOpen)}
-                >
-                  <div className="flex items-center gap-x-3">
-                    <div className="h-8 w-8 rounded-full bg-gradient-to-br from-[#3b82f6] to-[#1d4ed8] flex items-center justify-center shadow-sm">
-                      <User className="h-4 w-4 text-white" />
-                    </div>
-                    <div className="hidden lg:block text-left">
-                      <p className="text-sm font-semibold text-gray-900">{profile?.full_name || user?.user_metadata?.full_name || 'User'}</p>
-                      <p className="text-xs text-gray-500">{roleDisplayName}</p>
-                    </div>
-                  </div>
-                  <ChevronDown className="hidden lg:block h-4 w-4 text-gray-400" />
-                </button>
-
-                {userDropdownOpen && (
-                  <>
-                    <div
-                      className="fixed inset-0 z-10"
-                      onClick={() => setUserDropdownOpen(false)}
-                    />
-                    <div className="absolute right-0 z-20 mt-2 w-64 origin-top-right rounded-xl bg-white shadow-xl ring-1 ring-black ring-opacity-5 border border-gray-100">
-                      <div className="p-3 border-b border-gray-100">
-                        <div className="flex items-center gap-2">
-                          <p className="text-sm font-semibold text-gray-900">{profile?.full_name || user?.user_metadata?.full_name || 'User'}</p>
-                          {isSuperAdmin && (
-                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-700">
-                              <Shield className="h-3 w-3" />
-                              Admin
-                            </span>
-                          )}
-                        </div>
-                        <p className="text-xs text-gray-500">{user?.email}</p>
-                        <p className="text-xs text-blue-600 mt-1">{roleDisplayName}</p>
-                      </div>
-                      <div className="border-t border-gray-100 py-2">
-                        <Link
-                          href="/accounting/manager"
-                          className="flex w-full items-center gap-3 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
-                          onClick={() => setUserDropdownOpen(false)}
-                        >
-                          <span>Go to Accounting</span>
-                        </Link>
-                        <button
-                          onClick={() => {
-                            setUserDropdownOpen(false);
-                            handleSignOut();
-                          }}
-                          className="flex w-full items-center gap-3 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
-                        >
-                          <LogOut className="h-4 w-4 text-gray-400" />
-                          Sign Out
-                        </button>
-                      </div>
-                    </div>
-                  </>
-                )}
-              </div>
+              <UserDropdown module="bookings" />
             </div>
           </div>
         </div>

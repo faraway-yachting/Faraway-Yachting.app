@@ -23,7 +23,7 @@ export type PettyCashReimbursement = {
   reimbursement_number: string;
   expense_id: string;
   wallet_id: string;
-  company_id: string;
+  company_id: string | null; // Nullable - accountant assigns company during approval
   amount: number;
   adjustment_amount: number | null;
   adjustment_reason: string | null;
@@ -53,6 +53,24 @@ export type PettyCashReimbursementInsert = Omit<PettyCashReimbursement,
   approved_at?: string;
   rejected_at?: string;
   reconciled_at?: string;
+};
+
+// Batch type for grouping reimbursements into single bank transfers
+export type PettyCashBatch = {
+  id: string;
+  batch_number: string;
+  company_id: string;
+  wallet_holder_id: string | null;
+  wallet_holder_name: string;
+  bank_account_id: string;
+  total_amount: number;
+  reimbursement_count: number;
+  status: 'pending_payment' | 'paid';
+  payment_date: string | null;
+  payment_reference: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
 };
 
 export type WalletWithDetails = PettyCashWallet & {
@@ -524,8 +542,26 @@ export const pettyCashApi = {
   /**
    * Create an expense with auto-generated expense number
    * Also triggers an accounting event for automatic journal generation
+   * Includes duplicate detection to prevent multiple submissions
    */
   async createExpenseWithNumber(expense: Omit<PettyCashExpenseInsert, 'expense_number'>): Promise<PettyCashExpense> {
+    const supabase = createClient();
+
+    // Check for duplicate: same wallet_id + amount + date within 5 seconds
+    const fiveSecondsAgo = new Date(Date.now() - 5000).toISOString();
+    const { data: recentDuplicates } = await supabase
+      .from('petty_cash_expenses')
+      .select('id')
+      .eq('wallet_id', expense.wallet_id)
+      .eq('amount', expense.amount ?? 0)
+      .eq('expense_date', expense.expense_date)
+      .gte('created_at', fiveSecondsAgo)
+      .limit(1);
+
+    if (recentDuplicates && recentDuplicates.length > 0) {
+      throw new Error('DUPLICATE_EXPENSE: An identical expense was recently submitted. Please wait before submitting again.');
+    }
+
     const expenseNumber = await this.generateExpenseNumber();
     const createdExpense = await this.createExpense({
       ...expense,
@@ -584,6 +620,96 @@ export const pettyCashApi = {
       .single();
     if (error) throw error;
     return data;
+  },
+
+  /**
+   * Resubmit a rejected expense - updates the SAME expense and SAME reimbursement records.
+   * This ensures 1 expense + 1 reimbursement throughout the entire claim lifecycle.
+   * When resubmitting, the rejected reimbursement is reset to 'pending' status.
+   */
+  async resubmitExpense(
+    expenseId: string,
+    updates: {
+      amount?: number;
+      description?: string;
+      projectId?: string;
+      projectName?: string;
+      expenseDate?: string;
+    }
+  ): Promise<{ expense: PettyCashExpense; reimbursement: PettyCashReimbursement }> {
+    const supabase = createClient();
+
+    // 1. Get the expense
+    const expense = await this.getExpenseById(expenseId);
+    if (!expense) {
+      throw new Error('Expense not found');
+    }
+
+    // 2. Find the rejected reimbursement linked to this expense
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: rejectedReimbursements } = await (supabase as any)
+      .from('petty_cash_reimbursements')
+      .select('*')
+      .eq('expense_id', expenseId)
+      .eq('status', 'rejected')
+      .order('created_at', { ascending: false })
+      .limit(1);
+
+    if (!rejectedReimbursements || rejectedReimbursements.length === 0) {
+      // Also check if expense status is 'rejected' (edge case)
+      if (expense.status !== 'rejected') {
+        throw new Error('Can only resubmit rejected expenses');
+      }
+    }
+
+    const existingReimbursement = rejectedReimbursements?.[0];
+
+    // 3. Update the expense with changes, set status back to 'submitted'
+    const { data: updatedExpense, error: updateError } = await supabase
+      .from('petty_cash_expenses')
+      .update({
+        amount: updates.amount ?? expense.amount,
+        description: updates.description ?? expense.description,
+        project_id: updates.projectId ?? expense.project_id,
+        expense_date: updates.expenseDate ?? expense.expense_date,
+        status: 'submitted',
+      })
+      .eq('id', expenseId)
+      .select()
+      .single();
+
+    if (updateError) throw updateError;
+
+    // 4. UPDATE the existing reimbursement - reset to 'pending', clear rejection fields
+    const newAmount = updates.amount ?? expense.amount;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: updatedReimbursement, error: reimbursementError } = await (supabase as any)
+      .from('petty_cash_reimbursements')
+      .update({
+        amount: newAmount,
+        final_amount: newAmount,
+        status: 'pending',
+        // Clear rejection fields
+        rejected_by: null,
+        rejected_at: null,
+        rejection_reason: null,
+        // Clear approval fields (in case it was approved before)
+        approved_by: null,
+        approved_at: null,
+        // Reset company_id since accountant will reassign
+        company_id: null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', existingReimbursement.id)
+      .select()
+      .single();
+
+    if (reimbursementError) throw reimbursementError;
+
+    return {
+      expense: updatedExpense,
+      reimbursement: updatedReimbursement as PettyCashReimbursement,
+    };
   },
 
   async deleteExpense(id: string): Promise<void> {
@@ -751,6 +877,37 @@ export const pettyCashApi = {
       .order('topup_date', { ascending: false });
     if (error) throw error;
     return data ?? [];
+  },
+
+  async createTopUp(input: {
+    wallet_id: string;
+    amount: number;
+    company_id: string | null;
+    bank_account_id: string;
+    top_up_date: string;
+    reference?: string;
+    notes?: string;
+    status?: 'pending' | 'approved' | 'completed';
+    created_by: string | null;
+  }): Promise<PettyCashTopup> {
+    const supabase = createClient();
+    const { data, error } = await supabase
+      .from('petty_cash_topups')
+      .insert([{
+        wallet_id: input.wallet_id,
+        amount: input.amount,
+        company_id: input.company_id,
+        bank_account_id: input.bank_account_id,
+        topup_date: input.top_up_date,
+        reference: input.reference || null,
+        notes: input.notes || null,
+        status: input.status || 'completed',
+        created_by: input.created_by,
+      }])
+      .select()
+      .single();
+    if (error) throw error;
+    return data;
   },
 
   // ============================================================================
@@ -1033,10 +1190,35 @@ export const pettyCashApi = {
 
   /**
    * Create a reimbursement with auto-generated reimbursement number
+   * Includes duplicate detection - won't create if reimbursement already exists for this expense
    */
   async createReimbursementWithNumber(
     reimbursement: Omit<PettyCashReimbursementInsert, 'reimbursement_number'>
   ): Promise<PettyCashReimbursement> {
+    const supabase = createClient();
+
+    // Check if a reimbursement already exists for this expense_id
+    if (reimbursement.expense_id) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data: existing } = await (supabase as any)
+        .from('petty_cash_reimbursements')
+        .select('id, reimbursement_number')
+        .eq('expense_id', reimbursement.expense_id)
+        .limit(1);
+
+      if (existing && existing.length > 0) {
+        // Return existing reimbursement instead of creating duplicate
+        console.log(`Reimbursement already exists for expense ${reimbursement.expense_id}: ${existing[0].reimbursement_number}`);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const { data: fullReimbursement } = await (supabase as any)
+          .from('petty_cash_reimbursements')
+          .select('*')
+          .eq('id', existing[0].id)
+          .single();
+        return fullReimbursement as PettyCashReimbursement;
+      }
+    }
+
     const reimbursementNumber = await this.generateReimbursementNumber();
     return this.createReimbursement({
       ...reimbursement,
@@ -1170,6 +1352,7 @@ export const pettyCashApi = {
 
   /**
    * Reject a reimbursement
+   * Also updates the expense status to 'rejected' to prevent auto-creation of new reimbursements
    */
   async rejectReimbursement(
     id: string,
@@ -1177,6 +1360,16 @@ export const pettyCashApi = {
     rejectionReason: string
   ): Promise<PettyCashReimbursement> {
     const supabase = createClient();
+
+    // First get the expense_id to update its status
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: reimbursement } = await (supabase as any)
+      .from('petty_cash_reimbursements')
+      .select('expense_id')
+      .eq('id', id)
+      .single();
+
+    // Update reimbursement status
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data, error } = await (supabase as any)
       .from('petty_cash_reimbursements')
@@ -1191,6 +1384,18 @@ export const pettyCashApi = {
       .select()
       .single();
     if (error) throw error;
+
+    // Also update the expense status to 'rejected' so it won't trigger auto-creation
+    if (reimbursement?.expense_id) {
+      await supabase
+        .from('petty_cash_expenses')
+        .update({
+          status: 'rejected',
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', reimbursement.expense_id);
+    }
+
     return data as PettyCashReimbursement;
   },
 
@@ -1202,6 +1407,483 @@ export const pettyCashApi = {
       .delete()
       .eq('id', id);
     if (error) throw error;
+  },
+
+  // ============================================================================
+  // Batch Reimbursement Operations
+  // Groups multiple reimbursements into one bank transfer
+  // ============================================================================
+
+  /**
+   * Get approved reimbursements grouped by company + wallet holder
+   * Used to show the reimbursement summary for batch creation
+   * Note: Only 'approved' reimbursements are shown (not 'pending' - those need approval first)
+   */
+  async getPendingGroupedByCompanyAndHolder(): Promise<{
+    companyId: string;
+    companyName: string;
+    walletHolderName: string;
+    walletHolderId: string | null;
+    reimbursements: PettyCashReimbursement[];
+    totalAmount: number;
+  }[]> {
+    const supabase = createClient();
+
+    // Get all APPROVED reimbursements that are NOT already in a batch
+    // Only approved claims should appear in the batch creation area
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: reimbursements, error } = await (supabase as any)
+      .from('petty_cash_reimbursements')
+      .select(`
+        *,
+        wallet:petty_cash_wallets(user_name, user_id),
+        company:companies(name)
+      `)
+      .eq('status', 'approved')
+      .is('batch_id', null)
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+
+    // Group by company_id + wallet holder name
+    const groups = new Map<string, {
+      companyId: string;
+      companyName: string;
+      walletHolderName: string;
+      walletHolderId: string | null;
+      reimbursements: PettyCashReimbursement[];
+      totalAmount: number;
+    }>();
+
+    for (const r of (reimbursements || []) as Array<{
+      id: string;
+      reimbursement_number: string;
+      expense_id: string;
+      wallet_id: string;
+      company_id: string;
+      amount: number;
+      adjustment_amount: number | null;
+      adjustment_reason: string | null;
+      final_amount: number;
+      status: 'pending' | 'approved' | 'paid' | 'rejected';
+      bank_account_id: string | null;
+      payment_date: string | null;
+      payment_reference: string | null;
+      approved_by: string | null;
+      approved_at: string | null;
+      rejected_by: string | null;
+      rejected_at: string | null;
+      rejection_reason: string | null;
+      bank_feed_line_id: string | null;
+      reconciled_at: string | null;
+      created_by: string | null;
+      created_at: string;
+      updated_at: string;
+      wallet: { user_name: string; user_id: string | null } | null;
+      company: { name: string } | null;
+    }>) {
+      const walletHolderName = r.wallet?.user_name || 'Unknown';
+      const walletHolderId = r.wallet?.user_id || null;
+      const companyName = r.company?.name || 'Unknown';
+      const key = `${r.company_id}-${walletHolderName}`;
+
+      if (!groups.has(key)) {
+        groups.set(key, {
+          companyId: r.company_id,
+          companyName,
+          walletHolderName,
+          walletHolderId,
+          reimbursements: [],
+          totalAmount: 0,
+        });
+      }
+
+      const group = groups.get(key)!;
+      group.reimbursements.push({
+        id: r.id,
+        reimbursement_number: r.reimbursement_number,
+        expense_id: r.expense_id,
+        wallet_id: r.wallet_id,
+        company_id: r.company_id,
+        amount: r.amount,
+        adjustment_amount: r.adjustment_amount,
+        adjustment_reason: r.adjustment_reason,
+        final_amount: r.final_amount,
+        status: r.status,
+        bank_account_id: r.bank_account_id,
+        payment_date: r.payment_date,
+        payment_reference: r.payment_reference,
+        approved_by: r.approved_by,
+        approved_at: r.approved_at,
+        rejected_by: r.rejected_by,
+        rejected_at: r.rejected_at,
+        rejection_reason: r.rejection_reason,
+        bank_feed_line_id: r.bank_feed_line_id,
+        reconciled_at: r.reconciled_at,
+        created_by: r.created_by,
+        created_at: r.created_at,
+        updated_at: r.updated_at,
+      });
+      group.totalAmount += r.final_amount || r.amount || 0;
+    }
+
+    return Array.from(groups.values());
+  },
+
+  /**
+   * Get approved reimbursements grouped by wallet and then by bank account
+   * Used for the Transfer Summary - shows how much needs to be transferred to each wallet from each bank
+   */
+  async getApprovedReimbursementsGroupedForTransfer(): Promise<{
+    walletId: string;
+    walletName: string;
+    holderName: string;
+    bankAccountGroups: {
+      bankAccountId: string;
+      bankAccountName: string;
+      companyId: string;
+      companyName: string;
+      amount: number;
+      reimbursementIds: string[];
+    }[];
+    totalAmount: number;
+  }[]> {
+    const supabase = createClient();
+
+    // Get all APPROVED reimbursements that have a bank_account_id set
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: reimbursements, error } = await (supabase as any)
+      .from('petty_cash_reimbursements')
+      .select(`
+        *,
+        wallet:petty_cash_wallets(id, wallet_name, user_name),
+        company:companies(id, name),
+        bank_account:bank_accounts(id, account_name, account_number)
+      `)
+      .eq('status', 'approved')
+      .not('bank_account_id', 'is', null)
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+
+    // Group by wallet_id, then by bank_account_id
+    const walletGroups = new Map<string, {
+      walletId: string;
+      walletName: string;
+      holderName: string;
+      bankAccountGroups: Map<string, {
+        bankAccountId: string;
+        bankAccountName: string;
+        companyId: string;
+        companyName: string;
+        amount: number;
+        reimbursementIds: string[];
+      }>;
+      totalAmount: number;
+    }>();
+
+    for (const r of (reimbursements || []) as Array<{
+      id: string;
+      wallet_id: string;
+      company_id: string;
+      bank_account_id: string;
+      final_amount: number;
+      amount: number;
+      wallet: { id: string; wallet_name: string; user_name: string } | null;
+      company: { id: string; name: string } | null;
+      bank_account: { id: string; account_name: string; account_number: string } | null;
+    }>) {
+      const walletId = r.wallet_id;
+      const walletName = r.wallet?.wallet_name || 'Unknown Wallet';
+      const holderName = r.wallet?.user_name || 'Unknown';
+      const bankAccountId = r.bank_account_id;
+      const bankAccountName = r.bank_account
+        ? `${r.bank_account.account_name} (${r.bank_account.account_number})`
+        : 'Unknown Bank';
+      const companyId = r.company_id || '';
+      const companyName = r.company?.name || 'Unknown';
+      const amount = r.final_amount || r.amount || 0;
+
+      // Get or create wallet group
+      if (!walletGroups.has(walletId)) {
+        walletGroups.set(walletId, {
+          walletId,
+          walletName,
+          holderName,
+          bankAccountGroups: new Map(),
+          totalAmount: 0,
+        });
+      }
+
+      const walletGroup = walletGroups.get(walletId)!;
+      walletGroup.totalAmount += amount;
+
+      // Get or create bank account group within wallet
+      if (!walletGroup.bankAccountGroups.has(bankAccountId)) {
+        walletGroup.bankAccountGroups.set(bankAccountId, {
+          bankAccountId,
+          bankAccountName,
+          companyId,
+          companyName,
+          amount: 0,
+          reimbursementIds: [],
+        });
+      }
+
+      const bankGroup = walletGroup.bankAccountGroups.get(bankAccountId)!;
+      bankGroup.amount += amount;
+      bankGroup.reimbursementIds.push(r.id);
+    }
+
+    // Convert to array format
+    return Array.from(walletGroups.values()).map(wg => ({
+      walletId: wg.walletId,
+      walletName: wg.walletName,
+      holderName: wg.holderName,
+      bankAccountGroups: Array.from(wg.bankAccountGroups.values()),
+      totalAmount: wg.totalAmount,
+    }));
+  },
+
+  /**
+   * Generate a unique batch number in format PC-BATCH-YYMMXXXX
+   */
+  async generateBatchNumber(): Promise<string> {
+    const supabase = createClient();
+    const now = new Date();
+    const yymm = `${now.getFullYear().toString().slice(-2)}${(now.getMonth() + 1).toString().padStart(2, '0')}`;
+    const prefix = `PC-BATCH-${yymm}`;
+
+    // Get the count of batches this month to generate sequence
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { count, error } = await (supabase as any)
+      .from('petty_cash_reimbursement_batches')
+      .select('*', { count: 'exact', head: true })
+      .like('batch_number', `${prefix}%`);
+
+    if (error) throw error;
+
+    const sequence = ((count || 0) + 1).toString().padStart(4, '0');
+    return `${prefix}${sequence}`;
+  },
+
+  /**
+   * Create a batch from pending reimbursements
+   */
+  async createBatch(input: {
+    reimbursementIds: string[];
+    companyId: string;
+    walletHolderName: string;
+    walletHolderId?: string | null;
+    bankAccountId: string;
+    createdBy: string;
+  }): Promise<PettyCashBatch> {
+    const supabase = createClient();
+
+    // Calculate total amount from reimbursements
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: reimbursements, error: fetchError } = await (supabase as any)
+      .from('petty_cash_reimbursements')
+      .select('final_amount, amount')
+      .in('id', input.reimbursementIds);
+
+    if (fetchError) throw fetchError;
+
+    const totalAmount = (reimbursements || []).reduce(
+      (sum: number, r: { final_amount?: number; amount?: number }) => sum + (r.final_amount || r.amount || 0),
+      0
+    );
+
+    // Generate batch number
+    const batchNumber = await this.generateBatchNumber();
+
+    // Create the batch
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: batch, error: createError } = await (supabase as any)
+      .from('petty_cash_reimbursement_batches')
+      .insert([{
+        batch_number: batchNumber,
+        company_id: input.companyId,
+        wallet_holder_id: input.walletHolderId || null,
+        wallet_holder_name: input.walletHolderName,
+        bank_account_id: input.bankAccountId,
+        total_amount: totalAmount,
+        reimbursement_count: input.reimbursementIds.length,
+        status: 'pending_payment',
+        created_by: input.createdBy,
+      }])
+      .select()
+      .single();
+
+    if (createError) throw createError;
+
+    // Update reimbursements to link them to the batch
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error: updateError } = await (supabase as any)
+      .from('petty_cash_reimbursements')
+      .update({
+        batch_id: batch.id,
+        updated_at: new Date().toISOString(),
+      })
+      .in('id', input.reimbursementIds);
+
+    if (updateError) throw updateError;
+
+    return batch as PettyCashBatch;
+  },
+
+  /**
+   * Get all batches
+   */
+  async getAllBatches(): Promise<PettyCashBatch[]> {
+    const supabase = createClient();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data, error } = await (supabase as any)
+      .from('petty_cash_reimbursement_batches')
+      .select('*')
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    return (data ?? []) as PettyCashBatch[];
+  },
+
+  /**
+   * Get batches by status
+   */
+  async getBatchesByStatus(status: 'pending_payment' | 'paid'): Promise<PettyCashBatch[]> {
+    const supabase = createClient();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data, error } = await (supabase as any)
+      .from('petty_cash_reimbursement_batches')
+      .select('*')
+      .eq('status', status)
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    return (data ?? []) as PettyCashBatch[];
+  },
+
+  /**
+   * Get a batch by ID with its reimbursements
+   */
+  async getBatchById(id: string): Promise<(PettyCashBatch & { reimbursements: PettyCashReimbursement[] }) | null> {
+    const supabase = createClient();
+
+    // Get the batch
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: batch, error: batchError } = await (supabase as any)
+      .from('petty_cash_reimbursement_batches')
+      .select('*')
+      .eq('id', id)
+      .single();
+
+    if (batchError) {
+      if (batchError.code === 'PGRST116') return null;
+      throw batchError;
+    }
+
+    // Get the reimbursements in this batch
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: reimbursements, error: reimbError } = await (supabase as any)
+      .from('petty_cash_reimbursements')
+      .select('*')
+      .eq('batch_id', id)
+      .order('created_at', { ascending: false });
+
+    if (reimbError) throw reimbError;
+
+    return {
+      ...batch,
+      reimbursements: (reimbursements ?? []) as PettyCashReimbursement[],
+    } as PettyCashBatch & { reimbursements: PettyCashReimbursement[] };
+  },
+
+  /**
+   * Mark a batch as paid (after bank transfer is completed)
+   * Also marks all linked reimbursements as paid
+   */
+  async markBatchPaid(
+    batchId: string,
+    paymentDate: string,
+    paymentReference?: string
+  ): Promise<PettyCashBatch> {
+    const supabase = createClient();
+
+    // Update the batch
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: batch, error: batchError } = await (supabase as any)
+      .from('petty_cash_reimbursement_batches')
+      .update({
+        status: 'paid',
+        payment_date: paymentDate,
+        payment_reference: paymentReference || null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', batchId)
+      .select()
+      .single();
+
+    if (batchError) throw batchError;
+
+    // Get all reimbursements in this batch to mark them as paid
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: reimbursements } = await (supabase as any)
+      .from('petty_cash_reimbursements')
+      .select('id, wallet_id, final_amount')
+      .eq('batch_id', batchId);
+
+    // Mark all reimbursements as paid
+    if (reimbursements && reimbursements.length > 0) {
+      const reimbursementIds = reimbursements.map((r: { id: string }) => r.id);
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (supabase as any)
+        .from('petty_cash_reimbursements')
+        .update({
+          status: 'paid',
+          payment_date: paymentDate,
+          payment_reference: paymentReference || null,
+          updated_at: new Date().toISOString(),
+        })
+        .in('id', reimbursementIds);
+
+      // Trigger accounting events for each reimbursement
+      for (const r of reimbursements as Array<{ id: string; wallet_id: string; final_amount: number }>) {
+        try {
+          const wallet = await this.getWalletById(r.wallet_id);
+          if (wallet && wallet.company_id) {
+            const eventData: PettyCashReimbursementEventData = {
+              reimbursementId: r.id,
+              reimbursementNumber: `BATCH-${batch.batch_number}`,
+              walletId: r.wallet_id,
+              walletName: wallet.wallet_name || 'Petty Cash Wallet',
+              companyId: wallet.company_id,
+              paymentDate: paymentDate,
+              finalAmount: r.final_amount,
+              bankAccountId: batch.bank_account_id || undefined,
+              bankAccountCode: undefined,
+              bankAccountName: undefined,
+              paymentReference: paymentReference || undefined,
+              currency: wallet.currency || 'THB',
+            };
+
+            createAndProcessEvent(
+              'PETTYCASH_REIMBURSEMENT_PAID',
+              paymentDate,
+              [wallet.company_id],
+              eventData as unknown as Record<string, unknown>,
+              'petty_cash_reimbursement',
+              r.id,
+              undefined
+            ).catch(err => {
+              console.error('Failed to create petty cash reimbursement event:', err);
+            });
+          }
+        } catch (err) {
+          console.error('Error creating petty cash reimbursement event:', err);
+        }
+      }
+    }
+
+    return batch as PettyCashBatch;
   },
 
   /**

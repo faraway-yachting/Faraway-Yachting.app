@@ -54,7 +54,15 @@ export const notificationsApi = {
       .or(`target_role.eq.${role},target_role.eq.all`)
       .order('created_at', { ascending: false })
       .limit(50);
-    if (error) throw error;
+    // Gracefully handle missing table or RLS errors - return empty array
+    if (error) {
+      if (error.code === '42P01' || error.message?.includes('does not exist')) {
+        // Table doesn't exist yet - silently return empty
+        return [];
+      }
+      console.warn('Notifications fetch error:', error.message);
+      return [];
+    }
     return (data ?? []).map(dbToFrontend);
   },
 
@@ -65,11 +73,12 @@ export const notificationsApi = {
       .select('*', { count: 'exact', head: true })
       .or(`target_role.eq.${role},target_role.eq.all`)
       .eq('read', false);
-    if (error) throw error;
+    // Gracefully handle missing table
+    if (error) return 0;
     return count ?? 0;
   },
 
-  async create(input: NotificationCreateInput): Promise<AppNotification> {
+  async create(input: NotificationCreateInput): Promise<AppNotification | null> {
     const supabase = createClient();
     const row: DbNotificationInsert = {
       type: input.type,
@@ -86,7 +95,10 @@ export const notificationsApi = {
       .insert(row)
       .select()
       .single();
-    if (error) throw error;
+    if (error) {
+      console.warn('Failed to create notification:', error.message);
+      return null;
+    }
     return dbToFrontend(data);
   },
 
@@ -96,7 +108,7 @@ export const notificationsApi = {
       .from('notifications')
       .update({ read: true })
       .eq('id', id);
-    if (error) throw error;
+    if (error) console.warn('Failed to mark notification as read:', error.message);
   },
 
   async markAllAsRead(role: string): Promise<void> {
@@ -106,7 +118,7 @@ export const notificationsApi = {
       .update({ read: true })
       .or(`target_role.eq.${role},target_role.eq.all`)
       .eq('read', false);
-    if (error) throw error;
+    if (error) console.warn('Failed to mark all notifications as read:', error.message);
   },
 
   async delete(id: string): Promise<void> {
@@ -115,6 +127,6 @@ export const notificationsApi = {
       .from('notifications')
       .delete()
       .eq('id', id);
-    if (error) throw error;
+    if (error) console.warn('Failed to delete notification:', error.message);
   },
 };

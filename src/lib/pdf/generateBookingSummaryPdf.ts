@@ -1,5 +1,18 @@
-import jsPDF from 'jspdf';
-import autoTable from 'jspdf-autotable';
+// Dynamic imports for heavy PDF libraries - only loaded when needed
+let cachedJsPDF: typeof import('jspdf').default | null = null;
+let cachedAutoTable: typeof import('jspdf-autotable').default | null = null;
+
+const getPDFLibs = async () => {
+  if (!cachedJsPDF || !cachedAutoTable) {
+    const [{ default: jsPDF }, { default: autoTable }] = await Promise.all([
+      import('jspdf'),
+      import('jspdf-autotable'),
+    ]);
+    cachedJsPDF = jsPDF;
+    cachedAutoTable = autoTable;
+  }
+  return { jsPDF: cachedJsPDF, autoTable: cachedAutoTable };
+};
 
 const BRAND: [number, number, number] = [90, 122, 143]; // #5A7A8F
 const BRAND_LIGHT: [number, number, number] = [230, 238, 243];
@@ -61,7 +74,8 @@ function fmtDate(d: string): string {
   return date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
-export function generateBookingSummaryPdf(data: BookingSummaryData): jsPDF {
+export async function generateBookingSummaryPdf(data: BookingSummaryData): Promise<InstanceType<typeof import('jspdf').default>> {
+  const { jsPDF, autoTable } = await getPDFLibs();
   const doc = new jsPDF();
   const pageW = 210;
   const margin = 16;

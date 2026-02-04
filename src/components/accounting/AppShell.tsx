@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, ReactNode } from "react";
+import { useState, useEffect, useMemo, useCallback, ReactNode } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useAuth } from "@/components/auth";
@@ -194,59 +194,63 @@ export function AppShell({ children }: AppShellProps) {
 
   // Notification context (optional - may not be wrapped in provider)
   const notificationContext = useNotificationsOptional();
+  const setCurrentRole = notificationContext?.setCurrentRole;
+  const unreadCount = notificationContext?.unreadCount ?? 0;
 
   // Map role to notification target role
   const notificationRole: NotificationTargetRole =
     accountingRole === 'petty-cash' ? 'petty_cash_holder' : (accountingRole as NotificationTargetRole) || 'manager';
 
-  // Update notification context when role changes
+  // Update notification context when role changes - use stable reference to setCurrentRole
   useEffect(() => {
-    if (notificationContext) {
-      notificationContext.setCurrentRole(notificationRole);
+    if (setCurrentRole) {
+      setCurrentRole(notificationRole);
     }
-  }, [notificationRole, notificationContext]);
+  }, [notificationRole, setCurrentRole]);
 
-  // Determine dynamic href for Petty Cash based on permissions
-  const getPettyCashHref = () => {
+  // Determine dynamic href for Petty Cash based on permissions - memoized
+  const pettyCashHref = useMemo(() => {
     // If user has view_all permission (manager), show management page with toggle
     if (isSuperAdmin || hasPermission(ACCOUNTING_PERMISSIONS.PETTYCASH_VIEW_ALL)) {
       return '/accounting/manager/petty-cash-management';
     }
     // Otherwise, show personal wallet page only
     return '/accounting/petty-cash';
-  };
+  }, [isSuperAdmin, hasPermission]);
 
-  // Filter menu items based on user's permissions and menu visibility settings
-  const navigation = menuItems
-    .filter((item) => {
-      // First check menu visibility settings from role config
-      // Super admin always sees everything, isMenuVisible handles this
-      if (!isMenuVisible('accounting', item.menuKey)) {
+  // Filter menu items based on user's permissions and menu visibility settings - memoized
+  const navigation = useMemo(() => {
+    return menuItems
+      .filter((item) => {
+        // First check menu visibility settings from role config
+        // Super admin always sees everything, isMenuVisible handles this
+        if (!isMenuVisible('accounting', item.menuKey)) {
+          return false;
+        }
+
+        // Super admin sees everything (already passed visibility check)
+        if (isSuperAdmin) return true;
+
+        // Check single permission
+        if (item.permission) {
+          return hasPermission(item.permission);
+        }
+
+        // Check any of multiple permissions
+        if (item.anyPermission) {
+          return hasAnyPermission(item.anyPermission);
+        }
+
         return false;
-      }
-
-      // Super admin sees everything (already passed visibility check)
-      if (isSuperAdmin) return true;
-
-      // Check single permission
-      if (item.permission) {
-        return hasPermission(item.permission);
-      }
-
-      // Check any of multiple permissions
-      if (item.anyPermission) {
-        return hasAnyPermission(item.anyPermission);
-      }
-
-      return false;
-    })
-    .map((item) => {
-      // Handle dynamic href for Petty Cash
-      if (item.menuKey === 'petty-cash') {
-        return { ...item, href: getPettyCashHref() };
-      }
-      return item;
-    });
+      })
+      .map((item) => {
+        // Handle dynamic href for Petty Cash
+        if (item.menuKey === 'petty-cash') {
+          return { ...item, href: pettyCashHref };
+        }
+        return item;
+      });
+  }, [isSuperAdmin, hasPermission, hasAnyPermission, isMenuVisible, pettyCashHref]);
 
   // Check if user can access admin
   const canAccessAdmin = can.manageUsers();
@@ -436,7 +440,7 @@ export function AppShell({ children }: AppShellProps) {
                 >
                   <span className="sr-only">View notifications</span>
                   <Bell className="h-5 w-5" aria-hidden="true" />
-                  {notificationContext && notificationContext.unreadCount > 0 && (
+                  {unreadCount > 0 && (
                     <span className="absolute top-1.5 right-1.5 h-2 w-2 rounded-full bg-red-500 ring-2 ring-white"></span>
                   )}
                 </button>

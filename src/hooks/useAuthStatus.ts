@@ -40,11 +40,27 @@ export function useAuthStatus() {
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (isCancelled) return;
+
+      // Skip refetch on token refresh - user data hasn't changed
+      if (event === 'TOKEN_REFRESHED') {
+        return;
+      }
+
       const currentUser = session?.user ?? null;
       setUser(currentUser);
       setIsLoading(false);
-      if (currentUser) fetchSuperAdmin(currentUser.id);
-      else setIsSuperAdmin(false);
+
+      if (event === 'SIGNED_OUT') {
+        setIsSuperAdmin(false);
+        return;
+      }
+
+      // Only fetch super admin on SIGNED_IN or INITIAL_SESSION
+      if (currentUser && (event === 'SIGNED_IN' || event === 'INITIAL_SESSION')) {
+        fetchSuperAdmin(currentUser.id);
+      } else if (!currentUser) {
+        setIsSuperAdmin(false);
+      }
     });
 
     return () => {

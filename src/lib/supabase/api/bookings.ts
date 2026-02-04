@@ -162,6 +162,14 @@ function dbGuestToFrontend(db: DbBookingGuest): BookingGuest {
   };
 }
 
+export interface PaginatedResult<T> {
+  data: T[];
+  total: number;
+  page: number;
+  pageSize: number;
+  hasMore: boolean;
+}
+
 export const bookingsApi = {
   async getAll(): Promise<Booking[]> {
     const supabase = createClient();
@@ -171,6 +179,30 @@ export const bookingsApi = {
       .order('date_from', { ascending: false });
     if (error) throw error;
     return (data ?? []).map(dbBookingToFrontend);
+  },
+
+  // Paginated version for large datasets
+  async getPage(page: number = 1, pageSize: number = 50): Promise<PaginatedResult<Booking>> {
+    const supabase = createClient();
+    const from = (page - 1) * pageSize;
+    const to = from + pageSize - 1;
+
+    const { data, error, count } = await supabase
+      .from('bookings')
+      .select('*', { count: 'exact' })
+      .order('date_from', { ascending: false })
+      .range(from, to);
+
+    if (error) throw error;
+
+    const total = count ?? 0;
+    return {
+      data: (data ?? []).map(dbBookingToFrontend),
+      total,
+      page,
+      pageSize,
+      hasMore: from + (data?.length ?? 0) < total,
+    };
   },
 
   async getById(id: string): Promise<Booking | null> {

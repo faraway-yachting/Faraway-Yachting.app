@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useMemo, useEffect } from 'react';
+import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { X, Upload, FileText, Trash2, Loader2, Camera } from 'lucide-react';
 import type { Attachment } from '@/data/petty-cash/types';
 import type { Project } from '@/data/project/types';
@@ -19,6 +19,13 @@ interface ExpenseFormProps {
   walletHolderName: string;
   onSave: (expense: SimplifiedExpenseInput) => void;
   onCancel: () => void;
+  initialData?: {
+    projectId: string;
+    expenseDate: string;
+    amount: number;
+    description: string;
+  };
+  isResubmit?: boolean;
 }
 
 export default function ExpenseForm({
@@ -26,6 +33,8 @@ export default function ExpenseForm({
   walletHolderName,
   onSave,
   onCancel,
+  initialData,
+  isResubmit = false,
 }: ExpenseFormProps) {
   // Async loaded data
   const [projects, setProjects] = useState<Project[]>([]);
@@ -46,15 +55,18 @@ export default function ExpenseForm({
     loadProjects();
   }, []);
 
-  // Form state
-  const [projectId, setProjectId] = useState('');
-  const [expenseDate, setExpenseDate] = useState(getTodayISO());
-  const [amount, setAmount] = useState<number | ''>('');
-  const [description, setDescription] = useState('');
+  // Form state - initialize with initialData if provided (for resubmit)
+  const [projectId, setProjectId] = useState(initialData?.projectId || '');
+  const [expenseDate, setExpenseDate] = useState(initialData?.expenseDate || getTodayISO());
+  const [amount, setAmount] = useState<number | ''>(initialData?.amount || '');
+  const [description, setDescription] = useState(initialData?.description || '');
   const [attachments, setAttachments] = useState<Attachment[]>([]);
 
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [isSaving, setIsSaving] = useState(false);
+
+  // Ref for immediate duplicate submission blocking (faster than state)
+  const isSubmittingRef = useRef(false);
 
   // Get selected project
   const selectedProject = useMemo(
@@ -122,6 +134,12 @@ export default function ExpenseForm({
 
   // Handle save
   const handleSave = useCallback(async () => {
+    // Immediate blocking using ref (prevents duplicate submissions)
+    if (isSubmittingRef.current) {
+      return;
+    }
+    isSubmittingRef.current = true;
+
     // Validate (company is no longer required - accountant will add it)
     const validationErrors = validateSimplifiedExpenseForm({
       companyId: 'pending', // Placeholder - accountant will assign
@@ -136,6 +154,7 @@ export default function ExpenseForm({
 
     if (Object.keys(validationErrors).length > 0) {
       setErrors(validationErrors);
+      isSubmittingRef.current = false;
       return;
     }
 
@@ -162,6 +181,7 @@ export default function ExpenseForm({
       setErrors({ submit: 'Failed to save expense. Please try again.' });
     } finally {
       setIsSaving(false);
+      isSubmittingRef.current = false;
     }
   }, [
     projectId,
@@ -181,7 +201,16 @@ export default function ExpenseForm({
         <div className="w-full max-w-lg bg-white rounded-lg shadow-xl">
           {/* Header */}
           <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
-            <h2 className="text-lg font-semibold text-gray-900">New Expense Claim</h2>
+            <div>
+              <h2 className="text-lg font-semibold text-gray-900">
+                {isResubmit ? 'Resubmit Claim' : 'New Expense Claim'}
+              </h2>
+              {isResubmit && (
+                <p className="text-sm text-amber-600 mt-1">
+                  Review and edit the data before resubmitting
+                </p>
+              )}
+            </div>
             <button
               onClick={onCancel}
               className="p-2 text-gray-400 hover:text-gray-600 rounded-full hover:bg-gray-100"
@@ -392,7 +421,7 @@ export default function ExpenseForm({
               className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-[#5A7A8F] rounded-lg hover:bg-[#4a6a7f] disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {isSaving && <Loader2 className="h-4 w-4 animate-spin" />}
-              Submit Claim
+              {isResubmit ? 'Resubmit Claim' : 'Submit Claim'}
             </button>
           </div>
         </div>
