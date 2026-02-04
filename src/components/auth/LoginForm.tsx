@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { authApi } from '@/lib/supabase/api';
 import { Eye, EyeOff, Loader2 } from 'lucide-react';
@@ -16,6 +16,16 @@ export function LoginForm({ redirectTo = '/' }: LoginFormProps) {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const navigationTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Clean up timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (navigationTimeoutRef.current) {
+        clearTimeout(navigationTimeoutRef.current);
+      }
+    };
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -23,12 +33,27 @@ export function LoginForm({ redirectTo = '/' }: LoginFormProps) {
     setIsLoading(true);
 
     try {
+      console.log('[LoginForm] Starting sign in...');
       await authApi.signIn({ email, password });
+      console.log('[LoginForm] Sign in successful, refreshing router...');
+
+      // Set a timeout to handle cases where navigation hangs
+      navigationTimeoutRef.current = setTimeout(() => {
+        console.log('[LoginForm] Navigation timeout - forcing redirect via window.location');
+        window.location.href = redirectTo;
+      }, 5000);
+
       router.refresh();
+      console.log('[LoginForm] Router refreshed, pushing to:', redirectTo);
       router.push(redirectTo);
+      console.log('[LoginForm] router.push called');
     } catch (err) {
+      console.error('[LoginForm] Sign in error:', err);
       setError(err instanceof Error ? err.message : 'Failed to sign in');
       setIsLoading(false);
+      if (navigationTimeoutRef.current) {
+        clearTimeout(navigationTimeoutRef.current);
+      }
     }
   };
 
