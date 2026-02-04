@@ -17,37 +17,10 @@ import type { ModuleName } from "@/lib/supabase/api/userModuleRoles";
 export default function Home() {
   const [modalOpen, setModalOpen] = useState(false);
   const [selectedModule, setSelectedModule] = useState("");
-  const [authTimedOut, setAuthTimedOut] = useState(false);
   const router = useRouter();
 
   // Use the centralized AuthProvider instead of a duplicate listener
   const { user, isSuperAdmin, moduleRoles, isLoading, signOut } = useAuth();
-
-  // If auth takes more than 3 seconds, show Sign In button as fallback
-  // This ensures the button is always accessible even if Supabase is slow
-  useEffect(() => {
-    if (!isLoading) {
-      setAuthTimedOut(false);
-      return;
-    }
-
-    const timer = setTimeout(() => {
-      if (isLoading) {
-        console.warn('[HomePage] Auth loading timeout - showing Sign In button');
-        setAuthTimedOut(true);
-      }
-    }, 3000);
-
-    return () => clearTimeout(timer);
-  }, [isLoading]);
-
-  // Clear authTimedOut when user is authenticated (handles onAuthStateChange race condition)
-  // This fixes the case where initial getUser() times out but onAuthStateChange later sets the user
-  useEffect(() => {
-    if (user) {
-      setAuthTimedOut(false);
-    }
-  }, [user]);
 
   // Derive module access from moduleRoles
   const moduleAccess = useMemo(() =>
@@ -113,7 +86,7 @@ export default function Home() {
             </>
           )}
 
-          {user && !authTimedOut ? (
+          {user ? (
             <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
               <div className="flex items-center gap-3 bg-white/20 backdrop-blur-sm rounded-lg px-4 py-2.5">
                 <div className="h-8 w-8 rounded-full bg-white/30 flex items-center justify-center">
