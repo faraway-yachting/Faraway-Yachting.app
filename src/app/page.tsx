@@ -107,9 +107,13 @@ export default function Home() {
             </div>
           ) : (
             <div className="flex justify-center">
-              <Button variant="primary" size="md" href="/login">
+              {/* Using plain anchor tag to bypass any potential Next.js Link hydration issues */}
+              <a
+                href="/login"
+                className="inline-flex items-center justify-center font-medium rounded-lg transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 bg-[#5A7A8F] text-white hover:bg-[#2c3e50] focus:ring-[#5A7A8F] shadow-md hover:shadow-lg px-6 py-3 text-base"
+              >
                 Sign In
-              </Button>
+              </a>
             </div>
           )}
         </div>
