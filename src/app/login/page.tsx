@@ -1,7 +1,14 @@
 import { LoginForm } from '@/components/auth';
 import { Anchor } from 'lucide-react';
 
-export default function LoginPage() {
+interface LoginPageProps {
+  searchParams: Promise<{ redirectTo?: string }>;
+}
+
+export default async function LoginPage({ searchParams }: LoginPageProps) {
+  const params = await searchParams;
+  const redirectTo = params.redirectTo || '/';
+
   return (
     <div className="flex min-h-screen flex-col justify-center bg-gray-50 py-12 sm:px-6 lg:px-8">
       <div className="sm:mx-auto sm:w-full sm:max-w-md">
@@ -23,7 +30,7 @@ export default function LoginPage() {
           <h3 className="mb-6 text-center text-xl font-semibold text-gray-900">
             Sign in to your account
           </h3>
-          <LoginForm />
+          <LoginForm redirectTo={redirectTo} />
         </div>
       </div>
     </div>

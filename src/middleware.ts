@@ -49,6 +49,17 @@ export async function middleware(request: NextRequest) {
     }
   );
 
+  // Helper to create redirect responses that preserve auth cookies
+  // This is critical - if Supabase refreshed tokens during getUser(),
+  // those new cookies must be included in the redirect response
+  const createRedirect = (url: URL) => {
+    const redirectResponse = NextResponse.redirect(url);
+    supabaseResponse.cookies.getAll().forEach(cookie => {
+      redirectResponse.cookies.set(cookie.name, cookie.value, cookie);
+    });
+    return redirectResponse;
+  };
+
   // Get user with error handling - if token refresh fails, treat as unauthenticated
   let user = null;
   try {
@@ -81,14 +92,14 @@ export async function middleware(request: NextRequest) {
     const url = request.nextUrl.clone();
     url.pathname = '/login';
     url.searchParams.set('redirectTo', pathname);
-    return NextResponse.redirect(url);
+    return createRedirect(url);
   }
 
   // Redirect logged-in users away from auth pages
   if (isAuthRoute && user) {
     const url = request.nextUrl.clone();
     url.pathname = '/';
-    return NextResponse.redirect(url);
+    return createRedirect(url);
   }
 
   // Get target module for permission check
@@ -111,7 +122,7 @@ export async function middleware(request: NextRequest) {
     if (isAdminRoute && !isSuperAdmin) {
       const url = request.nextUrl.clone();
       url.pathname = '/unauthorized';
-      return NextResponse.redirect(url);
+      return createRedirect(url);
     }
 
     // Module route - check module access (skip if super admin)
@@ -129,7 +140,7 @@ export async function middleware(request: NextRequest) {
         const url = request.nextUrl.clone();
         url.pathname = '/unauthorized';
         url.searchParams.set('module', targetModule);
-        return NextResponse.redirect(url);
+        return createRedirect(url);
       }
     }
   }
