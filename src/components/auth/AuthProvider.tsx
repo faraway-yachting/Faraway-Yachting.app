@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useEffect, useState, ReactNode, useCallback, useRef } from 'react';
 import { createClient, clearSupabaseClient } from '@/lib/supabase/client';
+import { withTimeout } from '@/lib/utils/timeout';
 import type { User, Session } from '@supabase/supabase-js';
 import type { Database } from '@/lib/supabase/database.types';
 import type { ModuleName, UserModuleRole } from '@/lib/supabase/api/userModuleRoles';
@@ -399,13 +400,14 @@ export function AuthProvider({ children }: AuthProviderProps) {
       }
     }
 
-    // Fetch all data in parallel
+    // Fetch all data in parallel with 5-second timeout per query
+    // If any query hangs, it returns default value instead of blocking forever
     const [profileData, rolesData, permsData, companyData, projectData] = await Promise.all([
-      fetchProfile(userId),
-      fetchModuleRoles(userId),
-      fetchPermissions(userId),
-      fetchCompanyAccess(userId),
-      fetchProjectAccess(userId)
+      withTimeout(fetchProfile(userId), 5000).catch(() => null),
+      withTimeout(fetchModuleRoles(userId), 5000).catch(() => []),
+      withTimeout(fetchPermissions(userId), 5000).catch(() => []),
+      withTimeout(fetchCompanyAccess(userId), 5000).catch(() => []),
+      withTimeout(fetchProjectAccess(userId), 5000).catch(() => [])
     ]);
 
     // Fetch role config (only if there are roles)
@@ -449,20 +451,43 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
       try {
         const client = createClient();
-        const { data: { user: currentUser }, error } = await client.auth.getUser();
 
-        if (error || !currentUser) {
+        // Add 5-second timeout to initial auth check
+        // If Supabase is slow/unreachable, treat as unauthenticated rather than hanging forever
+        let currentUser = null;
+        let authError = null;
+
+        try {
+          const result = await withTimeout(client.auth.getUser(), 5000);
+          currentUser = result.data?.user || null;
+          authError = result.error;
+        } catch (timeoutErr) {
+          console.error('Auth getUser timeout:', timeoutErr);
+          authError = new Error('Auth check timed out');
+        }
+
+        if (authError || !currentUser) {
           setUser(null);
           setSession(null);
           setIsLoading(false);
           return;
         }
 
-        const { data: { session: currentSession } } = await client.auth.getSession();
-        setSession(currentSession);
+        // Session check also with timeout
+        try {
+          const { data: { session: currentSession } } = await withTimeout(
+            client.auth.getSession(),
+            3000
+          );
+          setSession(currentSession);
+        } catch {
+          // Session timeout - continue without session
+          console.warn('Session check timed out, continuing with user only');
+        }
+
         setUser(currentUser);
 
-        // Load auth data (will use cache if available)
+        // Load auth data with internal timeouts (will use cache if available)
         await loadAuthData(currentUser.id);
         authLoadedRef.current = true;
       } catch (error) {

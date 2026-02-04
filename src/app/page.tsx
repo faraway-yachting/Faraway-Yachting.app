@@ -17,10 +17,29 @@ import type { ModuleName } from "@/lib/supabase/api/userModuleRoles";
 export default function Home() {
   const [modalOpen, setModalOpen] = useState(false);
   const [selectedModule, setSelectedModule] = useState("");
+  const [authTimedOut, setAuthTimedOut] = useState(false);
   const router = useRouter();
 
   // Use the centralized AuthProvider instead of a duplicate listener
   const { user, isSuperAdmin, moduleRoles, isLoading, signOut } = useAuth();
+
+  // If auth takes more than 3 seconds, show Sign In button as fallback
+  // This ensures the button is always accessible even if Supabase is slow
+  useEffect(() => {
+    if (!isLoading) {
+      setAuthTimedOut(false);
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      if (isLoading) {
+        console.warn('[HomePage] Auth loading timeout - showing Sign In button');
+        setAuthTimedOut(true);
+      }
+    }, 3000);
+
+    return () => clearTimeout(timer);
+  }, [isLoading]);
 
   // Derive module access from moduleRoles
   const moduleAccess = useMemo(() =>
@@ -86,7 +105,7 @@ export default function Home() {
             </>
           )}
 
-          {user ? (
+          {user && !authTimedOut ? (
             <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
               <div className="flex items-center gap-3 bg-white/20 backdrop-blur-sm rounded-lg px-4 py-2.5">
                 <div className="h-8 w-8 rounded-full bg-white/30 flex items-center justify-center">
@@ -107,7 +126,7 @@ export default function Home() {
             </div>
           ) : (
             <div className="flex justify-center">
-              {/* Using plain anchor tag to bypass any potential Next.js Link hydration issues */}
+              {/* Using plain anchor tag - always accessible even if auth is slow */}
               <a
                 href="/login"
                 className="inline-flex items-center justify-center font-medium rounded-lg transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 bg-[#5A7A8F] text-white hover:bg-[#2c3e50] focus:ring-[#5A7A8F] shadow-md hover:shadow-lg px-6 py-3 text-base"

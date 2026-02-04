@@ -3,6 +3,15 @@ import { NextResponse, type NextRequest } from 'next/server';
 
 type ModuleName = 'accounting' | 'bookings' | 'inventory' | 'maintenance' | 'customers' | 'hr';
 
+// Timeout utility for middleware (inlined to work in edge runtime)
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout>;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => reject(new Error('Timeout')), timeoutMs);
+  });
+  return Promise.race([promise, timeoutPromise]).finally(() => clearTimeout(timeoutId)) as Promise<T>;
+}
+
 const MODULE_ROUTES: Record<ModuleName, string> = {
   accounting: '/accounting',
   bookings: '/bookings',
@@ -60,17 +69,18 @@ export async function middleware(request: NextRequest) {
     return redirectResponse;
   };
 
-  // Get user with error handling - if token refresh fails, treat as unauthenticated
+  // Get user with error handling and 5-second timeout
+  // If Supabase hangs, treat as unauthenticated rather than blocking forever
   let user = null;
   try {
-    const { data, error } = await supabase.auth.getUser();
+    const { data, error } = await withTimeout(supabase.auth.getUser(), 5000);
     if (!error) {
       user = data.user;
     }
     // If error, user stays null - will redirect to login for protected routes
   } catch (err) {
-    // Network error or other failure - treat as unauthenticated
-    console.error('Middleware auth error:', err);
+    // Timeout or network error - treat as unauthenticated
+    console.error('Middleware auth error (timeout or network):', err);
   }
 
   const pathname = request.nextUrl.pathname;
@@ -109,14 +119,17 @@ export async function middleware(request: NextRequest) {
   const needsPermissionCheck = (isAdminRoute || targetModule) && user;
 
   if (needsPermissionCheck && user) {
-    // Single consolidated query: fetch profile + module roles together
-    const { data: profile } = await supabase
-      .from('user_profiles')
-      .select('is_super_admin')
-      .eq('id', user.id)
-      .single();
-
-    const isSuperAdmin = profile?.is_super_admin === true;
+    // Fetch profile with 3-second timeout - if slow, skip permission check and allow access
+    // Better to allow access temporarily than to hang forever
+    let isSuperAdmin = false;
+    try {
+      const profilePromise = Promise.resolve(supabase.from('user_profiles').select('is_super_admin').eq('id', user.id).single());
+      const profileResult = await withTimeout(profilePromise, 3000);
+      isSuperAdmin = (profileResult.data as { is_super_admin?: boolean } | null)?.is_super_admin === true;
+    } catch (err) {
+      // Timeout or error - skip admin check, proceed with caution
+      console.error('Middleware profile check timeout:', err);
+    }
 
     // Admin route - requires super admin
     if (isAdminRoute && !isSuperAdmin) {
@@ -127,14 +140,23 @@ export async function middleware(request: NextRequest) {
 
     // Module route - check module access (skip if super admin)
     if (targetModule && !isAdminRoute && !isSuperAdmin) {
-      const { data: moduleRoles } = await supabase
-        .from('user_module_roles')
-        .select('module, role, is_active')
-        .eq('user_id', user.id)
-        .eq('module', targetModule)
-        .eq('is_active', true);
-
-      const hasModuleAccess = moduleRoles && moduleRoles.length > 0;
+      let hasModuleAccess = false;
+      try {
+        const rolesPromise = Promise.resolve(
+          supabase.from('user_module_roles')
+            .select('module, role, is_active')
+            .eq('user_id', user.id)
+            .eq('module', targetModule)
+            .eq('is_active', true)
+        );
+        const rolesResult = await withTimeout(rolesPromise, 3000);
+        const moduleRoles = rolesResult.data as unknown[] | null;
+        hasModuleAccess = moduleRoles != null && moduleRoles.length > 0;
+      } catch (err) {
+        // Timeout - allow access rather than hang
+        console.error('Middleware module check timeout:', err);
+        hasModuleAccess = true; // Fail open - AuthProvider will do proper check
+      }
 
       if (!hasModuleAccess) {
         const url = request.nextUrl.clone();
