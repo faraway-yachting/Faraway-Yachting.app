@@ -20,7 +20,7 @@ export default function Home() {
   const router = useRouter();
 
   // Use the centralized AuthProvider instead of a duplicate listener
-  const { user, isSuperAdmin, moduleRoles, isLoading, signOut } = useAuth();
+  const { user, profile, isSuperAdmin, moduleRoles, isLoading, signOut } = useAuth();
 
   // Derive module access from moduleRoles
   const moduleAccess = useMemo(() =>
@@ -31,21 +31,23 @@ export default function Home() {
   const visibleModules = useMemo((): Module[] => {
     if (!user) return modules;
     if (isLoading) return modules;
+    if (!profile) return modules;
     if (isSuperAdmin) return modules;
     return modules.filter((m) => moduleAccess.includes(m.moduleKey));
-  }, [user, isSuperAdmin, moduleAccess, isLoading]);
+  }, [user, profile, isSuperAdmin, moduleAccess, isLoading]);
 
   // Debug: track when moduleRoles changes
   useEffect(() => {
-    console.log('[HomePage] moduleRoles changed:', {
-      count: moduleRoles.length,
-      roles: moduleRoles.map(r => r.module),
+    console.log('[HomePage] auth state:', {
+      moduleCount: moduleRoles.length,
+      modules: moduleRoles.map(r => r.module),
       user: user?.email,
+      profileLoaded: !!profile,
       isLoading,
       isSuperAdmin,
       visibleModulesCount: visibleModules.length
     });
-  }, [moduleRoles, user, isLoading, isSuperAdmin, visibleModules]);
+  }, [moduleRoles, user, profile, isLoading, isSuperAdmin, visibleModules]);
 
   useEffect(() => {
     const hash = window.location.hash;

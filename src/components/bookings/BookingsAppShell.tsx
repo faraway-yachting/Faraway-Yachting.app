@@ -80,15 +80,18 @@ export function BookingsAppShell({ children, currentRole }: BookingsAppShellProp
   const pathname = usePathname();
 
   // Get auth context for real user data
-  const { isSuperAdmin, getModuleRole, isMenuVisible } = useAuth();
+  const { isSuperAdmin, getModuleRole, isMenuVisible, profile, isLoading } = useAuth();
 
   // Get user's actual role in bookings module
   const bookingsRole = getModuleRole('bookings');
   const roleDisplayName = getRoleDisplayName(bookingsRole, isSuperAdmin);
 
   // Use the user's actual role config, not the URL-based one
-  const effectiveRole = isSuperAdmin ? 'manager' : (bookingsRole as BookingsRole) || 'viewer';
-  const config = roleConfig[effectiveRole] || roleConfig['viewer'];
+  // If still loading or profile not loaded, default to manager (fail open for better UX)
+  const effectiveRole = (isLoading || !profile) 
+    ? 'manager' 
+    : (isSuperAdmin ? 'manager' : (bookingsRole as BookingsRole) || 'viewer');
+  const config = roleConfig[effectiveRole] || roleConfig['manager'];
 
   // Unused but keeping for reference
   void roleDisplayName; // Used by UserDropdown internally
