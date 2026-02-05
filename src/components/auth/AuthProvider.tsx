@@ -81,20 +81,6 @@ function clearCachedAuth(): void {
   }
 }
 
-function getInitialCachedAuth(): AuthCache | null {
-  if (typeof window === 'undefined') return null;
-  try {
-    const cached = sessionStorage.getItem(AUTH_CACHE_KEY);
-    if (!cached) return null;
-    const data: AuthCache = JSON.parse(cached);
-    if (Date.now() - data.timestamp < AUTH_CACHE_TTL) {
-      return data;
-    }
-  } catch (e) {}
-  return null;
-}
-
-const initialCache = typeof window !== 'undefined' ? getInitialCachedAuth() : null;
 
 interface AuthContextType {
   user: User | null;
@@ -136,14 +122,14 @@ interface AuthProviderProps {
 
 export function AuthProvider({ children }: AuthProviderProps) {
   const [user, setUser] = useState<User | null>(null);
-  const [profile, setProfile] = useState<UserProfile | null>(initialCache?.profile ?? null);
+  const [profile, setProfile] = useState<UserProfile | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [moduleRoles, setModuleRoles] = useState<UserModuleRole[]>(initialCache?.moduleRoles ?? []);
-  const [permissions, setPermissions] = useState<string[]>(initialCache?.permissions ?? []);
-  const [companyAccess, setCompanyAccess] = useState<UserCompanyAccess[]>(initialCache?.companyAccess ?? []);
-  const [projectAccess, setProjectAccess] = useState<UserProjectAccess[]>(initialCache?.projectAccess ?? []);
-  const [roleConfig, setRoleConfig] = useState<RoleConfig>(initialCache?.roleConfig ?? {
+  const [moduleRoles, setModuleRoles] = useState<UserModuleRole[]>([]);
+  const [permissions, setPermissions] = useState<string[]>([]);
+  const [companyAccess, setCompanyAccess] = useState<UserCompanyAccess[]>([]);
+  const [projectAccess, setProjectAccess] = useState<UserProjectAccess[]>([]);
+  const [roleConfig, setRoleConfig] = useState<RoleConfig>({
     menuVisibility: {},
     dataScopes: {},
   });
@@ -414,6 +400,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
         return;
       }
     }
+    
+    clearCachedAuth();
 
     // Fetch all data in parallel with 5-second timeout per query
     // If any query hangs, it returns default value instead of blocking forever
