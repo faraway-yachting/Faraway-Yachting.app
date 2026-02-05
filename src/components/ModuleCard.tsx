@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { Badge } from "./ui/Badge";
 import { Module } from "@/data/modules";
 
@@ -15,15 +14,20 @@ export function ModuleCard({ module, onNotify }: ModuleCardProps) {
   const isActive = status === "live" || status === "beta";
 
   const handleClick = () => {
-    if (!href) {
+    if (href) {
+      window.location.href = href;
+    } else {
       onNotify(title);
     }
   };
 
-  const cardContent = (
-    <div className={`relative bg-white/60 rounded-xl p-8 transition-all duration-200 border border-white/40 h-full backdrop-blur-sm ${
-      href ? "hover:bg-white/80 hover:shadow-xl hover:-translate-y-1 cursor-pointer" : "cursor-pointer"
-    }`}>
+  return (
+    <div 
+      onClick={handleClick}
+      className={`relative bg-white/60 rounded-xl p-8 transition-all duration-200 border border-white/40 h-full backdrop-blur-sm cursor-pointer ${
+        href ? "hover:bg-white/80 hover:shadow-xl hover:-translate-y-1" : ""
+      }`}
+    >
       <div className="absolute top-4 right-4">
         <Badge status={status} />
       </div>
@@ -45,10 +49,4 @@ export function ModuleCard({ module, onNotify }: ModuleCardProps) {
       </div>
     </div>
   );
-
-  if (href) {
-    return <Link href={href}>{cardContent}</Link>;
-  }
-
-  return <div onClick={handleClick}>{cardContent}</div>;
 }
