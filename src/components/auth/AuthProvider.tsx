@@ -515,6 +515,14 @@ export function AuthProvider({ children }: AuthProviderProps) {
     const client = createClient();
     const { data: { subscription } } = client.auth.onAuthStateChange(
       async (event, currentSession) => {
+        // Debug: log all auth events
+        console.log('[AuthProvider] onAuthStateChange:', {
+          event,
+          hasSession: !!currentSession,
+          userId: currentSession?.user?.id,
+          authLoadedRef: authLoadedRef.current
+        });
+
         // Only handle significant auth events
         if (event === 'SIGNED_OUT') {
           setSession(null);

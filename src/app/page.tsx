@@ -35,6 +35,18 @@ export default function Home() {
     return modules.filter((m) => moduleAccess.includes(m.moduleKey));
   }, [user, isSuperAdmin, moduleAccess, isLoading]);
 
+  // Debug: track when moduleRoles changes
+  useEffect(() => {
+    console.log('[HomePage] moduleRoles changed:', {
+      count: moduleRoles.length,
+      roles: moduleRoles.map(r => r.module),
+      user: user?.email,
+      isLoading,
+      isSuperAdmin,
+      visibleModulesCount: visibleModules.length
+    });
+  }, [moduleRoles, user, isLoading, isSuperAdmin, visibleModules]);
+
   useEffect(() => {
     const hash = window.location.hash;
     if (hash) {
