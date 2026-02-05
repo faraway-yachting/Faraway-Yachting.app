@@ -492,9 +492,13 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
         setUser(currentUser);
 
-        // Load auth data with internal timeouts (will use cache if available)
-        await loadAuthData(currentUser.id);
-        authLoadedRef.current = true;
+        // Only load auth data if not already loaded by onAuthStateChange (INITIAL_SESSION)
+        // This prevents the race condition where both getInitialSession and INITIAL_SESSION
+        // call loadAuthData in parallel, causing the second call to overwrite with timed-out data
+        if (!authLoadedRef.current) {
+          await loadAuthData(currentUser.id);
+          authLoadedRef.current = true;
+        }
       } catch (error) {
         console.error('Error getting session:', error);
         // Only reset if onAuthStateChange hasn't already loaded a user
