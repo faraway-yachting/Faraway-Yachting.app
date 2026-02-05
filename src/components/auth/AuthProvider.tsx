@@ -400,8 +400,6 @@ export function AuthProvider({ children }: AuthProviderProps) {
         return;
       }
     }
-    
-    clearCachedAuth();
 
     // Fetch all data in parallel with 5-second timeout per query
     // If any query hangs, it returns default value instead of blocking forever
@@ -608,6 +606,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
     setCompanyAccess([]);
     setProjectAccess([]);
     setRoleConfig({ menuVisibility: {}, dataScopes: {} });
+    clearCachedAuth();
+    authLoadedRef.current = false;
 
     try {
       const freshClient = createClient();
