@@ -554,10 +554,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
         // For SIGNED_IN, load fresh data
         if (event === 'SIGNED_IN' && currentSession?.user) {
+          // Set authLoadedRef FIRST to prevent getInitialSession timeout from overwriting user
+          authLoadedRef.current = true;
           setSession(currentSession);
           setUser(currentSession.user);
           await loadAuthData(currentSession.user.id, true); // Skip cache on sign in
-          authLoadedRef.current = true;
           setIsLoading(false);
           return;
         }
@@ -573,10 +574,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
         // This is critical - without this, authLoadedRef stays false and getInitialSession
         // will overwrite the user with null when it times out
         if (event === 'INITIAL_SESSION' && currentSession?.user) {
+          // Set authLoadedRef FIRST to prevent getInitialSession timeout from overwriting user
+          authLoadedRef.current = true;
           setSession(currentSession);
           setUser(currentSession.user);
           await loadAuthData(currentSession.user.id); // Use cache if available
-          authLoadedRef.current = true;
           setIsLoading(false);
           return;
         }
