@@ -106,7 +106,7 @@ export default function Home() {
                 </div>
                 <span className="text-white text-sm font-medium">{user.email}</span>
               </div>
-              {isSuperAdmin && (
+              {!isLoading && isSuperAdmin && (
                 <Button variant="primary" size="md" href="/admin/users">
                   <Shield className="h-4 w-4 mr-2" />
                   Admin
