@@ -119,27 +119,27 @@ export async function middleware(request: NextRequest) {
   const needsPermissionCheck = (isAdminRoute || targetModule) && user;
 
   if (needsPermissionCheck && user) {
-    // Fetch profile with 3-second timeout - if slow, skip permission check and allow access
-    // Better to allow access temporarily than to hang forever
+    // Fetch profile with 3-second timeout
     let isSuperAdmin = false;
+    let profileCheckFailed = false;
     try {
       const profilePromise = Promise.resolve(supabase.from('user_profiles').select('is_super_admin').eq('id', user.id).single());
       const profileResult = await withTimeout(profilePromise, 3000);
       isSuperAdmin = (profileResult.data as { is_super_admin?: boolean } | null)?.is_super_admin === true;
     } catch (err) {
-      // Timeout or error - skip admin check, proceed with caution
       console.error('Middleware profile check timeout:', err);
+      profileCheckFailed = true;
     }
 
-    // Admin route - requires super admin
-    if (isAdminRoute && !isSuperAdmin) {
+    // Admin route - requires super admin (but allow if profile check failed - fail open)
+    if (isAdminRoute && !isSuperAdmin && !profileCheckFailed) {
       const url = request.nextUrl.clone();
       url.pathname = '/unauthorized';
       return createRedirect(url);
     }
 
-    // Module route - check module access (skip if super admin)
-    if (targetModule && !isAdminRoute && !isSuperAdmin) {
+    // Module route - check module access (skip if super admin or profile check failed)
+    if (targetModule && !isAdminRoute && !isSuperAdmin && !profileCheckFailed) {
       let hasModuleAccess = false;
       try {
         const rolesPromise = Promise.resolve(
@@ -153,9 +153,8 @@ export async function middleware(request: NextRequest) {
         const moduleRoles = rolesResult.data as unknown[] | null;
         hasModuleAccess = moduleRoles != null && moduleRoles.length > 0;
       } catch (err) {
-        // Timeout - allow access rather than hang
         console.error('Middleware module check timeout:', err);
-        hasModuleAccess = true; // Fail open - AuthProvider will do proper check
+        hasModuleAccess = true;
       }
 
       if (!hasModuleAccess) {
