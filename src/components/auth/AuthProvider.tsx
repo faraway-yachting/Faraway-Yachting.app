@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useContext, useEffect, useState, ReactNode, useCallback } from 'react';
+import { createContext, useContext, useEffect, useState, useRef, ReactNode, useCallback } from 'react';
 import { createClient, clearSupabaseClient } from '@/lib/supabase/client';
 import { withTimeout } from '@/lib/utils/timeout';
 import type { User, Session } from '@supabase/supabase-js';
@@ -134,6 +134,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     dataScopes: {},
   });
 
+  const loadingAuthRef = useRef(false);
   const supabase = createClient();
 
   // Determine if user is super admin from profile
@@ -384,61 +385,69 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   // Consolidated function to load all auth data for a user
   const loadAuthData = useCallback(async (userId: string, skipCache = false): Promise<void> => {
-    // Check cache first (unless explicitly skipping)
-    if (!skipCache) {
-      const cached = getCachedAuth(userId);
-      if (cached) {
-        setProfile(cached.profile);
-        setModuleRoles(cached.moduleRoles);
-        setPermissions(cached.permissions);
-        setCompanyAccess(cached.companyAccess);
-        setProjectAccess(cached.projectAccess);
-        setRoleConfig(cached.roleConfig);
-        return;
+    // Prevent concurrent calls (INITIAL_SESSION + SIGNED_IN fire in quick succession)
+    if (loadingAuthRef.current) return;
+    loadingAuthRef.current = true;
+
+    try {
+      // Check cache first (unless explicitly skipping)
+      if (!skipCache) {
+        const cached = getCachedAuth(userId);
+        if (cached) {
+          setProfile(cached.profile);
+          setModuleRoles(cached.moduleRoles);
+          setPermissions(cached.permissions);
+          setCompanyAccess(cached.companyAccess);
+          setProjectAccess(cached.projectAccess);
+          setRoleConfig(cached.roleConfig);
+          return;
+        }
       }
+
+      // Fetch all data in parallel with 10-second timeout per query (safety net)
+      const [profileDataInitial, rolesData, permsData, companyData, projectData] = await Promise.all([
+        withTimeout(fetchProfile(userId), 10000).catch(() => null),
+        withTimeout(fetchModuleRoles(userId), 10000).catch(() => []),
+        withTimeout(fetchPermissions(userId), 10000).catch(() => []),
+        withTimeout(fetchCompanyAccess(userId), 10000).catch(() => []),
+        withTimeout(fetchProjectAccess(userId), 10000).catch(() => [])
+      ]);
+
+      // Profile is critical (determines is_super_admin) — retry once if it failed
+      let profileData = profileDataInitial;
+      if (!profileData) {
+        console.warn('Profile fetch failed, retrying once...');
+        profileData = await withTimeout(fetchProfile(userId), 10000).catch(() => null);
+      }
+
+      // Fetch role config (only if there are roles)
+      let config: RoleConfig = { menuVisibility: {}, dataScopes: {} };
+      if (rolesData.length > 0) {
+        config = await fetchRoleConfig(rolesData);
+      }
+
+      // Update state
+      setProfile(profileData);
+      setModuleRoles(rolesData);
+      setPermissions(permsData);
+      setCompanyAccess(companyData);
+      setProjectAccess(projectData);
+      setRoleConfig(config);
+
+      // Cache the result
+      setCachedAuth({
+        userId,
+        profile: profileData,
+        moduleRoles: rolesData,
+        permissions: permsData,
+        companyAccess: companyData,
+        projectAccess: projectData,
+        roleConfig: config,
+        timestamp: Date.now(),
+      });
+    } finally {
+      loadingAuthRef.current = false;
     }
-
-    // Fetch all data in parallel with 10-second timeout per query (safety net)
-    const [profileDataInitial, rolesData, permsData, companyData, projectData] = await Promise.all([
-      withTimeout(fetchProfile(userId), 10000).catch(() => null),
-      withTimeout(fetchModuleRoles(userId), 10000).catch(() => []),
-      withTimeout(fetchPermissions(userId), 10000).catch(() => []),
-      withTimeout(fetchCompanyAccess(userId), 10000).catch(() => []),
-      withTimeout(fetchProjectAccess(userId), 10000).catch(() => [])
-    ]);
-
-    // Profile is critical (determines is_super_admin) — retry once if it failed
-    let profileData = profileDataInitial;
-    if (!profileData) {
-      console.warn('Profile fetch failed, retrying once...');
-      profileData = await withTimeout(fetchProfile(userId), 10000).catch(() => null);
-    }
-
-    // Fetch role config (only if there are roles)
-    let config: RoleConfig = { menuVisibility: {}, dataScopes: {} };
-    if (rolesData.length > 0) {
-      config = await fetchRoleConfig(rolesData);
-    }
-
-    // Update state
-    setProfile(profileData);
-    setModuleRoles(rolesData);
-    setPermissions(permsData);
-    setCompanyAccess(companyData);
-    setProjectAccess(projectData);
-    setRoleConfig(config);
-
-    // Cache the result
-    setCachedAuth({
-      userId,
-      profile: profileData,
-      moduleRoles: rolesData,
-      permissions: permsData,
-      companyAccess: companyData,
-      projectAccess: projectData,
-      roleConfig: config,
-      timestamp: Date.now(),
-    });
   }, []);
 
   const refreshProfile = async () => {
@@ -479,8 +488,9 @@ export function AuthProvider({ children }: AuthProviderProps) {
         if ((event === 'SIGNED_IN' || event === 'INITIAL_SESSION') && currentSession?.user) {
           setSession(currentSession);
           setUser(currentSession.user);
-          // Always fetch fresh data — cache can have stale is_super_admin
-          await loadAuthData(currentSession.user.id, true);
+          // Fresh login: skip cache. Page load: use cache if available.
+          const skipCache = event === 'SIGNED_IN';
+          await loadAuthData(currentSession.user.id, skipCache);
           setIsLoading(false);
           return;
         }
