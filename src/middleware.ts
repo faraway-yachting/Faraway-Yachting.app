@@ -69,11 +69,10 @@ export async function middleware(request: NextRequest) {
     return redirectResponse;
   };
 
-  // Get user with error handling and 5-second timeout
-  // If Supabase hangs, treat as unauthenticated rather than blocking forever
+  // Get user with error handling and 10-second timeout (safety net)
   let user = null;
   try {
-    const { data, error } = await withTimeout(supabase.auth.getUser(), 5000);
+    const { data, error } = await withTimeout(supabase.auth.getUser(), 10000);
     if (!error) {
       user = data.user;
     }
@@ -124,7 +123,7 @@ export async function middleware(request: NextRequest) {
     let isSuperAdmin = false;
     try {
       const profilePromise = Promise.resolve(supabase.from('user_profiles').select('is_super_admin').eq('id', user.id).single());
-      const profileResult = await withTimeout(profilePromise, 3000);
+      const profileResult = await withTimeout(profilePromise, 10000);
       isSuperAdmin = (profileResult.data as { is_super_admin?: boolean } | null)?.is_super_admin === true;
     } catch (err) {
       // Timeout or error - skip admin check, proceed with caution
@@ -149,7 +148,7 @@ export async function middleware(request: NextRequest) {
             .eq('module', targetModule)
             .eq('is_active', true)
         );
-        const rolesResult = await withTimeout(rolesPromise, 3000);
+        const rolesResult = await withTimeout(rolesPromise, 10000);
         const moduleRoles = rolesResult.data as unknown[] | null;
         hasModuleAccess = moduleRoles != null && moduleRoles.length > 0;
       } catch (err) {

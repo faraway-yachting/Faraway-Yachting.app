@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useContext, useEffect, useState, ReactNode, useCallback, useRef } from 'react';
+import { createContext, useContext, useEffect, useState, ReactNode, useCallback } from 'react';
 import { createClient, clearSupabaseClient } from '@/lib/supabase/client';
 import { withTimeout } from '@/lib/utils/timeout';
 import type { User, Session } from '@supabase/supabase-js';
@@ -381,9 +381,6 @@ export function AuthProvider({ children }: AuthProviderProps) {
     return roleConfig.dataScopes[module][resource] ?? 'company';
   };
 
-  // Track if we've already loaded auth data to prevent duplicate fetches
-  const authLoadedRef = useRef(false);
-
   // Consolidated function to load all auth data for a user
   const loadAuthData = useCallback(async (userId: string, skipCache = false): Promise<void> => {
     // Check cache first (unless explicitly skipping)
@@ -400,14 +397,13 @@ export function AuthProvider({ children }: AuthProviderProps) {
       }
     }
 
-    // Fetch all data in parallel with 5-second timeout per query
-    // If any query hangs, it returns default value instead of blocking forever
+    // Fetch all data in parallel with 10-second timeout per query (safety net)
     const [profileData, rolesData, permsData, companyData, projectData] = await Promise.all([
-      withTimeout(fetchProfile(userId), 5000).catch(() => null),
-      withTimeout(fetchModuleRoles(userId), 5000).catch(() => []),
-      withTimeout(fetchPermissions(userId), 5000).catch(() => []),
-      withTimeout(fetchCompanyAccess(userId), 5000).catch(() => []),
-      withTimeout(fetchProjectAccess(userId), 5000).catch(() => [])
+      withTimeout(fetchProfile(userId), 10000).catch(() => null),
+      withTimeout(fetchModuleRoles(userId), 10000).catch(() => []),
+      withTimeout(fetchPermissions(userId), 10000).catch(() => []),
+      withTimeout(fetchCompanyAccess(userId), 10000).catch(() => []),
+      withTimeout(fetchProjectAccess(userId), 10000).catch(() => [])
     ]);
 
     // Fetch role config (only if there are roles)
@@ -445,89 +441,9 @@ export function AuthProvider({ children }: AuthProviderProps) {
   };
 
   useEffect(() => {
-    const getInitialSession = async () => {
-      // Prevent duplicate loads
-      if (authLoadedRef.current) return;
-
-      try {
-        const client = createClient();
-
-        // Add 5-second timeout to initial auth check
-        // If Supabase is slow/unreachable, treat as unauthenticated rather than hanging forever
-        let currentUser = null;
-        let authError = null;
-
-        try {
-          const result = await withTimeout(client.auth.getUser(), 5000);
-          currentUser = result.data?.user || null;
-          authError = result.error;
-        } catch (timeoutErr) {
-          console.error('Auth getUser timeout:', timeoutErr);
-          authError = new Error('Auth check timed out');
-        }
-
-        if (authError || !currentUser) {
-          // Only set user to null if onAuthStateChange hasn't already loaded a user
-          // This prevents the race condition where getUser() times out but
-          // onAuthStateChange has already successfully authenticated the user
-          if (!authLoadedRef.current) {
-            setUser(null);
-            setSession(null);
-            setIsLoading(false);
-          }
-          return;
-        }
-
-        // Session check also with timeout
-        try {
-          const { data: { session: currentSession } } = await withTimeout(
-            client.auth.getSession(),
-            3000
-          );
-          setSession(currentSession);
-        } catch {
-          // Session timeout - continue without session
-          console.warn('Session check timed out, continuing with user only');
-        }
-
-        setUser(currentUser);
-
-        // Only load auth data if not already loaded by onAuthStateChange (INITIAL_SESSION)
-        // This prevents the race condition where both getInitialSession and INITIAL_SESSION
-        // call loadAuthData in parallel, causing the second call to overwrite with timed-out data
-        if (!authLoadedRef.current) {
-          await loadAuthData(currentUser.id);
-          authLoadedRef.current = true;
-        }
-      } catch (error) {
-        console.error('Error getting session:', error);
-        // Only reset if onAuthStateChange hasn't already loaded a user
-        if (!authLoadedRef.current) {
-          setUser(null);
-          setSession(null);
-        }
-      } finally {
-        // Only set isLoading false if not already loaded by onAuthStateChange
-        if (!authLoadedRef.current) {
-          setIsLoading(false);
-        }
-      }
-    };
-
-    getInitialSession();
-
     const client = createClient();
     const { data: { subscription } } = client.auth.onAuthStateChange(
       async (event, currentSession) => {
-        // Debug: log all auth events
-        console.log('[AuthProvider] onAuthStateChange:', {
-          event,
-          hasSession: !!currentSession,
-          userId: currentSession?.user?.id,
-          authLoadedRef: authLoadedRef.current
-        });
-
-        // Only handle significant auth events
         if (event === 'SIGNED_OUT') {
           setSession(null);
           setUser(null);
@@ -538,10 +454,9 @@ export function AuthProvider({ children }: AuthProviderProps) {
           setProjectAccess([]);
           setRoleConfig({ menuVisibility: {}, dataScopes: {} });
           clearCachedAuth();
-          authLoadedRef.current = false;
           setIsLoading(false);
 
-          // Redirect ALL tabs to login when sign out is detected (including other tabs)
+          // Redirect to login when sign out is detected (including other tabs)
           if (typeof window !== 'undefined') {
             const authPages = ['/login', '/signup', '/forgot-password', '/auth/'];
             const isOnAuthPage = authPages.some(page => window.location.pathname.startsWith(page));
@@ -552,41 +467,28 @@ export function AuthProvider({ children }: AuthProviderProps) {
           return;
         }
 
-        // For SIGNED_IN, load fresh data
-        if (event === 'SIGNED_IN' && currentSession?.user) {
-          // Set authLoadedRef FIRST to prevent getInitialSession timeout from overwriting user
-          authLoadedRef.current = true;
+        // SIGNED_IN (fresh login) or INITIAL_SESSION (page load with existing session)
+        if ((event === 'SIGNED_IN' || event === 'INITIAL_SESSION') && currentSession?.user) {
           setSession(currentSession);
           setUser(currentSession.user);
-          await loadAuthData(currentSession.user.id, true); // Skip cache on sign in
+          const skipCache = event === 'SIGNED_IN';
+          await loadAuthData(currentSession.user.id, skipCache);
           setIsLoading(false);
           return;
         }
 
-        // For TOKEN_REFRESHED, just update session - no need to refetch all data
+        // INITIAL_SESSION with no user = not authenticated
+        if (event === 'INITIAL_SESSION' && !currentSession?.user) {
+          setUser(null);
+          setSession(null);
+          setIsLoading(false);
+          return;
+        }
+
+        // TOKEN_REFRESHED - just update session, no need to refetch data
         if (event === 'TOKEN_REFRESHED' && currentSession) {
           setSession(currentSession);
-          // Don't refetch auth data on token refresh - use cached data
           return;
-        }
-
-        // For INITIAL_SESSION (page load with existing session), load auth data
-        // This is critical - without this, authLoadedRef stays false and getInitialSession
-        // will overwrite the user with null when it times out
-        if (event === 'INITIAL_SESSION' && currentSession?.user) {
-          // Set authLoadedRef FIRST to prevent getInitialSession timeout from overwriting user
-          authLoadedRef.current = true;
-          setSession(currentSession);
-          setUser(currentSession.user);
-          await loadAuthData(currentSession.user.id); // Use cache if available
-          setIsLoading(false);
-          return;
-        }
-
-        // For other events, update session if present
-        if (currentSession) {
-          setSession(currentSession);
-          setUser(currentSession.user);
         }
       }
     );
