@@ -16,7 +16,7 @@ BEGIN
     coalesce(NEW.customer_name, '') || ' ' ||
     coalesce(NEW.customer_email, '') || ' ' ||
     coalesce(NEW.external_boat_name, '') || ' ' ||
-    coalesce(NEW.notes, '') || ' ' ||
+    coalesce(NEW.customer_notes, '') || ' ' ||
     coalesce(NEW.internal_notes, '')
   );
   RETURN NEW;
@@ -32,7 +32,7 @@ CREATE TRIGGER bookings_search_vector_trigger
 UPDATE bookings SET search_vector = to_tsvector('english',
   coalesce(booking_number, '') || ' ' || coalesce(title, '') || ' ' ||
   coalesce(customer_name, '') || ' ' || coalesce(customer_email, '') || ' ' ||
-  coalesce(external_boat_name, '') || ' ' || coalesce(notes, '') || ' ' ||
+  coalesce(external_boat_name, '') || ' ' || coalesce(customer_notes, '') || ' ' ||
   coalesce(internal_notes, '')
 );
 
@@ -49,7 +49,6 @@ BEGIN
     coalesce(NEW.name, '') || ' ' ||
     coalesce(NEW.email, '') || ' ' ||
     coalesce(NEW.phone, '') || ' ' ||
-    coalesce(NEW.company_name, '') || ' ' ||
     coalesce(NEW.contact_person, '') || ' ' ||
     coalesce(NEW.tax_id, '') || ' ' ||
     coalesce(NEW.notes, '')
@@ -66,9 +65,8 @@ CREATE TRIGGER contacts_search_vector_trigger
 -- Backfill existing rows
 UPDATE contacts SET search_vector = to_tsvector('english',
   coalesce(name, '') || ' ' || coalesce(email, '') || ' ' ||
-  coalesce(phone, '') || ' ' || coalesce(company_name, '') || ' ' ||
-  coalesce(contact_person, '') || ' ' || coalesce(tax_id, '') || ' ' ||
-  coalesce(notes, '')
+  coalesce(phone, '') || ' ' || coalesce(contact_person, '') || ' ' ||
+  coalesce(tax_id, '') || ' ' || coalesce(notes, '')
 );
 
 CREATE INDEX IF NOT EXISTS idx_contacts_search ON contacts USING GIN (search_vector);
@@ -83,8 +81,7 @@ BEGIN
   NEW.search_vector := to_tsvector('english',
     coalesce(NEW.expense_number, '') || ' ' ||
     coalesce(NEW.vendor_name, '') || ' ' ||
-    coalesce(NEW.description, '') || ' ' ||
-    coalesce(NEW.reference_number, '') || ' ' ||
+    coalesce(NEW.supplier_invoice_number, '') || ' ' ||
     coalesce(NEW.notes, '')
   );
   RETURN NEW;
@@ -99,8 +96,7 @@ CREATE TRIGGER expenses_search_vector_trigger
 -- Backfill existing rows
 UPDATE expenses SET search_vector = to_tsvector('english',
   coalesce(expense_number, '') || ' ' || coalesce(vendor_name, '') || ' ' ||
-  coalesce(description, '') || ' ' || coalesce(reference_number, '') || ' ' ||
-  coalesce(notes, '')
+  coalesce(supplier_invoice_number, '') || ' ' || coalesce(notes, '')
 );
 
 CREATE INDEX IF NOT EXISTS idx_expenses_search ON expenses USING GIN (search_vector);
