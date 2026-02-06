@@ -81,6 +81,7 @@ function clearCachedAuth(): void {
   }
 }
 
+
 interface AuthContextType {
   user: User | null;
   profile: UserProfile | null;
@@ -507,6 +508,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
     setCompanyAccess([]);
     setProjectAccess([]);
     setRoleConfig({ menuVisibility: {}, dataScopes: {} });
+    clearCachedAuth();
+    authLoadedRef.current = false;
 
     try {
       const freshClient = createClient();

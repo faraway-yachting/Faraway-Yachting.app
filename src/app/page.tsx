@@ -20,7 +20,7 @@ export default function Home() {
   const router = useRouter();
 
   // Use the centralized AuthProvider instead of a duplicate listener
-  const { user, isSuperAdmin, moduleRoles, isLoading, signOut } = useAuth();
+  const { user, profile, isSuperAdmin, moduleRoles, isLoading, signOut } = useAuth();
 
   // Derive module access from moduleRoles
   const moduleAccess = useMemo(() =>
@@ -31,9 +31,10 @@ export default function Home() {
   const visibleModules = useMemo((): Module[] => {
     if (!user) return modules;
     if (isLoading) return modules;
+    if (!profile) return modules;
     if (isSuperAdmin) return modules;
     return modules.filter((m) => moduleAccess.includes(m.moduleKey));
-  }, [user, isSuperAdmin, moduleAccess, isLoading]);
+  }, [user, profile, isSuperAdmin, moduleAccess, isLoading]);
 
   useEffect(() => {
     const hash = window.location.hash;
@@ -94,7 +95,7 @@ export default function Home() {
                 </div>
                 <span className="text-white text-sm font-medium">{user.email}</span>
               </div>
-              {isSuperAdmin && (
+              {!isLoading && isSuperAdmin && (
                 <Button variant="primary" size="md" href="/admin/users">
                   <Shield className="h-4 w-4 mr-2" />
                   Admin

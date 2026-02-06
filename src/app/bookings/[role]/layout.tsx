@@ -17,13 +17,16 @@ function BookingsLayoutInner({ children }: { children: React.ReactNode }) {
   const params = useParams();
   const router = useRouter();
   const pathname = usePathname();
-  const { getModuleRole, isSuperAdmin, isLoading } = useAuth();
+  const { getModuleRole, isSuperAdmin, isLoading, profile } = useAuth();
 
   const urlRole = params.role as string;
 
   // Get user's actual role from database
+  // If still loading or profile not loaded, default to manager (fail open)
   const userBookingsRole = getModuleRole('bookings');
-  const effectiveRole = isSuperAdmin ? 'manager' : (userBookingsRole as BookingsRole) || 'viewer';
+  const effectiveRole = (isLoading || !profile) 
+    ? 'manager' 
+    : (isSuperAdmin ? 'manager' : (userBookingsRole as BookingsRole) || 'viewer');
 
   // Redirect to correct role URL if mismatch
   useEffect(() => {
