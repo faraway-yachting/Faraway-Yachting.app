@@ -1,14 +1,7 @@
 -- ============================================================
--- pg_cron scheduled jobs (requires Supabase Pro)
+-- pg_cron scheduled jobs (Supabase Pro)
+-- pg_cron and pg_net are already enabled on Supabase Pro
 -- ============================================================
-
--- Enable pg_cron and pg_net extensions
-CREATE EXTENSION IF NOT EXISTS pg_cron;
-CREATE EXTENSION IF NOT EXISTS pg_net;
-
--- Grant usage to postgres role (required for cron jobs)
-GRANT USAGE ON SCHEMA cron TO postgres;
-GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA cron TO postgres;
 
 -- ============================================================
 -- Daily alert processing at 8:00 AM UTC (3:00 PM Bangkok time)
