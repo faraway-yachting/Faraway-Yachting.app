@@ -405,20 +405,13 @@ export function AuthProvider({ children }: AuthProviderProps) {
       }
 
       // Fetch all data in parallel with 10-second timeout per query (safety net)
-      const [profileDataInitial, rolesData, permsData, companyData, projectData] = await Promise.all([
+      const [profileData, rolesData, permsData, companyData, projectData] = await Promise.all([
         withTimeout(fetchProfile(userId), 10000).catch(() => null),
         withTimeout(fetchModuleRoles(userId), 10000).catch(() => []),
         withTimeout(fetchPermissions(userId), 10000).catch(() => []),
         withTimeout(fetchCompanyAccess(userId), 10000).catch(() => []),
         withTimeout(fetchProjectAccess(userId), 10000).catch(() => [])
       ]);
-
-      // Profile is critical (determines is_super_admin) — retry once if it failed
-      let profileData = profileDataInitial;
-      if (!profileData) {
-        console.warn('Profile fetch failed, retrying once...');
-        profileData = await withTimeout(fetchProfile(userId), 10000).catch(() => null);
-      }
 
       // Fetch role config (only if there are roles)
       let config: RoleConfig = { menuVisibility: {}, dataScopes: {} };
@@ -457,10 +450,17 @@ export function AuthProvider({ children }: AuthProviderProps) {
     }
   };
 
+  // Track fresh logins to skip cache
+  const freshLoginRef = useRef(false);
+
+  // useEffect 1: Listen to auth state changes (synchronous only — no data fetching)
+  // Data fetching happens in useEffect 2 below, after React commits the user state.
+  // This avoids the race condition where loadAuthData runs during Supabase's _initialize
+  // before the client is ready for authenticated queries.
   useEffect(() => {
     const client = createClient();
     const { data: { subscription } } = client.auth.onAuthStateChange(
-      async (event, currentSession) => {
+      (event, currentSession) => {
         if (event === 'SIGNED_OUT') {
           setSession(null);
           setUser(null);
@@ -484,14 +484,15 @@ export function AuthProvider({ children }: AuthProviderProps) {
           return;
         }
 
-        // SIGNED_IN (fresh login) or INITIAL_SESSION (page load with existing session)
+        // Fresh login — mark so useEffect 2 skips cache
+        if (event === 'SIGNED_IN') {
+          freshLoginRef.current = true;
+        }
+
+        // Set user/session state (useEffect 2 will handle data loading)
         if ((event === 'SIGNED_IN' || event === 'INITIAL_SESSION') && currentSession?.user) {
           setSession(currentSession);
           setUser(currentSession.user);
-          // Fresh login: skip cache. Page load: use cache if available.
-          const skipCache = event === 'SIGNED_IN';
-          await loadAuthData(currentSession.user.id, skipCache);
-          setIsLoading(false);
           return;
         }
 
@@ -514,7 +515,16 @@ export function AuthProvider({ children }: AuthProviderProps) {
     return () => {
       subscription.unsubscribe();
     };
-  }, [loadAuthData]);
+  }, []);
+
+  // useEffect 2: Load auth data when user changes
+  // Runs AFTER React commits user state, so Supabase client is fully initialized.
+  useEffect(() => {
+    if (!user) return;
+    const skipCache = freshLoginRef.current;
+    freshLoginRef.current = false;
+    loadAuthData(user.id, skipCache).then(() => setIsLoading(false));
+  }, [user?.id, loadAuthData]);
 
   const signOut = async () => {
     setUser(null);
