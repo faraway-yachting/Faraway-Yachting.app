@@ -509,7 +509,6 @@ export function AuthProvider({ children }: AuthProviderProps) {
     setProjectAccess([]);
     setRoleConfig({ menuVisibility: {}, dataScopes: {} });
     clearCachedAuth();
-    authLoadedRef.current = false;
 
     try {
       const freshClient = createClient();
