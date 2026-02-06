@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, ChangeEvent } from 'react';
 import { useParams } from 'next/navigation';
 import { useAuth } from '@/components/auth';
-import { Palette, RotateCcw, Ship, Check, Plus, Trash2, Anchor, Image, X, Upload, Link, Save, Loader2 } from 'lucide-react';
+import { Palette, RotateCcw, Ship, Check, Plus, Trash2, Anchor, Image, X, Upload, Link, Save, Loader2, Globe, Copy, ToggleLeft, ToggleRight, ExternalLink } from 'lucide-react';
 import { Project } from '@/data/project/types';
 import { projectsApi } from '@/lib/supabase/api/projects';
 import { dbProjectToFrontend } from '@/lib/supabase/transforms';
@@ -11,6 +11,7 @@ import { useBookingSettings } from '@/contexts/BookingSettingsContext';
 import { defaultBoatColors, defaultExternalBoatColor } from '@/data/booking/types';
 import { YachtProductManager } from '@/components/bookings/YachtProductManager';
 import BookingLookupsSettings from '@/components/bookings/BookingLookupsSettings';
+import { publicCalendarLinksApi, type PublicCalendarLink } from '@/lib/supabase/api/publicCalendarLinks';
 
 // Preset marina locations for "Depart From"
 const marinaPresets = [
@@ -166,6 +167,16 @@ export default function BookingSettingsPage() {
   const [newYachtOwnerOperator, setNewYachtOwnerOperator] = useState('');
   const [showCustomDepartFrom, setShowCustomDepartFrom] = useState(false);
 
+  // Public calendar links state
+  const [publicLinks, setPublicLinks] = useState<PublicCalendarLink[]>([]);
+  const [showCreateLinkModal, setShowCreateLinkModal] = useState(false);
+  const [newLinkLabel, setNewLinkLabel] = useState('');
+  const [newLinkProjectIds, setNewLinkProjectIds] = useState<string[]>([]);
+  const [newLinkStatuses, setNewLinkStatuses] = useState<string[]>(['booked', 'completed', 'hold']);
+  const [newLinkExpiry, setNewLinkExpiry] = useState('');
+  const [isCreatingLink, setIsCreatingLink] = useState(false);
+  const [copiedLinkId, setCopiedLinkId] = useState<string | null>(null);
+
   // Edit yacht state
   const [editingYachtId, setEditingYachtId] = useState<string | null>(null);
   const [editYachtName, setEditYachtName] = useState('');
@@ -191,6 +202,69 @@ export default function BookingSettingsPage() {
     }
     loadProjects();
   }, []);
+
+  // Load public calendar links
+  useEffect(() => {
+    publicCalendarLinksApi.getAll().then(setPublicLinks).catch(console.error);
+  }, []);
+
+  const handleCreateLink = async () => {
+    if (!newLinkLabel.trim() || newLinkProjectIds.length === 0) return;
+    setIsCreatingLink(true);
+    try {
+      const link = await publicCalendarLinksApi.create({
+        label: newLinkLabel.trim(),
+        project_ids: newLinkProjectIds,
+        visible_statuses: newLinkStatuses,
+        expires_at: newLinkExpiry || null,
+      });
+      setPublicLinks((prev) => [link, ...prev]);
+      setShowCreateLinkModal(false);
+      setNewLinkLabel('');
+      setNewLinkProjectIds([]);
+      setNewLinkStatuses(['booked', 'completed', 'hold']);
+      setNewLinkExpiry('');
+    } catch (err) {
+      console.error('Failed to create link:', err);
+      alert('Failed to create link');
+    } finally {
+      setIsCreatingLink(false);
+    }
+  };
+
+  const handleToggleLink = async (link: PublicCalendarLink) => {
+    try {
+      await publicCalendarLinksApi.update(link.id, { is_active: !link.is_active });
+      setPublicLinks((prev) =>
+        prev.map((l) => (l.id === link.id ? { ...l, is_active: !l.is_active } : l))
+      );
+    } catch (err) {
+      console.error('Failed to toggle link:', err);
+    }
+  };
+
+  const handleDeleteLink = async (id: string) => {
+    if (!confirm('Delete this public calendar link? Anyone with the URL will no longer be able to access it.')) return;
+    try {
+      await publicCalendarLinksApi.delete(id);
+      setPublicLinks((prev) => prev.filter((l) => l.id !== id));
+    } catch (err) {
+      console.error('Failed to delete link:', err);
+    }
+  };
+
+  const copyLinkUrl = (link: PublicCalendarLink) => {
+    const url = `${window.location.origin}/public/calendar/${link.token}`;
+    navigator.clipboard.writeText(url);
+    setCopiedLinkId(link.id);
+    setTimeout(() => setCopiedLinkId(null), 2000);
+  };
+
+  const getProjectNames = (projectIds: string[]) => {
+    return projectIds
+      .map((id) => projects.find((p) => p.id === id)?.name || 'Unknown')
+      .join(', ');
+  };
 
   const handleColorChange = (id: string, name: string, color: string) => {
     if (!canEdit) return;
@@ -525,6 +599,244 @@ export default function BookingSettingsPage() {
           )}
         </div>
       </div>
+
+      {/* Public Calendar Links Section */}
+      {canEdit && (
+        <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+          <div className="px-6 py-4 bg-gray-50 border-b border-gray-200">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="flex items-center gap-2">
+                  <Globe className="h-5 w-5 text-gray-600" />
+                  <h2 className="text-lg font-semibold text-gray-900">Public Calendar Links</h2>
+                </div>
+                <p className="text-sm text-gray-500 mt-1">
+                  Share read-only calendar views with agencies. They can only see today and future availability.
+                </p>
+              </div>
+              <button
+                onClick={() => setShowCreateLinkModal(true)}
+                className="flex items-center gap-2 px-3 py-2 bg-[#5A7A8F] text-white rounded-lg hover:bg-[#4a6a7f] transition-colors text-sm"
+              >
+                <Plus className="h-4 w-4" />
+                Create Link
+              </button>
+            </div>
+          </div>
+
+          <div className="p-6">
+            {publicLinks.length === 0 ? (
+              <div className="text-center py-8 text-gray-500">
+                <Globe className="h-8 w-8 mx-auto mb-2 text-gray-400" />
+                <p className="font-medium">No public calendar links yet</p>
+                <p className="text-xs mt-1">Create a link to share boat availability with agencies</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {publicLinks.map((link) => (
+                  <div
+                    key={link.id}
+                    className={`border rounded-lg p-4 ${link.is_active ? 'border-gray-200 bg-white' : 'border-gray-100 bg-gray-50 opacity-75'}`}
+                  >
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="font-medium text-gray-900">{link.label}</span>
+                          <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
+                            link.is_active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'
+                          }`}>
+                            {link.is_active ? 'Active' : 'Disabled'}
+                          </span>
+                          {link.expires_at && new Date(link.expires_at) < new Date() && (
+                            <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700">
+                              Expired
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-sm text-gray-500 truncate">
+                          Boats: {getProjectNames(link.project_ids)}
+                        </p>
+                        <div className="flex items-center gap-2 mt-2">
+                          <code className="text-xs text-gray-400 bg-gray-100 px-2 py-1 rounded truncate max-w-md">
+                            {typeof window !== 'undefined' ? `${window.location.origin}/public/calendar/${link.token}` : `/public/calendar/${link.token}`}
+                          </code>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1 flex-shrink-0">
+                        <button
+                          onClick={() => copyLinkUrl(link)}
+                          className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
+                          title="Copy link"
+                        >
+                          {copiedLinkId === link.id ? (
+                            <Check className="h-4 w-4 text-green-600" />
+                          ) : (
+                            <Copy className="h-4 w-4" />
+                          )}
+                        </button>
+                        <a
+                          href={`/public/calendar/${link.token}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
+                          title="Open in new tab"
+                        >
+                          <ExternalLink className="h-4 w-4" />
+                        </a>
+                        <button
+                          onClick={() => handleToggleLink(link)}
+                          className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
+                          title={link.is_active ? 'Disable link' : 'Enable link'}
+                        >
+                          {link.is_active ? (
+                            <ToggleRight className="h-5 w-5 text-green-600" />
+                          ) : (
+                            <ToggleLeft className="h-5 w-5" />
+                          )}
+                        </button>
+                        <button
+                          onClick={() => handleDeleteLink(link.id)}
+                          className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                          title="Delete link"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Create Link Modal */}
+      {showCreateLinkModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-lg">
+            <div className="px-6 py-4 border-b border-gray-200">
+              <h3 className="text-lg font-semibold text-gray-900">Create Public Calendar Link</h3>
+              <p className="text-sm text-gray-500 mt-1">Agencies will only see booking status — no customer details or prices.</p>
+            </div>
+            <div className="p-6 space-y-4">
+              {/* Label */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Label</label>
+                <input
+                  type="text"
+                  value={newLinkLabel}
+                  onChange={(e) => setNewLinkLabel(e.target.value)}
+                  placeholder="e.g. Yacht Charters Agency"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#5A7A8F]/20 focus:border-[#5A7A8F]"
+                />
+              </div>
+
+              {/* Boats */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Boats to show <span className="text-red-500">*</span>
+                </label>
+                <div className="space-y-2 max-h-40 overflow-y-auto border border-gray-200 rounded-lg p-3">
+                  {projects.map((project) => (
+                    <label key={project.id} className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={newLinkProjectIds.includes(project.id)}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setNewLinkProjectIds((prev) => [...prev, project.id]);
+                          } else {
+                            setNewLinkProjectIds((prev) => prev.filter((id) => id !== project.id));
+                          }
+                        }}
+                        className="rounded border-gray-300 text-[#5A7A8F] focus:ring-[#5A7A8F]"
+                      />
+                      <Ship className="h-4 w-4 text-gray-400" />
+                      <span className="text-sm text-gray-700">{project.name}</span>
+                    </label>
+                  ))}
+                  {projects.length === 0 && (
+                    <p className="text-sm text-gray-400">No boats available</p>
+                  )}
+                </div>
+                {projects.length > 0 && (
+                  <div className="mt-1 flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setNewLinkProjectIds(projects.map((p) => p.id))}
+                      className="text-xs text-[#5A7A8F] hover:underline"
+                    >
+                      Select all
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setNewLinkProjectIds([])}
+                      className="text-xs text-gray-500 hover:underline"
+                    >
+                      Clear
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Visible statuses */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Visible statuses</label>
+                <div className="flex flex-wrap gap-2">
+                  {['booked', 'completed', 'hold', 'enquiry'].map((status) => (
+                    <label key={status} className="flex items-center gap-1.5 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={newLinkStatuses.includes(status)}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setNewLinkStatuses((prev) => [...prev, status]);
+                          } else {
+                            setNewLinkStatuses((prev) => prev.filter((s) => s !== status));
+                          }
+                        }}
+                        className="rounded border-gray-300 text-[#5A7A8F] focus:ring-[#5A7A8F]"
+                      />
+                      <span className="text-sm text-gray-700 capitalize">{status}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              {/* Expiry date */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Expiry date <span className="text-xs text-gray-400">(optional)</span>
+                </label>
+                <input
+                  type="date"
+                  value={newLinkExpiry}
+                  onChange={(e) => setNewLinkExpiry(e.target.value)}
+                  min={new Date().toISOString().split('T')[0]}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#5A7A8F]/20 focus:border-[#5A7A8F]"
+                />
+              </div>
+            </div>
+            <div className="px-6 py-4 border-t border-gray-200 flex justify-end gap-3">
+              <button
+                onClick={() => setShowCreateLinkModal(false)}
+                className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleCreateLink}
+                disabled={!newLinkLabel.trim() || newLinkProjectIds.length === 0 || isCreatingLink}
+                className="px-4 py-2 bg-[#5A7A8F] text-white rounded-lg hover:bg-[#4a6a7f] transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+              >
+                {isCreatingLink && <Loader2 className="h-4 w-4 animate-spin" />}
+                Create Link
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Yacht Register Section */}
       <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">

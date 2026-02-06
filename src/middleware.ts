@@ -84,6 +84,11 @@ export async function middleware(request: NextRequest) {
 
   const pathname = request.nextUrl.pathname;
 
+  // Public routes — no auth required
+  if (pathname.startsWith('/public')) {
+    return supabaseResponse;
+  }
+
   const protectedRoutes = ['/accounting', '/bookings', '/admin', '/hr'];
   const isProtectedRoute = protectedRoutes.some((route) =>
     pathname.startsWith(route)

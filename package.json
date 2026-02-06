@@ -19,6 +19,7 @@
     "jspdf": "^4.1.0",
     "jspdf-autotable": "^5.0.7",
     "lucide-react": "^0.562.0",
+    "nanoid": "^5.1.6",
     "next": "16.1.1",
     "pdf-lib": "^1.17.1",
     "puppeteer": "^24.36.0",

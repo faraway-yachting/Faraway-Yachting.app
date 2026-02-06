@@ -3228,6 +3228,45 @@ export type Database = {
           }
         ]
       }
+      public_calendar_links: {
+        Row: {
+          id: string
+          token: string
+          label: string
+          project_ids: string[]
+          visible_statuses: string[]
+          is_active: boolean
+          expires_at: string | null
+          created_by: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          token: string
+          label: string
+          project_ids: string[]
+          visible_statuses?: string[]
+          is_active?: boolean
+          expires_at?: string | null
+          created_by?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          token?: string
+          label?: string
+          project_ids?: string[]
+          visible_statuses?: string[]
+          is_active?: boolean
+          expires_at?: string | null
+          created_by?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
