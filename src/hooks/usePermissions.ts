@@ -60,6 +60,36 @@ export const BOOKINGS_PERMISSIONS = {
   REPORTS_VIEW: 'bookings.reports.view',
   GUESTS_VIEW: 'bookings.guests.view',
   GUESTS_EDIT: 'bookings.guests.edit',
+  AGENCIES_VIEW: 'bookings.agencies.view',
+  AGENCIES_EDIT: 'bookings.agencies.edit',
+  BOATS_VIEW: 'bookings.boats.view',
+  BOATS_EDIT: 'bookings.boats.edit',
+  SETTINGS_VIEW: 'bookings.settings.view',
+  SETTINGS_MANAGE: 'bookings.settings.manage',
+} as const;
+
+// HR permissions
+export const HR_PERMISSIONS = {
+  DASHBOARD_VIEW: 'hr.dashboard.view',
+  EMPLOYEES_VIEW: 'hr.employees.view',
+  EMPLOYEES_CREATE: 'hr.employees.create',
+  EMPLOYEES_EDIT: 'hr.employees.edit',
+  EMPLOYEES_DELETE: 'hr.employees.delete',
+  LEAVE_VIEW: 'hr.leave.view',
+  LEAVE_MANAGE: 'hr.leave.manage',
+  LEAVE_REQUEST: 'hr.leave.request',
+  PAYROLL_VIEW: 'hr.payroll.view',
+  PAYROLL_MANAGE: 'hr.payroll.manage',
+  CREW_SCHEDULE_VIEW: 'hr.crew_schedule.view',
+  CREW_SCHEDULE_MANAGE: 'hr.crew_schedule.manage',
+  CHARTER_BONUS_VIEW: 'hr.charter_bonus.view',
+  CHARTER_BONUS_MANAGE: 'hr.charter_bonus.manage',
+  SETTINGS_VIEW: 'hr.settings.view',
+  SETTINGS_MANAGE: 'hr.settings.manage',
+  DOCUMENTS_VIEW_OWN: 'hr.documents.view_own',
+  DOCUMENTS_VIEW_ALL: 'hr.documents.view_all',
+  PAYSLIPS_VIEW_OWN: 'hr.payslips.view_own',
+  PAYSLIPS_VIEW_ALL: 'hr.payslips.view_all',
 } as const;
 
 // Admin permissions
@@ -72,6 +102,7 @@ export const ADMIN_PERMISSIONS = {
 export const PERMISSIONS = {
   ...ACCOUNTING_PERMISSIONS,
   ...BOOKINGS_PERMISSIONS,
+  ...HR_PERMISSIONS,
   ...ADMIN_PERMISSIONS,
 } as const;
 
@@ -227,6 +258,56 @@ export function usePermissions() {
     // Bookings - Guests
     viewGuests: () => hasPermission(BOOKINGS_PERMISSIONS.GUESTS_VIEW),
     editGuests: () => hasPermission(BOOKINGS_PERMISSIONS.GUESTS_EDIT),
+
+    // Bookings - Agencies
+    viewAgencies: () => hasPermission(BOOKINGS_PERMISSIONS.AGENCIES_VIEW),
+    editAgencies: () => hasPermission(BOOKINGS_PERMISSIONS.AGENCIES_EDIT),
+
+    // Bookings - Boats
+    viewBoats: () => hasPermission(BOOKINGS_PERMISSIONS.BOATS_VIEW),
+    editBoats: () => hasPermission(BOOKINGS_PERMISSIONS.BOATS_EDIT),
+
+    // Bookings - Settings
+    viewBookingSettings: () => hasPermission(BOOKINGS_PERMISSIONS.SETTINGS_VIEW),
+    manageBookingSettings: () => hasPermission(BOOKINGS_PERMISSIONS.SETTINGS_MANAGE),
+
+    // HR - Dashboard
+    viewHRDashboard: () => hasPermission(HR_PERMISSIONS.DASHBOARD_VIEW),
+
+    // HR - Employees
+    viewEmployees: () => hasPermission(HR_PERMISSIONS.EMPLOYEES_VIEW),
+    createEmployees: () => hasPermission(HR_PERMISSIONS.EMPLOYEES_CREATE),
+    editEmployees: () => hasPermission(HR_PERMISSIONS.EMPLOYEES_EDIT),
+    deleteEmployees: () => hasPermission(HR_PERMISSIONS.EMPLOYEES_DELETE),
+
+    // HR - Leave
+    viewLeave: () => hasPermission(HR_PERMISSIONS.LEAVE_VIEW),
+    manageLeave: () => hasPermission(HR_PERMISSIONS.LEAVE_MANAGE),
+    requestLeave: () => hasPermission(HR_PERMISSIONS.LEAVE_REQUEST),
+
+    // HR - Payroll
+    viewPayroll: () => hasPermission(HR_PERMISSIONS.PAYROLL_VIEW),
+    managePayroll: () => hasPermission(HR_PERMISSIONS.PAYROLL_MANAGE),
+
+    // HR - Crew Schedule
+    viewCrewSchedule: () => hasPermission(HR_PERMISSIONS.CREW_SCHEDULE_VIEW),
+    manageCrewSchedule: () => hasPermission(HR_PERMISSIONS.CREW_SCHEDULE_MANAGE),
+
+    // HR - Charter Bonus
+    viewCharterBonus: () => hasPermission(HR_PERMISSIONS.CHARTER_BONUS_VIEW),
+    manageCharterBonus: () => hasPermission(HR_PERMISSIONS.CHARTER_BONUS_MANAGE),
+
+    // HR - Settings
+    viewHRSettings: () => hasPermission(HR_PERMISSIONS.SETTINGS_VIEW),
+    manageHRSettings: () => hasPermission(HR_PERMISSIONS.SETTINGS_MANAGE),
+
+    // HR - Documents
+    viewOwnDocuments: () => hasPermission(HR_PERMISSIONS.DOCUMENTS_VIEW_OWN),
+    viewAllDocuments: () => hasPermission(HR_PERMISSIONS.DOCUMENTS_VIEW_ALL),
+
+    // HR - Payslips
+    viewOwnPayslips: () => hasPermission(HR_PERMISSIONS.PAYSLIPS_VIEW_OWN),
+    viewAllPayslips: () => hasPermission(HR_PERMISSIONS.PAYSLIPS_VIEW_ALL),
   };
 
   return {

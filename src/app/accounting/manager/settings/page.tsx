@@ -28,6 +28,7 @@ import { WalletFormModal } from "@/components/petty-cash/WalletFormModal";
 import { NumberFormatSettings } from "@/components/settings/NumberFormatSettings";
 import { UserManagementModal } from "@/components/settings/UserManagementModal";
 import { ImportPriorYearModal } from "@/components/accounting/ImportPriorYearModal";
+import { ModuleRouteGuard } from "@/components/auth";
 import { JournalEventSettings } from "@/components/accounting/JournalEventSettings";
 import { beamMerchantAccountsApi } from "@/lib/supabase/api/beamMerchantAccounts";
 import type { BeamMerchantAccount } from "@/data/beam/types";
@@ -587,6 +588,7 @@ export default function SettingsPage() {
 
   return (
     <AppShell>
+      <ModuleRouteGuard module="accounting" requiredPermission="accounting.settings.manage" redirectTo="/accounting/manager">
       <div className="mb-8">
         <h1 className="text-2xl font-bold text-gray-900">Settings</h1>
         <p className="mt-1 text-sm text-gray-500">
@@ -1760,6 +1762,7 @@ export default function SettingsPage() {
         isOpen={isImportPriorYearModalOpen}
         onClose={() => setIsImportPriorYearModalOpen(false)}
       />
+      </ModuleRouteGuard>
     </AppShell>
   );
 }

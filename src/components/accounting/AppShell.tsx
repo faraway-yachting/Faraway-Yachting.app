@@ -157,17 +157,19 @@ const menuItems = [
   },
 ];
 
-// Get role display name based on user's accounting module role
+// Role display names — known roles get friendly names, new roles auto-format
+const roleDisplayNames: Record<string, string> = {
+  manager: 'Manager',
+  accountant: 'Accountant',
+  sales: 'Sales',
+  investor: 'Investor',
+  'petty-cash': 'Petty Cash Holder',
+};
+
 function getRoleDisplayName(role: string | null, isSuperAdmin: boolean): string {
   if (isSuperAdmin) return "Super Admin";
-  switch (role) {
-    case 'manager': return 'Manager';
-    case 'accountant': return 'Accountant';
-    case 'sales': return 'Sales';
-    case 'investor': return 'Investor';
-    case 'petty-cash': return 'Petty Cash Holder';
-    default: return 'User';
-  }
+  if (!role) return 'User';
+  return roleDisplayNames[role] || role.replace(/[-_]/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 }
 
 export function AppShell({ children }: AppShellProps) {

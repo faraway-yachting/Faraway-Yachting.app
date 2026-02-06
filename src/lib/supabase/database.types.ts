@@ -3240,6 +3240,14 @@ export type Database = {
         }
         Returns: Json
       }
+      search_records: {
+        Args: {
+          p_table: string
+          p_query: string
+          p_limit?: number
+        }
+        Returns: Json[]
+      }
     }
     Enums: {
       [_ in never]: never

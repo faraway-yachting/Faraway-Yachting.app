@@ -4,11 +4,11 @@ export type ModuleName = 'accounting' | 'bookings' | 'inventory' | 'maintenance'
 
 export type ModuleRole = {
   accounting: 'admin' | 'manager' | 'accountant' | 'sales' | 'captain' | 'viewer' | 'petty-cash';
-  bookings: 'admin' | 'manager' | 'agent' | 'viewer';
+  bookings: 'admin' | 'manager' | 'agent' | 'crew' | 'investor' | 'viewer';
   inventory: 'admin' | 'manager' | 'warehouse' | 'viewer';
   maintenance: 'admin' | 'manager' | 'technician' | 'viewer';
   customers: 'admin' | 'manager' | 'sales' | 'viewer';
-  hr: 'admin' | 'manager' | 'hr_staff' | 'viewer';
+  hr: 'admin' | 'manager' | 'hr_staff' | 'employee' | 'viewer';
 };
 
 export interface UserModuleRole {
@@ -35,11 +35,11 @@ export interface UserWithModuleRoles {
 // Available roles per module
 export const MODULE_ROLES: Record<ModuleName, string[]> = {
   accounting: ['admin', 'manager', 'accountant', 'sales', 'captain', 'viewer', 'petty-cash'],
-  bookings: ['admin', 'manager', 'agent', 'viewer'],
+  bookings: ['admin', 'manager', 'agent', 'crew', 'investor', 'viewer'],
   inventory: ['admin', 'manager', 'warehouse', 'viewer'],
   maintenance: ['admin', 'manager', 'technician', 'viewer'],
   customers: ['admin', 'manager', 'sales', 'viewer'],
-  hr: ['admin', 'manager', 'hr_staff', 'viewer'],
+  hr: ['admin', 'manager', 'hr_staff', 'employee', 'viewer'],
 };
 
 // Module display names

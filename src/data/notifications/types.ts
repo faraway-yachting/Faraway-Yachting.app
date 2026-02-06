@@ -5,7 +5,12 @@ export type NotificationType =
   | 'reimbursement_approved'
   | 'reimbursement_paid'
   | 'reimbursement_rejected'
-  | 'booking_payment_needs_action';
+  | 'booking_payment_needs_action'
+  | 'document_expiry'
+  | 'overdue_invoice'
+  | 'leave_approved'
+  | 'leave_rejected'
+  | 'booking_confirmed';
 
 export type NotificationTargetRole = 'accountant' | 'manager' | 'petty_cash_holder' | 'all';
 
@@ -32,4 +37,10 @@ export interface NotificationInput {
   referenceNumber: string;
   targetRole: NotificationTargetRole;
   targetUserId?: string; // Specific user to notify (optional)
+  /** Optional: send an email notification via Edge Function */
+  sendEmail?: {
+    to: string;
+    subject: string;
+    html: string;
+  };
 }

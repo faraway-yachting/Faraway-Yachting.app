@@ -1,12 +1,12 @@
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
-import { useParams } from 'next/navigation';
 import {
   Anchor, Plus, Pencil, Trash2, Search, Ship, X,
   ChevronDown, ChevronUp, Upload, Loader2, User, Phone, Users, LayoutList,
   Eye, Download, FileText,
 } from 'lucide-react';
+import { useAuth } from '@/components/auth';
 import { externalBoatsApi, DbExternalBoat } from '@/lib/supabase/api/externalBoats';
 import { contactsApi } from '@/lib/supabase/api/contacts';
 import { DynamicSelect } from '@/components/bookings/form/DynamicSelect';
@@ -55,9 +55,8 @@ const emptyForm: BoatFormData = {
 };
 
 export default function BoatsPage() {
-  const params = useParams();
-  const role = params.role as string;
-  const canEdit = role === 'admin' || role === 'manager';
+  const { isSuperAdmin, hasPermission } = useAuth();
+  const canEdit = isSuperAdmin || hasPermission('bookings.boats.edit');
 
   const [boats, setBoats] = useState<DbExternalBoat[]>([]);
   const [loading, setLoading] = useState(true);

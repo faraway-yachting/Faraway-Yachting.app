@@ -24,87 +24,48 @@ interface BookingsAppShellProps {
   currentRole: BookingsRole;
 }
 
-// Define all available menu items
+// Define all available menu items with menu keys for database-driven visibility
 const allMenuItems = [
-  { name: "Calendar", href: "/bookings/{role}/calendar", icon: Calendar },
-  { name: "Bookings List", href: "/bookings/{role}/list", icon: List },
-  { name: "Agencies", href: "/bookings/{role}/agencies", icon: Users },
-  { name: "Boat Register", href: "/bookings/{role}/boats", icon: Anchor },
-  { name: "Settings", href: "/bookings/{role}/settings", icon: Settings },
+  { name: "Calendar", href: "/bookings/{role}/calendar", icon: Calendar, menuKey: "calendar" },
+  { name: "Bookings List", href: "/bookings/{role}/list", icon: List, menuKey: "list" },
+  { name: "Agencies", href: "/bookings/{role}/agencies", icon: Users, menuKey: "agencies" },
+  { name: "Boat Register", href: "/bookings/{role}/boats", icon: Anchor, menuKey: "boats" },
+  { name: "Settings", href: "/bookings/{role}/settings", icon: Settings, menuKey: "settings" },
 ];
 
-// Role-based menu visibility
-const roleConfig: Record<BookingsRole, { name: string; allowedMenus: string[] }> = {
-  admin: {
-    name: "Admin",
-    allowedMenus: ["Calendar", "Bookings List", "Agencies", "Boat Register", "Settings"],
-  },
-  manager: {
-    name: "Manager",
-    allowedMenus: ["Calendar", "Bookings List", "Agencies", "Boat Register", "Settings"],
-  },
-  agent: {
-    name: "Agent",
-    allowedMenus: ["Calendar", "Bookings List"],
-  },
-  viewer: {
-    name: "Viewer",
-    allowedMenus: ["Calendar", "Bookings List"],
-  },
-  investor: {
-    name: "Investor",
-    allowedMenus: ["Calendar"],
-  },
-  crew: {
-    name: "Crew",
-    allowedMenus: ["Calendar", "Bookings List"],
-  },
+// Role display names - used as fallback if role_definitions not loaded
+const roleDisplayNames: Record<string, string> = {
+  admin: "Admin",
+  manager: "Manager",
+  agent: "Agent",
+  crew: "Crew",
+  investor: "Investor",
+  viewer: "Viewer",
 };
-
-
-// Get role display name based on user's bookings module role
-function getRoleDisplayName(role: string | null, isSuperAdmin: boolean): string {
-  if (isSuperAdmin) return "Super Admin";
-  switch (role) {
-    case 'manager': return 'Manager';
-    case 'agent': return 'Agent';
-    case 'crew': return 'Crew';
-    case 'investor': return 'Investor';
-    case 'viewer': return 'Viewer';
-    default: return 'User';
-  }
-}
 
 export function BookingsAppShell({ children, currentRole }: BookingsAppShellProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const pathname = usePathname();
 
   // Get auth context for real user data
-  const { isSuperAdmin, getModuleRole, isMenuVisible, profile, isLoading } = useAuth();
+  const { isSuperAdmin, getModuleRole, isMenuVisible } = useAuth();
 
   // Get user's actual role in bookings module
   const bookingsRole = getModuleRole('bookings');
-  const roleDisplayName = getRoleDisplayName(bookingsRole, isSuperAdmin);
+  const roleName = isSuperAdmin ? "Super Admin" : (roleDisplayNames[bookingsRole || ''] || 'User');
 
-  // Use the user's actual role config, not the URL-based one
-  // If still loading or profile not loaded, default to manager (fail open for better UX)
-  const effectiveRole = (isLoading || !profile) 
-    ? 'manager' 
-    : (isSuperAdmin ? 'manager' : (bookingsRole as BookingsRole) || 'viewer');
-  const config = roleConfig[effectiveRole] || roleConfig['manager'];
-
-  // Unused but keeping for reference
-  void roleDisplayName; // Used by UserDropdown internally
-
-  // Filter menu items based on role permissions - memoized
+  // Filter menu items based on database menu visibility - memoized
   const navigation = useMemo(() => {
     return allMenuItems
-      .filter((item) => config.allowedMenus.includes(item.name))
+      .filter((item) => {
+        if (isSuperAdmin) return true;
+        return isMenuVisible('bookings', item.menuKey);
+      })
       .map((item) => ({
         ...item,
         href: item.href.replace("{role}", currentRole),
       }));
-  }, [config.allowedMenus, currentRole]);
+  }, [isSuperAdmin, isMenuVisible, currentRole]);
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -119,7 +80,7 @@ export function BookingsAppShell({ children, currentRole }: BookingsAppShellProp
               </div>
               <div className="flex flex-col">
                 <span className="text-white font-bold text-base">Faraway Yachting</span>
-                <span className="text-blue-200 text-xs">Bookings - {config.name}</span>
+                <span className="text-blue-200 text-xs">Bookings - {roleName}</span>
               </div>
             </Link>
           </div>
@@ -191,7 +152,7 @@ export function BookingsAppShell({ children, currentRole }: BookingsAppShellProp
                     </div>
                     <div className="flex flex-col">
                       <span className="text-white font-bold text-base">Faraway Yachting</span>
-                      <span className="text-blue-200 text-xs">Bookings - {config.name}</span>
+                      <span className="text-blue-200 text-xs">Bookings - {roleName}</span>
                     </div>
                   </Link>
                 </div>

@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { useParams, useSearchParams, useRouter } from 'next/navigation';
+import { useQueryClient } from '@tanstack/react-query';
 import { Plus, Calendar as CalendarIcon, Ship } from 'lucide-react';
 import { BookingCalendar } from '@/components/bookings/BookingCalendar';
 import { CalendarDisplayPopover } from '@/components/bookings/CalendarDisplayPopover';
@@ -9,9 +10,10 @@ import { BookingForm } from '@/components/bookings/BookingForm';
 import { Booking, BookingType, BookingStatus } from '@/data/booking/types';
 import { Project } from '@/data/project/types';
 import { Currency } from '@/data/company/types';
-import { projectsApi } from '@/lib/supabase/api/projects';
 import { bookingsApi } from '@/lib/supabase/api/bookings';
-import { dbProjectToFrontend } from '@/lib/supabase/transforms';
+import { useYachtProjects } from '@/hooks/queries/useProjects';
+import { useBookingsByMonth } from '@/hooks/queries/useBookings';
+import { useRealtimeSubscription } from '@/hooks/useRealtimeSubscription';
 import { useBookingSettings } from '@/contexts/BookingSettingsContext';
 import { useAuth } from '@/components/auth';
 
@@ -25,15 +27,17 @@ export default function BookingCalendarPage() {
   const { user, getModuleRole, isSuperAdmin, hasPermission } = useAuth();
   const userBookingsRole = getModuleRole('bookings');
 
-  // Determine if user is an agent based on their ACTUAL role, not URL
-  // Super admin sees everything, agent only sees status
-  const isAgencyView = !isSuperAdmin && userBookingsRole === 'agent';
+  // Limited view: user can only see booking status (no financial details)
+  // Users with full calendar.view permission see everything; others get status-only view
+  const isAgencyView = !isSuperAdmin && !hasPermission('bookings.calendar.view');
 
-  // Can create if user has manager role or super admin, or agent (agents can create enquiries)
-  const canCreate = isSuperAdmin || userBookingsRole === 'manager' || userBookingsRole === 'agent';
+  // Can create if user has the booking.create permission
+  const canCreate = isSuperAdmin || hasPermission('bookings.booking.create');
 
   // Get boat color settings and banner
   const { getBoatColor, bannerImageUrl, calendarDisplay } = useBookingSettings();
+
+  const queryClient = useQueryClient();
 
   // Pre-filled booking from URL params (from Quotation/Invoice/Receipt)
   const [prefilledBooking, setPrefilledBooking] = useState<Partial<Booking> | null>(null);
@@ -42,11 +46,17 @@ export default function BookingCalendarPage() {
   const [currentYear, setCurrentYear] = useState(new Date().getFullYear());
   const [currentMonth, setCurrentMonth] = useState(new Date().getMonth() + 1);
 
+  // Data via React Query (cached, auto-refreshes when stale)
+  const { data: projects = [], isLoading: projectsLoading } = useYachtProjects();
+  const { data: bookings = [], isLoading: bookingsLoading } = useBookingsByMonth(currentYear, currentMonth);
+  const isLoading = projectsLoading || bookingsLoading;
 
-  // Data state
-  const [bookings, setBookings] = useState<Booking[]>([]);
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  // Real-time updates: when another user creates/edits a booking, this calendar auto-refreshes
+  useRealtimeSubscription([{
+    table: 'bookings',
+    event: '*',
+    queryKeys: [['bookings']],
+  }]);
 
   // Filter state - null means "All Bookings"
   const [selectedBoatFilter, setSelectedBoatFilter] = useState<string | null>(null);
@@ -55,42 +65,6 @@ export default function BookingCalendarPage() {
   const [showBookingForm, setShowBookingForm] = useState(false);
   const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null);
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
-
-  // Load projects and bookings
-  const loadBookings = async (year: number, month: number) => {
-    try {
-      const data = await bookingsApi.getByMonth(year, month);
-      setBookings(data);
-    } catch (error) {
-      console.error('Error loading bookings:', error);
-    }
-  };
-
-  useEffect(() => {
-    async function loadData() {
-      setIsLoading(true);
-      try {
-        const [projectsData] = await Promise.all([
-          projectsApi.getActive(),
-          loadBookings(currentYear, currentMonth),
-        ]);
-        const yachts = projectsData
-          .map(dbProjectToFrontend)
-          .filter(p => p.type === 'yacht');
-        setProjects(yachts);
-      } catch (error) {
-        console.error('Error loading data:', error);
-      } finally {
-        setIsLoading(false);
-      }
-    }
-    loadData();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Reload bookings when month changes
-  useEffect(() => {
-    loadBookings(currentYear, currentMonth);
-  }, [currentYear, currentMonth]);
 
   // Handle URL parameters for pre-filled booking (from Quotation/Invoice/Receipt)
   useEffect(() => {
@@ -211,24 +185,22 @@ export default function BookingCalendarPage() {
   const handleSaveBooking = async (bookingData: Partial<Booking>) => {
     if (selectedBooking) {
       // Update existing booking
-      const updated = await bookingsApi.update(selectedBooking.id, bookingData);
-      setBookings(prev =>
-        prev.map(b => b.id === selectedBooking.id ? updated : b)
-      );
+      await bookingsApi.update(selectedBooking.id, bookingData);
     } else {
       // Create NEW booking (only happens on explicit save)
       const now = new Date();
       const year = now.getFullYear();
       const month = String(now.getMonth() + 1).padStart(2, '0');
       const rand = String(Math.floor(Math.random() * 10000)).padStart(4, '0');
-      const created = await bookingsApi.create({
+      await bookingsApi.create({
         ...bookingData,
         bookingNumber: `FA-${year}${month}${rand}`,
         bookingOwner: bookingData.bookingOwner || undefined,
       });
-      setBookings(prev => [...prev, created]);
     }
 
+    // Invalidate cache so React Query refetches
+    queryClient.invalidateQueries({ queryKey: ['bookings'] });
     setShowBookingForm(false);
     setSelectedBooking(null);
     setSelectedDate(null);
@@ -237,7 +209,7 @@ export default function BookingCalendarPage() {
 
   const handleDeleteBooking = async (id: string) => {
     await bookingsApi.delete(id);
-    setBookings(prev => prev.filter(b => b.id !== id));
+    queryClient.invalidateQueries({ queryKey: ['bookings'] });
     setShowBookingForm(false);
     setSelectedBooking(null);
   };

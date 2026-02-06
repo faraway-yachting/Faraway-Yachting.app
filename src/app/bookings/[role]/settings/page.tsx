@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, ChangeEvent } from 'react';
 import { useParams } from 'next/navigation';
+import { useAuth } from '@/components/auth';
 import { Palette, RotateCcw, Ship, Check, Plus, Trash2, Anchor, Image, X, Upload, Link, Save, Loader2 } from 'lucide-react';
 import { Project } from '@/data/project/types';
 import { projectsApi } from '@/lib/supabase/api/projects';
@@ -131,7 +132,8 @@ function ColorPicker({ color, onChange, disabled }: ColorPickerProps) {
 export default function BookingSettingsPage() {
   const params = useParams();
   const role = params.role as string;
-  const canEdit = role === 'admin' || role === 'manager';
+  const { isSuperAdmin, hasPermission } = useAuth();
+  const canEdit = isSuperAdmin || hasPermission('bookings.settings.manage');
 
   const {
     getBoatColor,

@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { AppShell } from "@/components/accounting/AppShell";
 import { KPICard } from "@/components/accounting/KPICard";
 import { DataTable } from "@/components/accounting/DataTable";
@@ -18,9 +19,10 @@ import {
   ExternalLink,
 } from "lucide-react";
 import { bookingsApi } from "@/lib/supabase/api/bookings";
-import { projectsApi } from "@/lib/supabase/api/projects";
 import { bookingPaymentsApi, type BookingPaymentExtended } from "@/lib/supabase/api/bookingPayments";
 import { invoicesApi } from "@/lib/supabase/api/invoices";
+import { useProjects } from "@/hooks/queries/useProjects";
+import { useUpcomingBookings, usePendingCharterExpenses } from "@/hooks/queries/useBookings";
 import type { Booking } from "@/data/booking/types";
 import Link from "next/link";
 
@@ -36,47 +38,33 @@ const STATUS_COLORS: Record<string, string> = {
 };
 
 export default function ManagerDashboard() {
-  const [loading, setLoading] = useState(true);
-  const [monthBookings, setMonthBookings] = useState<Booking[]>([]);
-  const [upcoming, setUpcoming] = useState<Booking[]>([]);
-  const [projects, setProjects] = useState<any[]>([]);
-  const [pendingExpenses, setPendingExpenses] = useState<Booking[]>([]);
-  const [paymentsNeedingAction, setPaymentsNeedingAction] = useState<BookingPaymentExtended[]>([]);
-  const [overdueInvoices, setOverdueInvoices] = useState<any[]>([]);
-
-  const now = new Date();
+  const now = useMemo(() => new Date(), []);
   const monthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
   const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
   const monthEnd = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${lastDay}`;
   const monthLabel = now.toLocaleDateString("en-US", { month: "long", year: "numeric" });
 
-  const loadData = useCallback(async () => {
-    try {
-      setLoading(true);
-      const [mb, up, pr, pe, pa, oi] = await Promise.all([
-        bookingsApi.getByDateRange(monthStart, monthEnd),
-        bookingsApi.getUpcoming(),
-        projectsApi.getActive(),
-        bookingsApi.getPendingCharterExpenses(),
-        bookingPaymentsApi.getNeedingAction(),
-        invoicesApi.getOverdue(),
-      ]);
-      setMonthBookings(mb);
-      setUpcoming(up);
-      setProjects(pr);
-      setPendingExpenses(pe);
-      setPaymentsNeedingAction(pa);
-      setOverdueInvoices(oi);
-    } catch (error) {
-      console.error("Failed to load dashboard:", error);
-    } finally {
-      setLoading(false);
-    }
-  }, [monthStart, monthEnd]);
+  // All data via React Query (cached, parallel fetch)
+  const { data: monthBookings = [], isLoading: l1 } = useQuery({
+    queryKey: ['bookings', 'dateRange', monthStart, monthEnd],
+    queryFn: () => bookingsApi.getByDateRange(monthStart, monthEnd),
+    staleTime: 60 * 1000,
+  });
+  const { data: upcoming = [], isLoading: l2 } = useUpcomingBookings();
+  const { data: projects = [], isLoading: l3 } = useProjects();
+  const { data: pendingExpenses = [], isLoading: l4 } = usePendingCharterExpenses();
+  const { data: paymentsNeedingAction = [], isLoading: l5 } = useQuery({
+    queryKey: ['bookingPayments', 'needingAction'],
+    queryFn: () => bookingPaymentsApi.getNeedingAction(),
+    staleTime: 60 * 1000,
+  });
+  const { data: overdueInvoices = [], isLoading: l6 } = useQuery({
+    queryKey: ['invoices', 'overdue'],
+    queryFn: () => invoicesApi.getOverdue(),
+    staleTime: 60 * 1000,
+  });
 
-  useEffect(() => {
-    loadData();
-  }, [loadData]);
+  const loading = l1 || l2 || l3 || l4 || l5 || l6;
 
   if (loading) {
     return (

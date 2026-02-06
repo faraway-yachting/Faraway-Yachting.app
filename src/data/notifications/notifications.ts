@@ -48,7 +48,7 @@ export function addNotification(input: NotificationInput): Notification {
 
   notifications.push(notification);
 
-  // Persist to Supabase (fire-and-forget)
+  // Persist to Supabase (fire-and-forget) + optional email
   notificationsApi.create({
     type: input.type,
     title: input.title,
@@ -58,6 +58,7 @@ export function addNotification(input: NotificationInput): Notification {
     referenceNumber: input.referenceNumber,
     targetRole: input.targetRole,
     targetUserId: input.targetUserId,
+    sendEmail: input.sendEmail,
   }).catch((err) => {
     console.error('Failed to persist notification:', err);
   });

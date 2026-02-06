@@ -1,11 +1,13 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useMemo } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { AppShell } from '@/components/accounting/AppShell';
 import { Users, Plus, Edit2, Search, Building2, ShoppingCart, Loader2, Ship } from 'lucide-react';
 import { ContactFormModal } from '@/components/contact/ContactFormModal';
 import { contactsApi } from '@/lib/supabase/api';
 import { dbContactToFrontend, frontendContactToDb } from '@/lib/supabase/transforms';
+import { useContacts } from '@/hooks/queries/useContacts';
 import { Contact, ContactType } from '@/data/contact/types';
 
 type FilterTab = 'all' | 'customer' | 'vendor' | 'agency' | 'boat_operator';
@@ -51,32 +53,16 @@ function TypeBadges({ types }: { types: ContactType[] }) {
 }
 
 export default function ContactsPage() {
-  const [contacts, setContacts] = useState<Contact[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const queryClient = useQueryClient();
+  const { data: rawContacts = [], isLoading: loading, error: queryError } = useContacts();
+  const contacts = useMemo(() => rawContacts.map(dbContactToFrontend), [rawContacts]);
+  const error = queryError ? (queryError instanceof Error ? queryError.message : 'Failed to load contacts') : null;
+
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingContact, setEditingContact] = useState<Contact | null>(null);
   const [showInactive, setShowInactive] = useState(false);
   const [filterTab, setFilterTab] = useState<FilterTab>('all');
   const [searchQuery, setSearchQuery] = useState('');
-
-  // Fetch contacts from Supabase
-  const fetchContacts = async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const data = await contactsApi.getAll();
-      setContacts(data.map(dbContactToFrontend));
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load contacts');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchContacts();
-  }, []);
 
   // Filter contacts
   const filteredContacts = useMemo(() => {
@@ -111,9 +97,9 @@ export default function ContactsPage() {
   const handleToggleStatus = async (id: string) => {
     try {
       await contactsApi.toggleStatus(id);
-      await fetchContacts();
+      queryClient.invalidateQueries({ queryKey: ['contacts'] });
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to toggle status');
+      console.error('Failed to toggle status:', e);
     }
   };
 
@@ -126,7 +112,7 @@ export default function ContactsPage() {
     }
     setIsModalOpen(false);
     setEditingContact(null);
-    await fetchContacts();
+    queryClient.invalidateQueries({ queryKey: ['contacts'] });
   };
 
   // Count contacts by type for tabs

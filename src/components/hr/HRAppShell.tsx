@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, ReactNode } from "react";
+import { useState, useMemo, ReactNode } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useAuth } from "@/components/auth";
+import { usePermissions, HR_PERMISSIONS } from "@/hooks/usePermissions";
 import { UserDropdown } from "@/components/shared/UserDropdown";
 import {
   LayoutDashboard,
@@ -23,41 +24,55 @@ interface HRAppShellProps {
   children: ReactNode;
 }
 
-const menuItems = [
+const allMenuItems = [
   {
     name: "Dashboard",
     href: "/hr/manager",
     icon: LayoutDashboard,
+    menuKey: "dashboard",
+    permission: HR_PERMISSIONS.DASHBOARD_VIEW,
   },
   {
     name: "Employees",
     href: "/hr/manager/employees",
     icon: Users,
+    menuKey: "employees",
+    permission: HR_PERMISSIONS.EMPLOYEES_VIEW,
   },
   {
     name: "Leave",
     href: "/hr/manager/leave",
     icon: CalendarDays,
+    menuKey: "leave",
+    permission: HR_PERMISSIONS.LEAVE_VIEW,
   },
   {
     name: "Payroll",
     href: "/hr/manager/payroll",
     icon: Banknote,
+    menuKey: "payroll",
+    permission: HR_PERMISSIONS.PAYROLL_VIEW,
   },
   {
     name: "Crew Schedule",
     href: "/hr/manager/crew-schedule",
     icon: Calendar,
+    menuKey: "crew-schedule",
+    permission: HR_PERMISSIONS.CREW_SCHEDULE_VIEW,
   },
   {
     name: "Charter Bonus",
     href: "/hr/manager/charter-bonus",
     icon: Ship,
+    menuKey: "charter-bonus",
+    permission: HR_PERMISSIONS.CHARTER_BONUS_VIEW,
   },
   {
     name: "Settings",
     href: "/hr/manager/settings",
     icon: Settings,
+    menuKey: "settings",
+    permission: HR_PERMISSIONS.SETTINGS_VIEW,
   },
 ];
 
@@ -65,9 +80,19 @@ export function HRAppShell({ children }: HRAppShellProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const pathname = usePathname();
 
-  const { isSuperAdmin } = useAuth();
+  const { isSuperAdmin, isMenuVisible } = useAuth();
+  const { hasPermission } = usePermissions();
 
   const canAccessAdmin = isSuperAdmin;
+
+  // Filter menu items based on database menu visibility + permissions
+  const menuItems = useMemo(() => {
+    return allMenuItems.filter((item) => {
+      if (isSuperAdmin) return true;
+      if (!isMenuVisible('hr', item.menuKey)) return false;
+      return hasPermission(item.permission);
+    });
+  }, [isSuperAdmin, isMenuVisible, hasPermission]);
 
   return (
     <div className="min-h-screen bg-gray-50">

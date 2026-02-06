@@ -27,6 +27,12 @@ export interface NotificationCreateInput {
   referenceNumber?: string;
   targetRole: string;
   targetUserId?: string;
+  /** Optional: send an email notification via Resend (Edge Function) */
+  sendEmail?: {
+    to: string;
+    subject: string;
+    html: string;
+  };
 }
 
 function dbToFrontend(db: DbNotification): AppNotification {
@@ -99,6 +105,20 @@ export const notificationsApi = {
       console.warn('Failed to create notification:', error.message);
       return null;
     }
+
+    // Send email via Edge Function if requested (fire-and-forget)
+    if (input.sendEmail) {
+      supabase.functions.invoke('send-email', {
+        body: {
+          to: input.sendEmail.to,
+          subject: input.sendEmail.subject,
+          html: input.sendEmail.html,
+        },
+      }).catch((emailErr) => {
+        console.warn('Failed to send email notification:', emailErr);
+      });
+    }
+
     return dbToFrontend(data);
   },
 

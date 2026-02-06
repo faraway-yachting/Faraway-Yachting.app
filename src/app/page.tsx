@@ -29,12 +29,15 @@ export default function Home() {
   );
 
   const visibleModules = useMemo((): Module[] => {
+    // Not logged in: show all modules (landing page)
     if (!user) return modules;
-    if (isLoading) return modules;
-    if (!profile) return modules;
+    // Still loading auth data: show nothing to prevent flash
+    if (isLoading) return [];
+    // Super admin: show all
     if (isSuperAdmin) return modules;
+    // Authenticated user: show only modules they have active roles for
     return modules.filter((m) => moduleAccess.includes(m.moduleKey));
-  }, [user, profile, isSuperAdmin, moduleAccess, isLoading]);
+  }, [user, isLoading, isSuperAdmin, moduleAccess]);
 
   useEffect(() => {
     const hash = window.location.hash;
@@ -149,15 +152,25 @@ export default function Home() {
             businesses.
           </p>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {visibleModules.map((module) => (
-            <ModuleCard
-              key={module.title}
-              module={module}
-              onNotify={handleNotify}
-            />
-          ))}
-        </div>
+        {user && !isLoading && visibleModules.length === 0 ? (
+          <div className="text-center py-12">
+            <div className="inline-flex items-center justify-center w-16 h-16 bg-gray-200 rounded-full mb-4">
+              <Shield className="h-8 w-8 text-gray-400" />
+            </div>
+            <h3 className="text-lg font-semibold text-gray-700 mb-2">No Modules Assigned</h3>
+            <p className="text-gray-500">Contact your administrator to get access to modules.</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {visibleModules.map((module) => (
+              <ModuleCard
+                key={module.title}
+                module={module}
+                onNotify={handleNotify}
+              />
+            ))}
+          </div>
+        )}
 
         <div className="flex justify-end mt-4">
           <button className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-[#5A7A8F] hover:text-[#2c3e50] transition-colors">

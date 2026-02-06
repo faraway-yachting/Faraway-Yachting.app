@@ -1,11 +1,12 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useMemo } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { Loader2, Users, AlertTriangle, UserCheck, UserX, FileWarning } from 'lucide-react';
 import Link from 'next/link';
-import { employeesApi } from '@/lib/supabase/api/employees';
 import { employeeDocumentsApi } from '@/lib/supabase/api/employeeDocuments';
-import { companiesApi } from '@/lib/supabase/api/companies';
+import { useEmployees } from '@/hooks/queries/useEmployees';
+import { useCompanies } from '@/hooks/queries/useCompanies';
 import type { Database } from '@/lib/supabase/database.types';
 import { EMPLOYEE_STATUS_LABELS, DOCUMENT_TYPE_LABELS } from '@/data/hr/types';
 import type { EmployeeStatus, DocumentType } from '@/data/hr/types';
@@ -14,32 +15,17 @@ type Employee = Database['public']['Tables']['employees']['Row'];
 type EmployeeDocument = Database['public']['Tables']['employee_documents']['Row'];
 
 export default function HRDashboard() {
-  const [employees, setEmployees] = useState<Employee[]>([]);
-  const [expiringDocs, setExpiringDocs] = useState<EmployeeDocument[]>([]);
-  const [companyMap, setCompanyMap] = useState<Map<string, string>>(new Map());
-  const [employeeMap, setEmployeeMap] = useState<Map<string, Employee>>(new Map());
-  const [loading, setLoading] = useState(true);
+  const { data: employees = [], isLoading: l1 } = useEmployees();
+  const { data: expiringDocs = [], isLoading: l2 } = useQuery({
+    queryKey: ['employeeDocuments', 'expiring', 60],
+    queryFn: () => employeeDocumentsApi.getExpiringSoon(60),
+    staleTime: 5 * 60 * 1000,
+  });
+  const { data: companies = [], isLoading: l3 } = useCompanies();
 
-  const loadData = useCallback(async () => {
-    try {
-      setLoading(true);
-      const [allEmployees, expDocs, companies] = await Promise.all([
-        employeesApi.getAll(),
-        employeeDocumentsApi.getExpiringSoon(60),
-        companiesApi.getAll(),
-      ]);
-      setEmployees(allEmployees);
-      setExpiringDocs(expDocs);
-      setCompanyMap(new Map(companies.map((c) => [c.id, c.name])));
-      setEmployeeMap(new Map(allEmployees.map((e) => [e.id, e])));
-    } catch (error) {
-      console.error('Failed to load HR dashboard:', error);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => { loadData(); }, [loadData]);
+  const companyMap = useMemo(() => new Map(companies.map((c: any) => [c.id, c.name])), [companies]);
+  const employeeMap = useMemo(() => new Map(employees.map((e: Employee) => [e.id, e])), [employees]);
+  const loading = l1 || l2 || l3;
 
   if (loading) {
     return (

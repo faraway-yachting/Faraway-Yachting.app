@@ -1,13 +1,14 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import { useParams } from 'next/navigation';
+import { useQueryClient } from '@tanstack/react-query';
 import { Search } from 'lucide-react';
 import { Booking, BookingStatus, BookingType, PaymentStatus, bookingStatusLabels, bookingStatusColors, bookingTypeLabels, paymentStatusLabels } from '@/data/booking/types';
 import { Project } from '@/data/project/types';
-import { projectsApi } from '@/lib/supabase/api/projects';
 import { bookingsApi } from '@/lib/supabase/api/bookings';
-import { dbProjectToFrontend } from '@/lib/supabase/transforms';
+import { useAllBookings } from '@/hooks/queries/useBookings';
+import { useYachtProjects } from '@/hooks/queries/useProjects';
 import { BookingForm } from '@/components/bookings/BookingForm';
 import { useAuth } from '@/components/auth';
 
@@ -15,15 +16,18 @@ export default function BookingsListPage() {
   const params = useParams();
   const role = params.role as string;
 
-  const { user, getModuleRole, isSuperAdmin } = useAuth();
+  const { user, getModuleRole, isSuperAdmin, hasPermission } = useAuth();
   const userBookingsRole = getModuleRole('bookings');
-  const isAgencyView = !isSuperAdmin && userBookingsRole === 'agent';
-  const canEdit = isSuperAdmin || userBookingsRole === 'manager' || userBookingsRole === 'agent';
+  // Limited view: users without full booking.view see reduced info (no financial data)
+  const isAgencyView = !isSuperAdmin && !hasPermission('bookings.booking.view');
+  const canEdit = isSuperAdmin || hasPermission('bookings.booking.edit');
 
-  // Data
-  const [bookings, setBookings] = useState<Booking[]>([]);
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const queryClient = useQueryClient();
+
+  // Data via React Query
+  const { data: bookings = [], isLoading: bookingsLoading } = useAllBookings();
+  const { data: projects = [], isLoading: projectsLoading } = useYachtProjects();
+  const isLoading = bookingsLoading || projectsLoading;
 
   // Filters
   const [statusFilter, setStatusFilter] = useState<string>('all');
@@ -52,26 +56,6 @@ export default function BookingsListPage() {
     }
     return 'External';
   };
-
-  // Load data
-  useEffect(() => {
-    async function loadData() {
-      setIsLoading(true);
-      try {
-        const [bookingsData, projectsData] = await Promise.all([
-          bookingsApi.getAll(),
-          projectsApi.getActive(),
-        ]);
-        setBookings(bookingsData);
-        setProjects(projectsData.map(dbProjectToFrontend).filter(p => p.type === 'yacht'));
-      } catch (error) {
-        console.error('Error loading data:', error);
-      } finally {
-        setIsLoading(false);
-      }
-    }
-    loadData();
-  }, []);
 
   // Filter
   const filteredBookings = useMemo(() => {
@@ -117,16 +101,16 @@ export default function BookingsListPage() {
 
   const handleSaveBooking = async (bookingData: Partial<Booking>) => {
     if (selectedBooking) {
-      const updated = await bookingsApi.update(selectedBooking.id, bookingData);
-      setBookings(prev => prev.map(b => b.id === selectedBooking.id ? updated : b));
+      await bookingsApi.update(selectedBooking.id, bookingData);
     }
+    queryClient.invalidateQueries({ queryKey: ['bookings'] });
     setShowBookingForm(false);
     setSelectedBooking(null);
   };
 
   const handleDeleteBooking = async (id: string) => {
     await bookingsApi.delete(id);
-    setBookings(prev => prev.filter(b => b.id !== id));
+    queryClient.invalidateQueries({ queryKey: ['bookings'] });
     setShowBookingForm(false);
     setSelectedBooking(null);
   };

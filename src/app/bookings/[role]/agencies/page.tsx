@@ -1,8 +1,8 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { useParams } from 'next/navigation';
 import { Users, Plus, Pencil, Trash2, Search, X, Building2, Loader2 } from 'lucide-react';
+import { useAuth } from '@/components/auth';
 import { bookingAgenciesApi, AgencyWithContact } from '@/lib/supabase/api/bookingAgencies';
 import { contactsApi } from '@/lib/supabase/api/contacts';
 import { DynamicSelect } from '@/components/bookings/form/DynamicSelect';
@@ -34,9 +34,8 @@ const emptyForm: AgencyForm = {
 };
 
 export default function AgenciesPage() {
-  const params = useParams();
-  const role = params.role as string;
-  const canEdit = role === 'admin' || role === 'manager';
+  const { isSuperAdmin, hasPermission } = useAuth();
+  const canEdit = isSuperAdmin || hasPermission('bookings.agencies.edit');
 
   const [agencies, setAgencies] = useState<AgencyWithContact[]>([]);
   const [loading, setLoading] = useState(true);
