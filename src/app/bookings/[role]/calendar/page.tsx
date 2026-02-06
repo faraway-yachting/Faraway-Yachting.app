@@ -13,6 +13,7 @@ import { Currency } from '@/data/company/types';
 import { bookingsApi } from '@/lib/supabase/api/bookings';
 import { useYachtProjects } from '@/hooks/queries/useProjects';
 import { useBookingsByMonth } from '@/hooks/queries/useBookings';
+import { useDataScope } from '@/hooks/useDataScope';
 import { useRealtimeSubscription } from '@/hooks/useRealtimeSubscription';
 import { useBookingSettings } from '@/contexts/BookingSettingsContext';
 import { useAuth } from '@/components/auth';
@@ -46,9 +47,12 @@ export default function BookingCalendarPage() {
   const [currentYear, setCurrentYear] = useState(new Date().getFullYear());
   const [currentMonth, setCurrentMonth] = useState(new Date().getMonth() + 1);
 
+  // Data scoping — restricted roles only see their assigned projects
+  const { projectIds } = useDataScope();
+
   // Data via React Query (cached, auto-refreshes when stale)
-  const { data: projects = [], isLoading: projectsLoading } = useYachtProjects();
-  const { data: bookings = [], isLoading: bookingsLoading } = useBookingsByMonth(currentYear, currentMonth);
+  const { data: projects = [], isLoading: projectsLoading } = useYachtProjects(projectIds);
+  const { data: bookings = [], isLoading: bookingsLoading } = useBookingsByMonth(currentYear, currentMonth, projectIds);
   const isLoading = projectsLoading || bookingsLoading;
 
   // Real-time updates: when another user creates/edits a booking, this calendar auto-refreshes

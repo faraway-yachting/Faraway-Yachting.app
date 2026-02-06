@@ -14,6 +14,8 @@ import { projectsApi } from "@/lib/supabase/api/projects";
 interface ProjectPLReportProps {
   projectId: string;
   projectName?: string;
+  /** When provided, restricts the project dropdown to only these project IDs */
+  accessibleProjectIds?: string[] | null;
 }
 
 interface ProjectOption {
@@ -21,7 +23,7 @@ interface ProjectOption {
   name: string;
 }
 
-export function ProjectPLReport({ projectId: initialProjectId, projectName }: ProjectPLReportProps) {
+export function ProjectPLReport({ projectId: initialProjectId, projectName, accessibleProjectIds }: ProjectPLReportProps) {
   const [isLoading, setIsLoading] = useState(false);
   const [report, setReport] = useState<ProjectPLReportData | null>(null);
   const [reports, setReports] = useState<ProjectPLReportData[]>([]); // For "All Projects"
@@ -39,18 +41,20 @@ export function ProjectPLReport({ projectId: initialProjectId, projectName }: Pr
 
   const fiscalYears = getRecentFiscalYears(5);
 
-  // Load projects from Supabase
+  // Load projects from Supabase (scoped by user access when restricted)
   useEffect(() => {
     const loadProjects = async () => {
       try {
-        const projectsData = await projectsApi.getActive();
+        const projectsData = accessibleProjectIds
+          ? await projectsApi.getActiveByIds(accessibleProjectIds)
+          : await projectsApi.getActive();
         setProjects(projectsData.map(p => ({ id: p.id, name: p.name })));
       } catch (error) {
         console.error("Error loading projects:", error);
       }
     };
     loadProjects();
-  }, []);
+  }, [accessibleProjectIds]);
 
   const loadReport = useCallback(async () => {
     if (projects.length === 0 && projectId === "all") {

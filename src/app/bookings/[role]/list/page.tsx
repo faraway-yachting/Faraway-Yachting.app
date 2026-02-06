@@ -11,6 +11,7 @@ import { useAllBookings } from '@/hooks/queries/useBookings';
 import { useYachtProjects } from '@/hooks/queries/useProjects';
 import { BookingForm } from '@/components/bookings/BookingForm';
 import { useAuth } from '@/components/auth';
+import { useDataScope } from '@/hooks/useDataScope';
 
 export default function BookingsListPage() {
   const params = useParams();
@@ -23,10 +24,11 @@ export default function BookingsListPage() {
   const canEdit = isSuperAdmin || hasPermission('bookings.booking.edit');
 
   const queryClient = useQueryClient();
+  const { projectIds } = useDataScope();
 
-  // Data via React Query
-  const { data: bookings = [], isLoading: bookingsLoading } = useAllBookings();
-  const { data: projects = [], isLoading: projectsLoading } = useYachtProjects();
+  // Data via React Query (scoped by user access)
+  const { data: bookings = [], isLoading: bookingsLoading } = useAllBookings(projectIds);
+  const { data: projects = [], isLoading: projectsLoading } = useYachtProjects(projectIds);
   const isLoading = bookingsLoading || projectsLoading;
 
   // Filters

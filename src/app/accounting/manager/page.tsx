@@ -23,6 +23,7 @@ import { bookingPaymentsApi, type BookingPaymentExtended } from "@/lib/supabase/
 import { invoicesApi } from "@/lib/supabase/api/invoices";
 import { useProjects } from "@/hooks/queries/useProjects";
 import { useUpcomingBookings, usePendingCharterExpenses } from "@/hooks/queries/useBookings";
+import { useDataScope } from "@/hooks/useDataScope";
 import type { Booking } from "@/data/booking/types";
 import Link from "next/link";
 
@@ -44,15 +45,18 @@ export default function ManagerDashboard() {
   const monthEnd = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${lastDay}`;
   const monthLabel = now.toLocaleDateString("en-US", { month: "long", year: "numeric" });
 
-  // All data via React Query (cached, parallel fetch)
+  // Data scoping — restricted roles only see their assigned projects
+  const { projectIds } = useDataScope();
+
+  // All data via React Query (cached, parallel fetch, scoped by user access)
   const { data: monthBookings = [], isLoading: l1 } = useQuery({
-    queryKey: ['bookings', 'dateRange', monthStart, monthEnd],
-    queryFn: () => bookingsApi.getByDateRange(monthStart, monthEnd),
+    queryKey: ['bookings', 'dateRange', monthStart, monthEnd, projectIds ?? 'all'],
+    queryFn: () => bookingsApi.getByDateRange(monthStart, monthEnd, projectIds ?? undefined),
     staleTime: 60 * 1000,
   });
-  const { data: upcoming = [], isLoading: l2 } = useUpcomingBookings();
-  const { data: projects = [], isLoading: l3 } = useProjects();
-  const { data: pendingExpenses = [], isLoading: l4 } = usePendingCharterExpenses();
+  const { data: upcoming = [], isLoading: l2 } = useUpcomingBookings(projectIds);
+  const { data: projects = [], isLoading: l3 } = useProjects(projectIds);
+  const { data: pendingExpenses = [], isLoading: l4 } = usePendingCharterExpenses(projectIds);
   const { data: paymentsNeedingAction = [], isLoading: l5 } = useQuery({
     queryKey: ['bookingPayments', 'needingAction'],
     queryFn: () => bookingPaymentsApi.getNeedingAction(),

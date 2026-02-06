@@ -171,12 +171,12 @@ export interface PaginatedResult<T> {
 }
 
 export const bookingsApi = {
-  async getAll(): Promise<Booking[]> {
+  async getAll(projectIds?: string[]): Promise<Booking[]> {
+    if (projectIds && projectIds.length === 0) return [];
     const supabase = createClient();
-    const { data, error } = await supabase
-      .from('bookings')
-      .select('*')
-      .order('date_from', { ascending: false });
+    let query = supabase.from('bookings').select('*').order('date_from', { ascending: false });
+    if (projectIds) query = query.in('project_id', projectIds);
+    const { data, error } = await query;
     if (error) throw error;
     return (data ?? []).map(dbBookingToFrontend);
   },
@@ -219,14 +219,15 @@ export const bookingsApi = {
     return dbBookingToFrontend(data);
   },
 
-  async getByDateRange(from: string, to: string): Promise<Booking[]> {
+  async getByDateRange(from: string, to: string, projectIds?: string[]): Promise<Booking[]> {
+    if (projectIds && projectIds.length === 0) return [];
     const supabase = createClient();
-    const { data, error } = await supabase
-      .from('bookings')
-      .select('*')
+    let query = supabase.from('bookings').select('*')
       .lte('date_from', to)
       .gte('date_to', from)
       .order('date_from', { ascending: true });
+    if (projectIds) query = query.in('project_id', projectIds);
+    const { data, error } = await query;
     if (error) throw error;
     return (data ?? []).map(dbBookingToFrontend);
   },
@@ -320,36 +321,38 @@ export const bookingsApi = {
     if (error) throw error;
   },
 
-  async getUpcoming(): Promise<Booking[]> {
+  async getUpcoming(projectIds?: string[]): Promise<Booking[]> {
+    if (projectIds && projectIds.length === 0) return [];
     const supabase = createClient();
     const today = new Date().toISOString().split('T')[0];
-    const { data, error } = await supabase
-      .from('bookings')
-      .select('*')
+    let query = supabase.from('bookings').select('*')
       .gte('date_from', today)
       .in('status', ['enquiry', 'hold', 'booked'])
       .order('date_from', { ascending: true })
       .limit(20);
+    if (projectIds) query = query.in('project_id', projectIds);
+    const { data, error } = await query;
     if (error) throw error;
     return (data ?? []).map(dbBookingToFrontend);
   },
 
-  async getPendingCharterExpenses(): Promise<Booking[]> {
+  async getPendingCharterExpenses(projectIds?: string[]): Promise<Booking[]> {
+    if (projectIds && projectIds.length === 0) return [];
     const supabase = createClient();
-    const { data, error } = await supabase
-      .from('bookings')
-      .select('*')
+    let query = supabase.from('bookings').select('*')
       .eq('charter_expense_status', 'pending_accounting')
       .order('date_from', { ascending: false });
+    if (projectIds) query = query.in('project_id', projectIds);
+    const { data, error } = await query;
     if (error) throw error;
     return (data ?? []).map(dbBookingToFrontend);
   },
 
-  async getByMonth(year: number, month: number): Promise<Booking[]> {
+  async getByMonth(year: number, month: number, projectIds?: string[]): Promise<Booking[]> {
     const from = `${year}-${String(month).padStart(2, '0')}-01`;
     const lastDay = new Date(year, month, 0).getDate();
     const to = `${year}-${String(month).padStart(2, '0')}-${lastDay}`;
-    return this.getByDateRange(from, to);
+    return this.getByDateRange(from, to, projectIds);
   },
 
   async checkConflicts(projectId: string, dateFrom: string, dateTo: string, excludeBookingId?: string): Promise<Booking[]> {

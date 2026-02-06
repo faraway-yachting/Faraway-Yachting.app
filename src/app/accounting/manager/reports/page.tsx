@@ -9,11 +9,13 @@ import { TrialBalanceReport } from "@/components/reports/TrialBalanceReport";
 import { AgingReport } from "@/components/reports/AgingReport";
 import NumberingGapReport from "@/components/reports/NumberingGapReport";
 import { BarChart3, FileText, TrendingUp, Building2, Ship, Scale, Clock, Hash } from "lucide-react";
+import { useDataScope } from "@/hooks/useDataScope";
 
 type ReportTab = "pl" | "balance-sheet" | "trial-balance" | "project-pl" | "aging" | "other";
 
 export default function ReportsPage() {
   const [activeTab, setActiveTab] = useState<ReportTab>("pl");
+  const { projectIds } = useDataScope();
 
   const tabs = [
     { id: "pl" as ReportTab, label: "P&L Report", icon: TrendingUp },
@@ -58,7 +60,7 @@ export default function ReportsPage() {
 
       {activeTab === "trial-balance" && <TrialBalanceReport />}
 
-      {activeTab === "project-pl" && <ProjectPLReport projectId="" />}
+      {activeTab === "project-pl" && <ProjectPLReport projectId="" accessibleProjectIds={projectIds} />}
 
       {activeTab === "aging" && <AgingReport />}
 

@@ -14,6 +14,7 @@ import type { BankAccount } from '@/data/banking/types';
 import type { Attachment } from '@/data/accounting/journalEntryTypes';
 import { formatCurrency, formatDate, isOverdue } from '@/lib/expenses/utils';
 import { getFiscalYear, getFiscalYearDateRange } from '@/lib/reports/projectPLCalculation';
+import { useDataScope } from '@/hooks/useDataScope';
 
 // Extended expense type with payment info
 interface ExpenseWithPaymentInfo extends ExpenseRecord {
@@ -21,6 +22,7 @@ interface ExpenseWithPaymentInfo extends ExpenseRecord {
 }
 
 export default function ExpenseRecordsPage() {
+  const { companyIds } = useDataScope();
   const [companies, setCompanies] = useState<Company[]>([]);
   const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([]);
   const [expenses, setExpenses] = useState<ExpenseWithPaymentInfo[]>([]);
@@ -53,14 +55,22 @@ export default function ExpenseRecordsPage() {
           companiesApi.getActive(),
           bankAccountsApi.getAll(),
         ]);
-        setCompanies(companiesData.map(dbCompanyToFrontend));
+        // Filter companies for restricted users
+        const filtered = companyIds
+          ? companiesData.filter(c => companyIds.includes(c.id))
+          : companiesData;
+        setCompanies(filtered.map(dbCompanyToFrontend));
         setBankAccounts(bankAccountsData.map(dbBankAccountToFrontend));
+        // Auto-select company for restricted users with single company
+        if (companyIds && filtered.length === 1) {
+          setDataScope(`company-${filtered[0].id}`);
+        }
       } catch (error) {
         console.error('Failed to load initial data:', error);
       }
     };
     loadInitialData();
-  }, []);
+  }, [companyIds]);
 
   // Load expenses from Supabase (with payments)
   useEffect(() => {

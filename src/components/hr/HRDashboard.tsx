@@ -7,6 +7,7 @@ import Link from 'next/link';
 import { employeeDocumentsApi } from '@/lib/supabase/api/employeeDocuments';
 import { useEmployees } from '@/hooks/queries/useEmployees';
 import { useCompanies } from '@/hooks/queries/useCompanies';
+import { useDataScope } from '@/hooks/useDataScope';
 import type { Database } from '@/lib/supabase/database.types';
 import { EMPLOYEE_STATUS_LABELS, DOCUMENT_TYPE_LABELS } from '@/data/hr/types';
 import type { EmployeeStatus, DocumentType } from '@/data/hr/types';
@@ -15,14 +16,24 @@ type Employee = Database['public']['Tables']['employees']['Row'];
 type EmployeeDocument = Database['public']['Tables']['employee_documents']['Row'];
 
 export default function HRDashboard() {
-  const { data: employees = [], isLoading: l1 } = useEmployees();
-  const { data: expiringDocs = [], isLoading: l2 } = useQuery({
+  const { companyIds } = useDataScope();
+  const { data: allEmployees = [], isLoading: l1 } = useEmployees();
+  const employees = useMemo(
+    () => companyIds ? allEmployees.filter((e) => e.company_id && companyIds.includes(e.company_id)) : allEmployees,
+    [allEmployees, companyIds]
+  );
+  const { data: allExpiringDocs = [], isLoading: l2 } = useQuery({
     queryKey: ['employeeDocuments', 'expiring', 60],
     queryFn: () => employeeDocumentsApi.getExpiringSoon(60),
     staleTime: 5 * 60 * 1000,
   });
   const { data: companies = [], isLoading: l3 } = useCompanies();
 
+  const employeeIds = useMemo(() => new Set(employees.map((e) => e.id)), [employees]);
+  const expiringDocs = useMemo(
+    () => companyIds ? allExpiringDocs.filter((d) => employeeIds.has(d.employee_id)) : allExpiringDocs,
+    [allExpiringDocs, companyIds, employeeIds]
+  );
   const companyMap = useMemo(() => new Map(companies.map((c: any) => [c.id, c.name])), [companies]);
   const employeeMap = useMemo(() => new Map(employees.map((e: Employee) => [e.id, e])), [employees]);
   const loading = l1 || l2 || l3;

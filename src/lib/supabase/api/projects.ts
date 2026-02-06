@@ -110,6 +110,19 @@ export const projectsApi = {
     return data ?? [];
   },
 
+  async getActiveByIds(projectIds: string[]): Promise<Project[]> {
+    if (projectIds.length === 0) return [];
+    const supabase = createClient();
+    const { data, error } = await supabase
+      .from('projects')
+      .select('*')
+      .eq('status', 'active')
+      .in('id', projectIds)
+      .order('name');
+    if (error) throw error;
+    return data ?? [];
+  },
+
   async getByStatus(status: 'active' | 'inactive' | 'completed'): Promise<Project[]> {
     const supabase = createClient();
     const { data, error } = await supabase

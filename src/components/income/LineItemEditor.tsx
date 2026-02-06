@@ -155,32 +155,31 @@ export default function LineItemEditor({
         <table className="min-w-full divide-y divide-gray-200">
           <thead className="bg-gray-50">
             <tr>
-              <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-48">
+              <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-36">
                 Project <span className="text-red-500">*</span>
               </th>
-              <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+              <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                 Description
               </th>
-              <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider w-24">
-                Quantity
+              <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider w-16">
+                Qty
               </th>
-              <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider w-40">
+              <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider w-36">
                 Unit Price
               </th>
               {pricingType !== 'no_vat' && (
-                <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider w-24">
+                <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider w-16">
                   Tax %
                 </th>
               )}
-              <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider w-32">
+              <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider w-28">
                 Amount
               </th>
-              <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider w-40">
+              <th className="px-2 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider w-28">
                 WHT
               </th>
               {!readOnly && (
-                <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider w-16">
-                  Actions
+                <th className="px-1 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider w-10">
                 </th>
               )}
             </tr>
@@ -204,19 +203,19 @@ export default function LineItemEditor({
                   {/* Main row */}
                   <tr className="hover:bg-gray-50">
                     {/* Project Selector (Required) */}
-                    <td className="px-3 pt-3 pb-1">
+                    <td className="px-2 pt-3 pb-1">
                       <select
                         value={item.projectId}
                         onChange={(e) => handleUpdateLineItem(item.id, { projectId: e.target.value })}
                         disabled={readOnly}
                         className={`
-                          w-full px-2 py-1.5 text-sm border rounded
+                          w-full px-1 py-1.5 text-sm border rounded
                           focus:outline-none focus:ring-2 focus:ring-[#5A7A8F]/20 focus:border-[#5A7A8F]
                           disabled:bg-gray-50 disabled:text-gray-500
                           ${!hasProject ? 'border-red-300 bg-red-50' : 'border-gray-300'}
                         `}
                       >
-                        <option value="">Select project...</option>
+                        <option value="">Sel...</option>
                         {projects.map((project) => (
                           <option key={project.id} value={project.id}>
                             {project.code} - {project.name}
@@ -224,7 +223,7 @@ export default function LineItemEditor({
                         ))}
                       </select>
                     </td>
-                    <td className="px-3 pt-3 pb-1">
+                    <td className="px-2 pt-3 pb-1">
                       <textarea
                         value={item.description}
                         onChange={(e) => handleUpdateLineItem(item.id, { description: e.target.value })}
@@ -234,7 +233,7 @@ export default function LineItemEditor({
                         className="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-[#5A7A8F]/20 focus:border-[#5A7A8F] disabled:bg-gray-50 disabled:text-gray-500 resize-none"
                       />
                     </td>
-                    <td className="px-4 pt-3 pb-1">
+                    <td className="px-2 pt-3 pb-1">
                       <input
                         type="number"
                         value={item.quantity}
@@ -242,10 +241,10 @@ export default function LineItemEditor({
                         disabled={readOnly}
                         min="0"
                         step="0.01"
-                        className="w-full px-2 py-1 text-sm text-right border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-[#5A7A8F]/20 focus:border-[#5A7A8F] disabled:bg-gray-50 disabled:text-gray-500"
+                        className="w-full px-1 py-1 text-sm text-right border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-[#5A7A8F]/20 focus:border-[#5A7A8F] disabled:bg-gray-50 disabled:text-gray-500"
                       />
                     </td>
-                    <td className="px-4 pt-3 pb-1">
+                    <td className="px-2 pt-3 pb-1">
                       <input
                         type="number"
                         value={item.unitPrice}
@@ -253,11 +252,11 @@ export default function LineItemEditor({
                         disabled={readOnly}
                         min="0"
                         step="0.01"
-                        className="w-full px-2 py-1 text-sm text-right border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-[#5A7A8F]/20 focus:border-[#5A7A8F] disabled:bg-gray-50 disabled:text-gray-500"
+                        className="w-full px-1 py-1 text-sm text-right border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-[#5A7A8F]/20 focus:border-[#5A7A8F] disabled:bg-gray-50 disabled:text-gray-500"
                       />
                     </td>
                     {pricingType !== 'no_vat' && (
-                      <td className="px-4 pt-3 pb-1">
+                      <td className="px-2 pt-3 pb-1">
                         <input
                           type="number"
                           value={item.taxRate}
@@ -266,11 +265,11 @@ export default function LineItemEditor({
                           min="0"
                           max="100"
                           step="0.01"
-                          className="w-full px-2 py-1 text-sm text-right border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-[#5A7A8F]/20 focus:border-[#5A7A8F] disabled:bg-gray-50 disabled:text-gray-500"
+                          className="w-full px-1 py-1 text-sm text-right border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-[#5A7A8F]/20 focus:border-[#5A7A8F] disabled:bg-gray-50 disabled:text-gray-500"
                         />
                       </td>
                     )}
-                    <td className="px-4 pt-3 pb-1">
+                    <td className="px-2 pt-3 pb-1">
                       <div className="text-sm font-medium text-gray-900 text-right">
                         {item.amount.toLocaleString('en-US', {
                           minimumFractionDigits: 2,
@@ -278,7 +277,7 @@ export default function LineItemEditor({
                         })}
                       </div>
                     </td>
-                    <td className="px-4 pt-3 pb-1">
+                    <td className="px-2 pt-3 pb-1">
                       {item.whtRate === 'custom' ? (
                         <input
                           type="number"
@@ -288,7 +287,7 @@ export default function LineItemEditor({
                           min="0"
                           step="0.01"
                           placeholder="0.00"
-                          className="w-full px-2 py-1 text-sm text-right border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-[#5A7A8F]/20 focus:border-[#5A7A8F] disabled:bg-gray-50 disabled:text-gray-500"
+                          className="w-full px-1 py-1 text-sm text-right border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-[#5A7A8F]/20 focus:border-[#5A7A8F] disabled:bg-gray-50 disabled:text-gray-500"
                         />
                       ) : (
                         <div className="text-sm font-medium text-gray-900 text-right">
@@ -300,7 +299,7 @@ export default function LineItemEditor({
                       )}
                     </td>
                     {!readOnly && (
-                      <td className="px-4 pt-3 pb-1 text-center" rowSpan={2}>
+                      <td className="px-1 pt-3 pb-1 text-center" rowSpan={2}>
                         <button
                           onClick={() => handleRemoveLineItem(item.id)}
                           className="p-1 text-red-600 hover:bg-red-50 rounded transition-colors"
@@ -313,8 +312,8 @@ export default function LineItemEditor({
                   </tr>
                   {/* Secondary row for Account selector and WHT rate selector */}
                   <tr className="hover:bg-gray-50 border-b border-gray-200">
-                    <td className="px-3 pt-0 pb-2"></td>
-                    <td className="px-3 pt-0 pb-2">
+                    <td className="px-2 pt-0 pb-2"></td>
+                    <td className="px-2 pt-0 pb-2">
                       <AccountCodeSelector
                         value={item.accountCode || ''}
                         onChange={(code) => handleUpdateLineItem(item.id, { accountCode: code })}
@@ -326,7 +325,7 @@ export default function LineItemEditor({
                       />
                     </td>
                     <td colSpan={pricingType !== 'no_vat' ? 4 : 3} className="pt-0 pb-2"></td>
-                    <td className="px-4 pt-0 pb-2">
+                    <td className="px-2 pt-0 pb-2">
                       <select
                         value={String(item.whtRate)}
                         onChange={(e) => {

@@ -13,6 +13,7 @@ import { receiptsApi } from '@/lib/supabase/api/receipts';
 import { projectsApi } from '@/lib/supabase/api/projects';
 import { bookingPaymentsApi, BookingPaymentExtended } from '@/lib/supabase/api/bookingPayments';
 import { getFiscalYear, getFiscalYearDateRange } from '@/lib/reports/projectPLCalculation';
+import { useDataScope } from '@/hooks/useDataScope';
 import type { Database } from '@/lib/supabase/database.types';
 
 type Invoice = Database['public']['Tables']['invoices']['Row'];
@@ -23,6 +24,7 @@ type Project = Database['public']['Tables']['projects']['Row'];
 
 export default function IncomeOverviewPage() {
   const router = useRouter();
+  const { companyIds, isRestricted } = useDataScope();
 
   // State
   const [dataScope, setDataScope] = useState('all-companies');
@@ -61,12 +63,22 @@ export default function IncomeOverviewPage() {
           bookingPaymentsApi.getNeedingAction(),
         ]);
 
+        // Filter by company access for restricted users
+        const filteredCompanies = companyIds
+          ? companiesData.filter(c => companyIds.includes(c.id))
+          : companiesData;
+
         setInvoices(invoicesData);
         setQuotations(quotationsData);
         setReceipts(receiptsData);
-        setCompanies(companiesData);
+        setCompanies(filteredCompanies);
         setProjects(projectsData);
         setPaymentsNeedingAction(needingActionData);
+
+        // Auto-select company for restricted users with single company
+        if (companyIds && filteredCompanies.length === 1) {
+          setDataScope(`company-${filteredCompanies[0].id}`);
+        }
       } catch (err) {
         console.error('Error fetching data:', err);
         setError(err instanceof Error ? err.message : 'Failed to load data');

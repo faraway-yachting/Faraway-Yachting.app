@@ -399,13 +399,20 @@ export function AuthProvider({ children }: AuthProviderProps) {
     }
 
     // Fetch all data in parallel with 10-second timeout per query (safety net)
-    const [profileData, rolesData, permsData, companyData, projectData] = await Promise.all([
+    const [profileDataInitial, rolesData, permsData, companyData, projectData] = await Promise.all([
       withTimeout(fetchProfile(userId), 10000).catch(() => null),
       withTimeout(fetchModuleRoles(userId), 10000).catch(() => []),
       withTimeout(fetchPermissions(userId), 10000).catch(() => []),
       withTimeout(fetchCompanyAccess(userId), 10000).catch(() => []),
       withTimeout(fetchProjectAccess(userId), 10000).catch(() => [])
     ]);
+
+    // Profile is critical (determines is_super_admin) — retry once if it failed
+    let profileData = profileDataInitial;
+    if (!profileData) {
+      console.warn('Profile fetch failed, retrying once...');
+      profileData = await withTimeout(fetchProfile(userId), 10000).catch(() => null);
+    }
 
     // Fetch role config (only if there are roles)
     let config: RoleConfig = { menuVisibility: {}, dataScopes: {} };
@@ -472,8 +479,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
         if ((event === 'SIGNED_IN' || event === 'INITIAL_SESSION') && currentSession?.user) {
           setSession(currentSession);
           setUser(currentSession.user);
-          const skipCache = event === 'SIGNED_IN';
-          await loadAuthData(currentSession.user.id, skipCache);
+          // Always fetch fresh data — cache can have stale is_super_admin
+          await loadAuthData(currentSession.user.id, true);
           setIsLoading(false);
           return;
         }
