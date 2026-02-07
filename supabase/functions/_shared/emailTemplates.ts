@@ -104,6 +104,32 @@ export function leaveRequestTemplate(
   `);
 }
 
+export function inviteUserTemplate(
+  fullName: string,
+  inviteLink: string,
+): string {
+  return baseTemplate("You're Invited to Faraway Yachting", `
+    <p style="color: #374151; margin: 0 0 12px;">Hello ${fullName},</p>
+    <p style="color: #374151; margin: 0 0 20px;">
+      You've been invited to join the Faraway Yachting management system.
+      Click the button below to set your password and get started.
+    </p>
+    <div style="text-align: center; margin: 24px 0;">
+      <a href="${inviteLink}"
+         style="display: inline-block; padding: 12px 32px; background-color: ${BRAND_COLOR}; color: white;
+                text-decoration: none; border-radius: 6px; font-weight: 600; font-size: 16px;">
+        Set Your Password
+      </a>
+    </div>
+    <p style="color: #6b7280; font-size: 14px; margin: 16px 0 0;">
+      If the button doesn't work, copy and paste this link into your browser:
+    </p>
+    <p style="color: #6b7280; font-size: 12px; word-break: break-all; margin: 8px 0 0;">
+      ${inviteLink}
+    </p>
+  `);
+}
+
 export function bookingConfirmationTemplate(
   bookingNumber: string,
   customerName: string,

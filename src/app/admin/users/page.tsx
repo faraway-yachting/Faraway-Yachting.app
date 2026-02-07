@@ -100,6 +100,7 @@ export default function AdminUsersPage() {
   const [inviting, setInviting] = useState(false);
   const [inviteLink, setInviteLink] = useState<string | null>(null);
   const [linkCopied, setLinkCopied] = useState(false);
+  const [emailSent, setEmailSent] = useState(false);
 
   // Edit state
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
@@ -234,6 +235,7 @@ export default function AdminUsersPage() {
       } else if (result.inviteLink) {
         // Show the invite link for admin to copy and share
         setInviteLink(result.inviteLink);
+        setEmailSent(result.emailSent);
         await loadData();
       } else {
         // No link returned, just close
@@ -501,7 +503,10 @@ export default function AdminUsersPage() {
                   <div>
                     <p className="font-medium text-green-800">User created successfully!</p>
                     <p className="text-sm text-green-700 mt-1">
-                      Share the invite link below with <strong>{inviteFullName}</strong> ({inviteEmail}) so they can set their password.
+                      {emailSent
+                        ? <>Invitation email sent to <strong>{inviteEmail}</strong>! The invite link is also available below.</>
+                        : <>Share the invite link below with <strong>{inviteFullName}</strong> ({inviteEmail}) so they can set their password.</>
+                      }
                     </p>
                   </div>
                 </div>
@@ -547,6 +552,7 @@ export default function AdminUsersPage() {
                       setShowInviteForm(false);
                       setInviteLink(null);
                       setLinkCopied(false);
+                      setEmailSent(false);
                       setInviteEmail('');
                       setInviteFullName('');
                       setInviteSuperAdmin(false);

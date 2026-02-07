@@ -203,7 +203,7 @@ export const userModuleRolesApi = {
     fullName: string,
     roles: { module: ModuleName; role: string }[],
     isSuperAdmin: boolean = false
-  ): Promise<{ user: UserWithModuleRoles | null; inviteLink: string | null; error: string | null }> {
+  ): Promise<{ user: UserWithModuleRoles | null; inviteLink: string | null; emailSent: boolean; error: string | null }> {
     try {
       // Call server-side API that has service role access
       const response = await fetch('/api/admin/invite-user', {
@@ -222,7 +222,7 @@ export const userModuleRolesApi = {
       const data = await response.json();
 
       if (!response.ok) {
-        return { user: null, inviteLink: null, error: data.error || 'Failed to invite user' };
+        return { user: null, inviteLink: null, emailSent: false, error: data.error || 'Failed to invite user' };
       }
 
       // Return the user with their roles
@@ -245,10 +245,10 @@ export const userModuleRolesApi = {
         })),
       };
 
-      return { user, inviteLink: data.inviteLink || null, error: null };
+      return { user, inviteLink: data.inviteLink || null, emailSent: data.emailSent || false, error: null };
     } catch (err) {
       console.error('Error inviting user:', err);
-      return { user: null, inviteLink: null, error: 'Failed to invite user' };
+      return { user: null, inviteLink: null, emailSent: false, error: 'Failed to invite user' };
     }
   },
 
