@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, ChangeEvent } from 'react';
 import { useParams } from 'next/navigation';
 import { useAuth } from '@/components/auth';
-import { Palette, RotateCcw, Ship, Check, Plus, Trash2, Anchor, Image, X, Upload, Link, Save, Loader2, Globe, Copy, ToggleLeft, ToggleRight, ExternalLink } from 'lucide-react';
+import { Palette, RotateCcw, Ship, Check, Plus, Trash2, Anchor, Image, X, Upload, Link, Save, Loader2, Globe, Copy, ToggleLeft, ToggleRight, ExternalLink, Pencil } from 'lucide-react';
 import { Project } from '@/data/project/types';
 import { projectsApi } from '@/lib/supabase/api/projects';
 import { dbProjectToFrontend } from '@/lib/supabase/transforms';
@@ -176,6 +176,12 @@ export default function BookingSettingsPage() {
   const [newLinkExpiry, setNewLinkExpiry] = useState('');
   const [isCreatingLink, setIsCreatingLink] = useState(false);
   const [copiedLinkId, setCopiedLinkId] = useState<string | null>(null);
+  const [editingLink, setEditingLink] = useState<PublicCalendarLink | null>(null);
+  const [editLinkLabel, setEditLinkLabel] = useState('');
+  const [editLinkProjectIds, setEditLinkProjectIds] = useState<string[]>([]);
+  const [editLinkStatuses, setEditLinkStatuses] = useState<string[]>([]);
+  const [editLinkExpiry, setEditLinkExpiry] = useState('');
+  const [isSavingLink, setIsSavingLink] = useState(false);
 
   // Edit yacht state
   const [editingYachtId, setEditingYachtId] = useState<string | null>(null);
@@ -250,6 +256,40 @@ export default function BookingSettingsPage() {
       setPublicLinks((prev) => prev.filter((l) => l.id !== id));
     } catch (err) {
       console.error('Failed to delete link:', err);
+    }
+  };
+
+  const handleStartEditLink = (link: PublicCalendarLink) => {
+    setEditingLink(link);
+    setEditLinkLabel(link.label);
+    setEditLinkProjectIds([...link.project_ids]);
+    setEditLinkStatuses([...link.visible_statuses]);
+    setEditLinkExpiry(link.expires_at ? link.expires_at.split('T')[0] : '');
+  };
+
+  const handleSaveEditLink = async () => {
+    if (!editingLink || !editLinkLabel.trim() || editLinkProjectIds.length === 0) return;
+    setIsSavingLink(true);
+    try {
+      await publicCalendarLinksApi.update(editingLink.id, {
+        label: editLinkLabel.trim(),
+        project_ids: editLinkProjectIds,
+        visible_statuses: editLinkStatuses,
+        expires_at: editLinkExpiry || null,
+      });
+      setPublicLinks((prev) =>
+        prev.map((l) =>
+          l.id === editingLink.id
+            ? { ...l, label: editLinkLabel.trim(), project_ids: editLinkProjectIds, visible_statuses: editLinkStatuses, expires_at: editLinkExpiry || null }
+            : l
+        )
+      );
+      setEditingLink(null);
+    } catch (err) {
+      console.error('Failed to update link:', err);
+      alert('Failed to update link');
+    } finally {
+      setIsSavingLink(false);
     }
   };
 
@@ -656,6 +696,14 @@ export default function BookingSettingsPage() {
                         <p className="text-sm text-gray-500 truncate">
                           Boats: {getProjectNames(link.project_ids)}
                         </p>
+                        {link.expires_at && (
+                          <p className="text-xs text-gray-400 mt-0.5">
+                            Expires: {new Date(link.expires_at).toLocaleDateString()}
+                          </p>
+                        )}
+                        {!link.expires_at && (
+                          <p className="text-xs text-gray-400 mt-0.5">No expiry</p>
+                        )}
                         <div className="flex items-center gap-2 mt-2">
                           <code className="text-xs text-gray-400 bg-gray-100 px-2 py-1 rounded truncate max-w-md">
                             {typeof window !== 'undefined' ? `${window.location.origin}/public/calendar/${link.token}` : `/public/calendar/${link.token}`}
@@ -683,6 +731,13 @@ export default function BookingSettingsPage() {
                         >
                           <ExternalLink className="h-4 w-4" />
                         </a>
+                        <button
+                          onClick={() => handleStartEditLink(link)}
+                          className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
+                          title="Edit link"
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </button>
                         <button
                           onClick={() => handleToggleLink(link)}
                           className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
@@ -832,6 +887,138 @@ export default function BookingSettingsPage() {
               >
                 {isCreatingLink && <Loader2 className="h-4 w-4 animate-spin" />}
                 Create Link
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Link Modal */}
+      {editingLink && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-lg">
+            <div className="px-6 py-4 border-b border-gray-200">
+              <h3 className="text-lg font-semibold text-gray-900">Edit Public Calendar Link</h3>
+              <p className="text-sm text-gray-500 mt-1">Update link settings. The URL stays the same.</p>
+            </div>
+            <div className="p-6 space-y-4">
+              {/* Label */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Label</label>
+                <input
+                  type="text"
+                  value={editLinkLabel}
+                  onChange={(e) => setEditLinkLabel(e.target.value)}
+                  placeholder="e.g. Yacht Charters Agency"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#5A7A8F]/20 focus:border-[#5A7A8F]"
+                />
+              </div>
+
+              {/* Boats */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Boats to show <span className="text-red-500">*</span>
+                </label>
+                <div className="space-y-2 max-h-40 overflow-y-auto border border-gray-200 rounded-lg p-3">
+                  {projects.map((project) => (
+                    <label key={project.id} className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={editLinkProjectIds.includes(project.id)}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setEditLinkProjectIds((prev) => [...prev, project.id]);
+                          } else {
+                            setEditLinkProjectIds((prev) => prev.filter((id) => id !== project.id));
+                          }
+                        }}
+                        className="rounded border-gray-300 text-[#5A7A8F] focus:ring-[#5A7A8F]"
+                      />
+                      <Ship className="h-4 w-4 text-gray-400" />
+                      <span className="text-sm text-gray-700">{project.name}</span>
+                    </label>
+                  ))}
+                </div>
+                {projects.length > 0 && (
+                  <div className="mt-1 flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setEditLinkProjectIds(projects.map((p) => p.id))}
+                      className="text-xs text-[#5A7A8F] hover:underline"
+                    >
+                      Select all
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setEditLinkProjectIds([])}
+                      className="text-xs text-gray-500 hover:underline"
+                    >
+                      Clear
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Visible statuses */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Visible statuses</label>
+                <div className="flex flex-wrap gap-2">
+                  {['booked', 'completed', 'hold', 'enquiry'].map((status) => (
+                    <label key={status} className="flex items-center gap-1.5 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={editLinkStatuses.includes(status)}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setEditLinkStatuses((prev) => [...prev, status]);
+                          } else {
+                            setEditLinkStatuses((prev) => prev.filter((s) => s !== status));
+                          }
+                        }}
+                        className="rounded border-gray-300 text-[#5A7A8F] focus:ring-[#5A7A8F]"
+                      />
+                      <span className="text-sm text-gray-700 capitalize">{status}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              {/* Expiry date */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Expiry date <span className="text-xs text-gray-400">(leave empty for no expiry)</span>
+                </label>
+                <input
+                  type="date"
+                  value={editLinkExpiry}
+                  onChange={(e) => setEditLinkExpiry(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#5A7A8F]/20 focus:border-[#5A7A8F]"
+                />
+                {editLinkExpiry && (
+                  <button
+                    type="button"
+                    onClick={() => setEditLinkExpiry('')}
+                    className="text-xs text-red-500 hover:underline mt-1"
+                  >
+                    Remove expiry (never expires)
+                  </button>
+                )}
+              </div>
+            </div>
+            <div className="px-6 py-4 border-t border-gray-200 flex justify-end gap-3">
+              <button
+                onClick={() => setEditingLink(null)}
+                className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveEditLink}
+                disabled={!editLinkLabel.trim() || editLinkProjectIds.length === 0 || isSavingLink}
+                className="px-4 py-2 bg-[#5A7A8F] text-white rounded-lg hover:bg-[#4a6a7f] transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+              >
+                {isSavingLink && <Loader2 className="h-4 w-4 animate-spin" />}
+                Save Changes
               </button>
             </div>
           </div>

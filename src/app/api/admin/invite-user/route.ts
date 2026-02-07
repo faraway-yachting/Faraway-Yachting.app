@@ -30,6 +30,7 @@ export async function POST(request: NextRequest) {
       data: {
         full_name: fullName,
       },
+      redirectTo: 'https://www.faraway-yachting.app/auth/setup-password',
     });
 
     if (authError) {
