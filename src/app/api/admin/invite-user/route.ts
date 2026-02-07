@@ -66,7 +66,13 @@ export async function POST(request: NextRequest) {
     }
 
     const userId = linkData.user.id;
-    const inviteLink = linkData.properties?.action_link || null;
+
+    // Build invite link using raw OTP token for direct client-side verification
+    // This bypasses Supabase's /auth/v1/verify redirect endpoint which can fail with otp_expired
+    const emailOtp = linkData.properties?.email_otp;
+    const inviteLink = emailOtp
+      ? `https://www.faraway-yachting.app/auth/setup-password?email=${encodeURIComponent(email)}&token=${encodeURIComponent(emailOtp)}`
+      : linkData.properties?.action_link || null;
 
     // Create or update user profile with super admin status and full name
     const { error: profileError } = await supabaseAdmin

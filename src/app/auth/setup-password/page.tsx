@@ -18,7 +18,34 @@ export default function SetupPasswordPage() {
   useEffect(() => {
     const initializeSession = async () => {
       try {
-        // Check if we have tokens in the URL hash (from email invite)
+        // Method 1: Verify OTP directly from query params (admin-shared invite link)
+        // URL format: /auth/setup-password?email=xxx&token=xxx
+        const searchParams = new URLSearchParams(window.location.search);
+        const emailParam = searchParams.get('email');
+        const tokenParam = searchParams.get('token');
+
+        if (emailParam && tokenParam) {
+          const { error: verifyError } = await supabase.auth.verifyOtp({
+            email: emailParam,
+            token: tokenParam,
+            type: 'invite',
+          });
+
+          if (verifyError) {
+            console.error('OTP verification error:', verifyError);
+            setError('Failed to verify invitation. The link may have expired or already been used.');
+            setInitializing(false);
+            return;
+          }
+
+          // Clear query params from URL for cleaner display
+          window.history.replaceState(null, '', window.location.pathname);
+          setSessionReady(true);
+          setInitializing(false);
+          return;
+        }
+
+        // Method 2: Check for tokens in URL hash (from Supabase email redirect flow)
         const hash = window.location.hash;
         if (hash) {
           const hashParams = new URLSearchParams(hash.substring(1));
@@ -26,8 +53,7 @@ export default function SetupPasswordPage() {
           const refreshToken = hashParams.get('refresh_token');
           const type = hashParams.get('type');
 
-          if (accessToken && refreshToken && type === 'invite') {
-            // Set the session using the tokens from the URL
+          if (accessToken && refreshToken && (type === 'invite' || type === 'recovery')) {
             const { error: sessionError } = await supabase.auth.setSession({
               access_token: accessToken,
               refresh_token: refreshToken,
@@ -40,15 +66,22 @@ export default function SetupPasswordPage() {
               return;
             }
 
-            // Clear the hash from URL for cleaner display
             window.history.replaceState(null, '', window.location.pathname);
             setSessionReady(true);
             setInitializing(false);
             return;
           }
+
+          // Check for error in hash (from failed Supabase redirect)
+          const hashError = hashParams.get('error_description') || hashParams.get('error');
+          if (hashError) {
+            setError(decodeURIComponent(hashError));
+            setInitializing(false);
+            return;
+          }
         }
 
-        // Check if user already has an active session
+        // Method 3: Check if user already has an active session
         const { data: { session } } = await supabase.auth.getSession();
         if (session) {
           setSessionReady(true);
