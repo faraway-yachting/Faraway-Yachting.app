@@ -22,6 +22,9 @@ import {
   X,
   Check,
   Trash2,
+  Copy,
+  CheckCircle,
+  Link,
 } from 'lucide-react';
 
 interface Company {
@@ -95,6 +98,8 @@ export default function AdminUsersPage() {
     hr: '',
   });
   const [inviting, setInviting] = useState(false);
+  const [inviteLink, setInviteLink] = useState<string | null>(null);
+  const [linkCopied, setLinkCopied] = useState(false);
 
   // Edit state
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
@@ -226,8 +231,12 @@ export default function AdminUsersPage() {
 
       if (result.error) {
         setError(result.error);
+      } else if (result.inviteLink) {
+        // Show the invite link for admin to copy and share
+        setInviteLink(result.inviteLink);
+        await loadData();
       } else {
-        // Reset form and reload
+        // No link returned, just close
         setInviteEmail('');
         setInviteFullName('');
         setInviteSuperAdmin(false);
@@ -471,12 +480,85 @@ export default function AdminUsersPage() {
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] overflow-hidden">
             <div className="flex items-center justify-between px-6 py-4 border-b">
-              <h2 className="text-lg font-semibold">Invite New User</h2>
-              <button onClick={() => setShowInviteForm(false)} className="text-gray-400 hover:text-gray-600">
+              <h2 className="text-lg font-semibold">{inviteLink ? 'User Created — Invite Link' : 'Invite New User'}</h2>
+              <button onClick={() => {
+                setShowInviteForm(false);
+                setInviteLink(null);
+                setLinkCopied(false);
+                setInviteEmail('');
+                setInviteFullName('');
+                setInviteSuperAdmin(false);
+                setInviteRoles({ accounting: '', bookings: '', inventory: '', maintenance: '', customers: '', hr: '' });
+              }} className="text-gray-400 hover:text-gray-600">
                 <X className="h-5 w-5" />
               </button>
             </div>
 
+            {inviteLink ? (
+              <div className="p-6 space-y-5">
+                <div className="flex items-start gap-3 p-4 bg-green-50 rounded-lg">
+                  <CheckCircle className="h-5 w-5 text-green-600 mt-0.5 flex-shrink-0" />
+                  <div>
+                    <p className="font-medium text-green-800">User created successfully!</p>
+                    <p className="text-sm text-green-700 mt-1">
+                      Share the invite link below with <strong>{inviteFullName}</strong> ({inviteEmail}) so they can set their password.
+                    </p>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    <Link className="h-4 w-4 inline mr-1" />
+                    Invite Link
+                  </label>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      readOnly
+                      value={inviteLink}
+                      className="flex-1 px-3 py-2 text-sm border border-gray-300 rounded-md bg-gray-50 text-gray-700 font-mono"
+                      onClick={(e) => (e.target as HTMLInputElement).select()}
+                    />
+                    <button
+                      onClick={async () => {
+                        await navigator.clipboard.writeText(inviteLink);
+                        setLinkCopied(true);
+                        setTimeout(() => setLinkCopied(false), 3000);
+                      }}
+                      className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+                        linkCopied
+                          ? 'bg-green-100 text-green-700'
+                          : 'bg-purple-600 text-white hover:bg-purple-700'
+                      }`}
+                    >
+                      {linkCopied ? <CheckCircle className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                      {linkCopied ? 'Copied!' : 'Copy'}
+                    </button>
+                  </div>
+                </div>
+
+                <p className="text-xs text-gray-500">
+                  This link will expire after first use. The user will be directed to set their password.
+                </p>
+
+                <div className="flex justify-end">
+                  <button
+                    onClick={() => {
+                      setShowInviteForm(false);
+                      setInviteLink(null);
+                      setLinkCopied(false);
+                      setInviteEmail('');
+                      setInviteFullName('');
+                      setInviteSuperAdmin(false);
+                      setInviteRoles({ accounting: '', bookings: '', inventory: '', maintenance: '', customers: '', hr: '' });
+                    }}
+                    className="px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200"
+                  >
+                    Done
+                  </button>
+                </div>
+              </div>
+            ) : (
             <form onSubmit={handleInviteUser} className="p-6 space-y-6 overflow-y-auto" style={{ maxHeight: 'calc(90vh - 130px)' }}>
               <div className="grid grid-cols-2 gap-4">
                 <div>
@@ -560,10 +642,11 @@ export default function AdminUsersPage() {
                   disabled={inviting || !inviteEmail || !inviteFullName}
                   className="px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 disabled:opacity-50"
                 >
-                  {inviting ? 'Sending...' : 'Send Invitation'}
+                  {inviting ? 'Creating...' : 'Create & Get Invite Link'}
                 </button>
               </div>
             </form>
+            )}
           </div>
         </div>
       )}

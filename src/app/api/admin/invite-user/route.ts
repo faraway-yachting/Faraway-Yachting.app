@@ -25,53 +25,48 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Invite the user via Supabase Auth Admin API
-    let { data: authData, error: authError } = await supabaseAdmin.auth.admin.inviteUserByEmail(email, {
-      data: {
-        full_name: fullName,
-      },
-      redirectTo: 'https://www.faraway-yachting.app/auth/setup-password',
-    });
+    // If user already exists in auth, clean up first
+    const { data: existingUsers } = await supabaseAdmin.auth.admin.listUsers();
+    const existingUser = existingUsers?.users?.find(u => u.email === email);
 
-    // If email already exists, clean up the old user and retry
-    if (authError) {
-      const { data: existingUsers } = await supabaseAdmin.auth.admin.listUsers();
-      const existingUser = existingUsers?.users?.find(u => u.email === email);
-
-      if (existingUser) {
-        // Clean up app tables + auth user (same logic as delete-user route)
-        await supabaseAdmin.from('user_module_roles').delete().eq('user_id', existingUser.id);
-        await supabaseAdmin.from('user_company_access').delete().eq('user_id', existingUser.id);
-        await supabaseAdmin.from('user_project_access').delete().eq('user_id', existingUser.id);
-        await supabaseAdmin.from('user_profiles').delete().eq('id', existingUser.id);
-        await supabaseAdmin.auth.admin.deleteUser(existingUser.id);
-
-        // Retry invite
-        const retry = await supabaseAdmin.auth.admin.inviteUserByEmail(email, {
-          data: { full_name: fullName },
-          redirectTo: 'https://www.faraway-yachting.app/auth/setup-password',
-        });
-        authData = retry.data;
-        authError = retry.error;
-      }
-
-      if (authError) {
-        console.error('Auth error:', authError);
-        return NextResponse.json(
-          { error: authError.message },
-          { status: 400 }
-        );
-      }
+    if (existingUser) {
+      await supabaseAdmin.from('user_module_roles').delete().eq('user_id', existingUser.id);
+      await supabaseAdmin.from('user_company_access').delete().eq('user_id', existingUser.id);
+      await supabaseAdmin.from('user_project_access').delete().eq('user_id', existingUser.id);
+      await supabaseAdmin.from('user_profiles').delete().eq('id', existingUser.id);
+      await supabaseAdmin.auth.admin.deleteUser(existingUser.id);
     }
 
-    if (!authData.user) {
+    // Also clean up orphaned profile by email
+    await supabaseAdmin.from('user_profiles').delete().eq('email', email);
+
+    // Generate invite link (does not rely on Supabase email service)
+    const { data: linkData, error: linkError } = await supabaseAdmin.auth.admin.generateLink({
+      type: 'invite',
+      email,
+      options: {
+        data: { full_name: fullName },
+        redirectTo: 'https://www.faraway-yachting.app/auth/setup-password',
+      },
+    });
+
+    if (linkError) {
+      console.error('Auth error:', linkError);
+      return NextResponse.json(
+        { error: linkError.message },
+        { status: 400 }
+      );
+    }
+
+    if (!linkData.user) {
       return NextResponse.json(
         { error: 'Failed to create user' },
         { status: 500 }
       );
     }
 
-    const userId = authData.user.id;
+    const userId = linkData.user.id;
+    const inviteLink = linkData.properties?.action_link || null;
 
     // Create or update user profile with super admin status and full name
     const { error: profileError } = await supabaseAdmin
@@ -87,7 +82,6 @@ export async function POST(request: NextRequest) {
 
     if (profileError) {
       console.error('Profile upsert error:', profileError);
-      // Don't fail the whole request, user was created
     }
 
     // Set module roles if provided
@@ -105,7 +99,6 @@ export async function POST(request: NextRequest) {
 
       if (rolesError) {
         console.error('Roles insert error:', rolesError);
-        // Don't fail the whole request, user was created
       }
     }
 
@@ -115,7 +108,8 @@ export async function POST(request: NextRequest) {
         id: userId,
         email: email,
         full_name: fullName,
-      }
+      },
+      inviteLink,
     });
 
   } catch (error) {
