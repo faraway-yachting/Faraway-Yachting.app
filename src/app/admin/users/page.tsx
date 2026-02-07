@@ -541,6 +541,12 @@ export default function AdminUsersPage() {
                 </div>
               </div>
 
+              {error && (
+                <div className="p-3 bg-red-50 text-red-700 rounded-md text-sm">
+                  {error}
+                </div>
+              )}
+
               <div className="flex justify-end gap-3">
                 <button
                   type="button"
