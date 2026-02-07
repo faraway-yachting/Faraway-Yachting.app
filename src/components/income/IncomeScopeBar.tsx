@@ -2,6 +2,7 @@
 
 import { Download, ChevronDown } from 'lucide-react';
 import { Currency } from '@/data/company/types';
+import { useCurrencyOptions } from '@/hooks/useCurrencyOptions';
 
 // Generic status type - will be customized per page
 export type IncomeDocumentStatus = string;
@@ -50,7 +51,8 @@ export function IncomeScopeBar({
   statusOptions = [],
   onExport,
 }: IncomeScopeBarProps) {
-  const currencyOptions: Currency[] = ['THB', 'USD', 'EUR', 'SGD'];
+  const { options: currencyOptionsList } = useCurrencyOptions();
+  const currencyOptions: Currency[] = currencyOptionsList.map(o => o.value as Currency);
 
   const toggleCurrency = (currency: Currency) => {
     if (!onCurrenciesChange) return;

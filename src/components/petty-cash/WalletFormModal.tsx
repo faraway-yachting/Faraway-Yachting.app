@@ -4,6 +4,7 @@ import { useState, useEffect, useMemo } from "react";
 import { X, Loader2 } from "lucide-react";
 import type { PettyCashWallet, WalletStatus } from "@/data/petty-cash/types";
 import type { Currency, Company } from "@/data/company/types";
+import { CurrencySelect } from "@/components/shared/CurrencySelect";
 import { companiesApi } from "@/lib/supabase/api/companies";
 import { pettyCashApi } from "@/lib/supabase/api/pettyCash";
 import { dbCompanyToFrontend } from "@/lib/supabase/transforms";
@@ -14,15 +15,6 @@ interface WalletFormModalProps {
   onSave: () => void;
   editingWallet?: PettyCashWallet | null;
 }
-
-const CURRENCY_OPTIONS: { value: Currency; label: string }[] = [
-  { value: "THB", label: "THB - Thai Baht" },
-  { value: "USD", label: "USD - US Dollar" },
-  { value: "EUR", label: "EUR - Euro" },
-  { value: "SGD", label: "SGD - Singapore Dollar" },
-  { value: "GBP", label: "GBP - British Pound" },
-  { value: "AED", label: "AED - UAE Dirham" },
-];
 
 const STATUS_OPTIONS: { value: WalletStatus; label: string }[] = [
   { value: "active", label: "Active" },
@@ -356,21 +348,14 @@ export function WalletFormModal({
               <label htmlFor="currency" className="block text-sm font-medium text-gray-700 mb-1">
                 Currency <span className="text-red-500">*</span>
               </label>
-              <select
-                id="currency"
+              <CurrencySelect
                 value={currency}
-                onChange={(e) => setCurrency(e.target.value as Currency)}
-                disabled={!!editingWallet} // Cannot change currency after creation
+                onChange={(val) => setCurrency(val as Currency)}
+                disabled={!!editingWallet}
                 className={`w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#5A7A8F] focus:border-transparent ${
                   editingWallet ? "bg-gray-100 text-gray-500" : ""
                 }`}
-              >
-                {CURRENCY_OPTIONS.map((opt) => (
-                  <option key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </option>
-                ))}
-              </select>
+              />
               {editingWallet && (
                 <p className="mt-1 text-xs text-gray-500">Currency cannot be changed after creation</p>
               )}

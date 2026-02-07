@@ -5,7 +5,8 @@
  * Companies can be used across Accounting, Invoicing, Tax Reporting, and Shareholder Reporting.
  */
 
-export type Currency = 'THB' | 'EUR' | 'USD' | 'SGD' | 'GBP' | 'AED';
+export type KnownCurrency = 'THB' | 'EUR' | 'USD' | 'SGD' | 'GBP' | 'AED';
+export type Currency = KnownCurrency | (string & {});
 
 export interface Address {
   street: string;

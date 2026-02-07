@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { Download, ChevronDown, Check } from 'lucide-react';
 import { Currency } from '@/data/company/types';
+import { useCurrencyOptions } from '@/hooks/useCurrencyOptions';
 import { ExpenseStatus, PaymentStatus, ReceiptStatus } from '@/data/expenses/types';
 import type { BankAccount } from '@/data/banking/types';
 
@@ -65,7 +66,7 @@ const receiptStatusOptions: Array<{ value: ReceiptStatus; label: string }> = [
   { value: 'not_required', label: 'N/A' },
 ];
 
-const currencyOptions: Currency[] = ['THB', 'USD', 'EUR', 'SGD', 'GBP', 'AED'];
+// Currency options loaded dynamically in component via useCurrencyOptions hook
 
 // Reusable dropdown component for multi-select filters
 function FilterDropdown<T extends string>({
@@ -187,6 +188,9 @@ export function ExpensesScopeBar({
   showBankAccountFilter = false,
   onExport,
 }: ExpensesScopeBarProps) {
+  const { options: currencyOptionsList } = useCurrencyOptions();
+  const currencyOptions: Currency[] = currencyOptionsList.map(o => o.value as Currency);
+
   // Bank account dropdown state
   const [bankAccountDropdownOpen, setBankAccountDropdownOpen] = useState(false);
   const bankAccountDropdownRef = useRef<HTMLDivElement>(null);

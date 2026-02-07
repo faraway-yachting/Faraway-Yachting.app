@@ -4,6 +4,7 @@ import { useState, useRef, useEffect } from 'react';
 import { Calendar, Download, RefreshCw, ChevronDown } from 'lucide-react';
 import { ReconciliationScope, ViewMode, BankFeedStatus } from '@/data/banking/bankReconciliationTypes';
 import { Currency } from '@/data/company/types';
+import { useCurrencyOptions } from '@/hooks/useCurrencyOptions';
 
 interface ReconciliationScopeBarProps {
   dataScope: string; // Format: "all-companies" | "company-{id}" | "project-{id}"
@@ -68,7 +69,8 @@ export function ReconciliationScopeBar({
     { value: 'ignored', label: 'Ignored' },
   ];
 
-  const currencyOptions: Currency[] = ['THB', 'USD', 'EUR', 'SGD'];
+  const { options: currencyOptionsList } = useCurrencyOptions();
+  const currencyOptions: Currency[] = currencyOptionsList.map(o => o.value as Currency);
 
   const toggleStatus = (status: BankFeedStatus) => {
     if (selectedStatuses.includes(status)) {

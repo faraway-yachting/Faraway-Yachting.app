@@ -7,6 +7,7 @@ import { mockDebitNotes } from '@/data/income/mockData';
 import { getCompanyById, getActiveCompanies } from '@/data/company/companies';
 import type { DebitNoteStatus } from '@/data/income/types';
 import type { Currency } from '@/data/company/types';
+import { useCurrencyOptions } from '@/hooks/useCurrencyOptions';
 
 // Status tabs configuration
 const statusTabs = [
@@ -46,11 +47,10 @@ interface FilterState {
   dateTo: string;
 }
 
-// Currency options
-const currencyOptions: Currency[] = ['USD', 'EUR', 'GBP', 'THB', 'SGD', 'AED'];
-
 export default function DebitNotesPage() {
   const router = useRouter();
+  const { options: currencyOptionsList } = useCurrencyOptions();
+  const currencyOptions: Currency[] = currencyOptionsList.map(o => o.value as Currency);
   const [activeTab, setActiveTab] = useState<DebitNoteStatus | 'all' | 'recent'>('recent');
   const [searchQuery, setSearchQuery] = useState('');
   const [showFilterPanel, setShowFilterPanel] = useState(false);

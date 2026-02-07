@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { Loader2, Save, Camera, User, Plus } from 'lucide-react';
 import { employeesApi } from '@/lib/supabase/api/employees';
 import { companiesApi } from '@/lib/supabase/api/companies';
+import { CurrencySelect } from '@/components/shared/CurrencySelect';
 import { hrEmploymentTypesApi } from '@/lib/supabase/api/hrEmploymentTypes';
 import { hrPositionsApi } from '@/lib/supabase/api/hrPositions';
 import { hrDepartmentsApi, type HRDepartment } from '@/lib/supabase/api/hrDepartments';
@@ -573,16 +574,11 @@ export default function EmployeeForm({ employee, onSaved, onCancel }: EmployeeFo
           </div>
           <div>
             <label className="block text-xs font-medium text-gray-700 mb-1">Currency</label>
-            <select
-              name="currency"
+            <CurrencySelect
               value={form.currency}
-              onChange={handleChange}
+              onChange={(val) => handleChange({ target: { name: 'currency', value: val } } as React.ChangeEvent<HTMLSelectElement>)}
               className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#5A7A8F]/50 focus:border-[#5A7A8F]"
-            >
-              <option value="THB">THB</option>
-              <option value="USD">USD</option>
-              <option value="EUR">EUR</option>
-            </select>
+            />
           </div>
           <div>
             <label className="block text-xs font-medium text-gray-700 mb-1">Thai Registered Salary</label>

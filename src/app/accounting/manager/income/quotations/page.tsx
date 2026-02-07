@@ -11,6 +11,7 @@ import { contactsApi } from '@/lib/supabase/api/contacts';
 import QuotationPrintView from '@/components/income/QuotationPrintView';
 import type { Quotation, QuotationStatus, LineItem } from '@/data/income/types';
 import type { Currency, Company } from '@/data/company/types';
+import { useCurrencyOptions } from '@/hooks/useCurrencyOptions';
 import type { BankAccount } from '@/data/banking/types';
 import type { Contact } from '@/data/contact/types';
 
@@ -52,11 +53,10 @@ interface FilterState {
   dateTo: string;
 }
 
-// Currency options
-const currencyOptions: Currency[] = ['USD', 'EUR', 'GBP', 'THB', 'SGD', 'AED'];
-
 export default function QuotationsPage() {
   const router = useRouter();
+  const { options: currencyOptionsList } = useCurrencyOptions();
+  const currencyOptions: Currency[] = currencyOptionsList.map(o => o.value as Currency);
   const [activeTab, setActiveTab] = useState<QuotationStatus | 'all' | 'recent'>('recent');
   const [searchQuery, setSearchQuery] = useState('');
   const [showFilterPanel, setShowFilterPanel] = useState(false);

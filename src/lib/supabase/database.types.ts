@@ -1344,7 +1344,7 @@ export type Database = {
           bank_information: Json
           account_name: string
           account_number: string
-          currency: 'THB' | 'EUR' | 'USD' | 'SGD' | 'GBP' | 'AED'
+          currency: string
           gl_account_code: string
           opening_balance: number | null
           opening_balance_date: string | null
@@ -1358,7 +1358,7 @@ export type Database = {
           bank_information: Json
           account_name: string
           account_number: string
-          currency: 'THB' | 'EUR' | 'USD' | 'SGD' | 'GBP' | 'AED'
+          currency: string
           gl_account_code: string
           opening_balance?: number | null
           opening_balance_date?: string | null
@@ -1372,7 +1372,7 @@ export type Database = {
           bank_information?: Json
           account_name?: string
           account_number?: string
-          currency?: 'THB' | 'EUR' | 'USD' | 'SGD' | 'GBP' | 'AED'
+          currency?: string
           gl_account_code?: string
           opening_balance?: number | null
           opening_balance_date?: string | null

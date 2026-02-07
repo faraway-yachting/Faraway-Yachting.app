@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { X } from 'lucide-react';
+import { CurrencySelect } from '@/components/shared/CurrencySelect';
 
 interface RecordCashModalProps {
   onClose: () => void;
@@ -72,15 +73,11 @@ export default function RecordCashModal({
             </div>
             <div className="w-24">
               <label className="block text-sm font-medium text-gray-700 mb-1">Currency</label>
-              <select
+              <CurrencySelect
                 value={currency}
-                onChange={(e) => setCurrency(e.target.value)}
+                onChange={(val) => setCurrency(val)}
                 className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-[#5A7A8F] focus:border-[#5A7A8F]"
-              >
-                <option value="THB">THB</option>
-                <option value="USD">USD</option>
-                <option value="EUR">EUR</option>
-              </select>
+              />
             </div>
           </div>
           <div>

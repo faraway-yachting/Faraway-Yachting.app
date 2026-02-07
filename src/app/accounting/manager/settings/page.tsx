@@ -30,6 +30,7 @@ import { UserManagementModal } from "@/components/settings/UserManagementModal";
 import { ImportPriorYearModal } from "@/components/accounting/ImportPriorYearModal";
 import { ModuleRouteGuard } from "@/components/auth";
 import { JournalEventSettings } from "@/components/accounting/JournalEventSettings";
+import { CurrencySettings } from "@/components/settings/CurrencySettings";
 import { beamMerchantAccountsApi } from "@/lib/supabase/api/beamMerchantAccounts";
 import type { BeamMerchantAccount } from "@/data/beam/types";
 import { financialPeriodsApi } from "@/lib/supabase/api/financialPeriods";
@@ -728,6 +729,9 @@ export default function SettingsPage() {
             </div>
           )}
         </div>
+
+        {/* Currencies */}
+        <CurrencySettings />
 
         {/* Company Settings */}
         <div className="rounded-lg border border-gray-200 bg-white p-6">

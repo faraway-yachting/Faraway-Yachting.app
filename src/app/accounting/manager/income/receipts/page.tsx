@@ -11,6 +11,7 @@ import { dbReceiptToFrontend, dbCompanyToFrontend, dbBankAccountToFrontend, dbCo
 import ReceiptPrintView from '@/components/income/ReceiptPrintView';
 import type { Receipt, ReceiptStatus, LineItem, PaymentRecord } from '@/data/income/types';
 import type { Company, Currency } from '@/data/company/types';
+import { useCurrencyOptions } from '@/hooks/useCurrencyOptions';
 import type { BankAccount } from '@/data/banking/types';
 import type { Contact } from '@/data/contact/types';
 
@@ -52,11 +53,10 @@ interface FilterState {
   dateTo: string;
 }
 
-// Currency options
-const currencyOptions: Currency[] = ['USD', 'EUR', 'GBP', 'THB', 'SGD', 'AED'];
-
 export default function ReceiptsPage() {
   const router = useRouter();
+  const { options: currencyOptionsList } = useCurrencyOptions();
+  const currencyOptions: Currency[] = currencyOptionsList.map(o => o.value as Currency);
   const [activeTab, setActiveTab] = useState<ReceiptStatus | 'all' | 'recent'>('recent');
   const [searchQuery, setSearchQuery] = useState('');
   const [showFilterPanel, setShowFilterPanel] = useState(false);

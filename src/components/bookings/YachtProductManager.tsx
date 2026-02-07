@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { Plus, Trash2, X, Package, ChevronDown, ChevronUp } from 'lucide-react';
+import { CurrencySelect } from '@/components/shared/CurrencySelect';
 import {
   YachtProduct,
   YachtSource,
@@ -492,17 +493,11 @@ export function YachtProductManager({
                           placeholder="0"
                           className="flex-1 px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                         />
-                        <select
+                        <CurrencySelect
                           value={formData.currency}
-                          onChange={e =>
-                            handleChange('currency', e.target.value)
-                          }
+                          onChange={(val) => handleChange('currency', val)}
                           className="w-20 px-2 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                        >
-                          <option value="THB">THB</option>
-                          <option value="USD">USD</option>
-                          <option value="EUR">EUR</option>
-                        </select>
+                        />
                       </div>
                     </div>
 

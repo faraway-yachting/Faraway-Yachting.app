@@ -11,6 +11,7 @@ import { dbInvoiceToFrontend, dbCompanyToFrontend, dbBankAccountToFrontend, dbCo
 import InvoicePrintView from '@/components/income/InvoicePrintView';
 import type { Invoice, InvoiceStatus, LineItem } from '@/data/income/types';
 import type { Company, Currency } from '@/data/company/types';
+import { useCurrencyOptions } from '@/hooks/useCurrencyOptions';
 import type { BankAccount } from '@/data/banking/types';
 import type { Contact } from '@/data/contact/types';
 
@@ -62,9 +63,6 @@ interface FilterState {
   dateTo: string;
 }
 
-// Currency options
-const currencyOptions: Currency[] = ['USD', 'EUR', 'GBP', 'THB', 'SGD', 'AED'];
-
 // Helper function to check if invoice is overdue
 function isInvoiceOverdue(invoice: Invoice): boolean {
   if (invoice.status !== 'issued') return false;
@@ -76,6 +74,8 @@ function isInvoiceOverdue(invoice: Invoice): boolean {
 
 export default function InvoicesPage() {
   const router = useRouter();
+  const { options: currencyOptionsList } = useCurrencyOptions();
+  const currencyOptions: Currency[] = currencyOptionsList.map(o => o.value as Currency);
   const [activeTab, setActiveTab] = useState<InvoiceStatus | 'all' | 'recent' | 'overdue'>('recent');
   const [searchQuery, setSearchQuery] = useState('');
   const [showFilterPanel, setShowFilterPanel] = useState(false);

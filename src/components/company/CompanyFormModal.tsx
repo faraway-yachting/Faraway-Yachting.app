@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { X, Loader2 } from "lucide-react";
 import { Company, Address, ContactInformation, Currency } from "@/data/company/types";
+import { CurrencySelect } from "@/components/shared/CurrencySelect";
 
 interface CompanyFormModalProps {
   isOpen: boolean;
@@ -304,17 +305,11 @@ export function CompanyFormModal({
                   <label htmlFor="currency" className="block text-sm font-medium text-gray-700 mb-1">
                     Currency
                   </label>
-                  <select
-                    id="currency"
+                  <CurrencySelect
                     value={currency}
-                    onChange={(e) => setCurrency(e.target.value as Currency)}
+                    onChange={(val) => setCurrency(val as Currency)}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#5A7A8F] focus:border-transparent"
-                  >
-                    <option value="THB">THB - Thai Baht</option>
-                    <option value="USD">USD - US Dollar</option>
-                    <option value="EUR">EUR - Euro</option>
-                    <option value="SGD">SGD - Singapore Dollar</option>
-                  </select>
+                  />
                 </div>
 
                 <div>
