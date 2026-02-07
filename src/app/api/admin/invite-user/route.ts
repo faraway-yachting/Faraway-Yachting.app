@@ -26,19 +26,42 @@ export async function POST(request: NextRequest) {
     }
 
     // Invite the user via Supabase Auth Admin API
-    const { data: authData, error: authError } = await supabaseAdmin.auth.admin.inviteUserByEmail(email, {
+    let { data: authData, error: authError } = await supabaseAdmin.auth.admin.inviteUserByEmail(email, {
       data: {
         full_name: fullName,
       },
       redirectTo: 'https://www.faraway-yachting.app/auth/setup-password',
     });
 
+    // If email already exists, clean up the old user and retry
     if (authError) {
-      console.error('Auth error:', authError);
-      return NextResponse.json(
-        { error: authError.message },
-        { status: 400 }
-      );
+      const { data: existingUsers } = await supabaseAdmin.auth.admin.listUsers();
+      const existingUser = existingUsers?.users?.find(u => u.email === email);
+
+      if (existingUser) {
+        // Clean up app tables + auth user (same logic as delete-user route)
+        await supabaseAdmin.from('user_module_roles').delete().eq('user_id', existingUser.id);
+        await supabaseAdmin.from('user_company_access').delete().eq('user_id', existingUser.id);
+        await supabaseAdmin.from('user_project_access').delete().eq('user_id', existingUser.id);
+        await supabaseAdmin.from('user_profiles').delete().eq('id', existingUser.id);
+        await supabaseAdmin.auth.admin.deleteUser(existingUser.id);
+
+        // Retry invite
+        const retry = await supabaseAdmin.auth.admin.inviteUserByEmail(email, {
+          data: { full_name: fullName },
+          redirectTo: 'https://www.faraway-yachting.app/auth/setup-password',
+        });
+        authData = retry.data;
+        authError = retry.error;
+      }
+
+      if (authError) {
+        console.error('Auth error:', authError);
+        return NextResponse.json(
+          { error: authError.message },
+          { status: 400 }
+        );
+      }
     }
 
     if (!authData.user) {
