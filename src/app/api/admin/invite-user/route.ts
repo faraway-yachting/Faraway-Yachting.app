@@ -147,7 +147,7 @@ export async function POST(request: NextRequest) {
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
-            from: 'Faraway Yachting <notifications@faraway.co>',
+            from: 'Faraway Yachting <notifications@faraway-yachting.app>',
             to: [email],
             subject: "You're invited to Faraway Yachting",
             html: emailHtml,
