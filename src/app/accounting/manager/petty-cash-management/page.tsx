@@ -1033,7 +1033,7 @@ export default function PettyCashManagementPage() {
       try {
         // Process each selected transfer group
         for (const key of selectedTransfers) {
-          const [walletId, bankAccountId] = key.split('-');
+          const [walletId, bankAccountId] = key.split('::');
 
           // Find the corresponding group
           const walletGroup = transferSummary.find(wg => wg.walletId === walletId);
@@ -1077,7 +1077,7 @@ export default function PettyCashManagementPage() {
 
   // Toggle transfer selection
   const toggleTransferSelection = useCallback((walletId: string, bankAccountId: string) => {
-    const key = `${walletId}-${bankAccountId}`;
+    const key = `${walletId}::${bankAccountId}`;
     setSelectedTransfers(prev => {
       const next = new Set(prev);
       if (next.has(key)) {
@@ -1093,7 +1093,7 @@ export default function PettyCashManagementPage() {
   const selectedTransferAmount = useMemo(() => {
     let total = 0;
     for (const key of selectedTransfers) {
-      const [walletId, bankAccountId] = key.split('-');
+      const [walletId, bankAccountId] = key.split('::');
       const walletGroup = transferSummary.find(wg => wg.walletId === walletId);
       const bankGroup = walletGroup?.bankAccountGroups.find(bg => bg.bankAccountId === bankAccountId);
       if (bankGroup) {
@@ -2151,7 +2151,7 @@ export default function PettyCashManagementPage() {
                     {/* Bank Account Groups */}
                     <div className="divide-y divide-gray-100">
                       {walletGroup.bankAccountGroups.map((bankGroup) => {
-                        const isSelected = selectedTransfers.has(`${walletGroup.walletId}-${bankGroup.bankAccountId}`);
+                        const isSelected = selectedTransfers.has(`${walletGroup.walletId}::${bankGroup.bankAccountId}`);
                         return (
                           <div
                             key={bankGroup.bankAccountId}
