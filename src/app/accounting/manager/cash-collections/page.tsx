@@ -15,6 +15,7 @@ type Tab = 'pending' | 'history' | 'summary';
 interface UserInfo {
   id: string;
   full_name: string;
+  email?: string;
 }
 
 interface CompanyInfo {
@@ -46,12 +47,12 @@ export default function CashCollectionsPage() {
     const supabase = createClient();
     Promise.all([
       (supabase as any).from('companies').select('id, name').order('name'),
-      (supabase as any).from('user_profiles').select('id, full_name').eq('is_active', true).order('full_name'),
+      (supabase as any).from('user_profiles').select('id, full_name, email').eq('is_active', true).order('full_name'),
     ]).then(([compRes, userRes]) => {
       const comps = (compRes.data ?? []) as CompanyInfo[];
       setCompanies(comps);
       // Default to 'all' — no need to auto-select first company
-      setUsers((userRes.data ?? []).map((u: any) => ({ id: u.id, full_name: u.full_name || u.id.slice(0, 8) })));
+      setUsers((userRes.data ?? []).map((u: any) => ({ id: u.id, full_name: u.full_name || u.id.slice(0, 8), email: u.email })));
     }).catch(console.error);
   }, []);
 
@@ -99,7 +100,7 @@ export default function CashCollectionsPage() {
   if (currencies.length === 0) currencies.push('THB');
 
   // Handlers
-  const handleRecordCash = async (data: { amount: number; currency: string; collection_notes?: string; booking_id?: string }) => {
+  const handleRecordCash = async (data: { amount: number; currency: string; collected_by_id: string; collection_notes?: string; booking_id?: string }) => {
     if (!user?.id || companyId === 'all') {
       if (companyId === 'all') alert('Please select a specific company before recording cash.');
       return;
@@ -108,7 +109,7 @@ export default function CashCollectionsPage() {
       company_id: companyId,
       amount: data.amount,
       currency: data.currency,
-      collected_by: user.id,
+      collected_by: data.collected_by_id,
       collection_notes: data.collection_notes,
       booking_id: data.booking_id,
     });
@@ -351,10 +352,12 @@ export default function CashCollectionsPage() {
       )}
 
       {/* Modals */}
-      {showRecordModal && (
+      {showRecordModal && user?.id && (
         <RecordCashModal
           onClose={() => setShowRecordModal(false)}
           onSubmit={handleRecordCash}
+          currentUserId={user.id}
+          users={users.map(u => ({ id: u.id, full_name: u.full_name, email: u.email || '' }))}
         />
       )}
       {showHandoverModal && (

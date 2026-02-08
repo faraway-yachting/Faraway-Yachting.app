@@ -30,6 +30,12 @@ const MONTH_NAMES = [
   'July', 'August', 'September', 'October', 'November', 'December'
 ];
 
+/** Parse "YYYY-MM-DD" as local midnight (not UTC) to match week boundary dates */
+function parseLocalDate(dateStr: string): Date {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  return new Date(y, m - 1, d);
+}
+
 // Helper to convert date to day index within a week (Mon = 0, Sun = 6)
 function getDayOfWeekIndex(date: Date): number {
   const day = date.getDay();
@@ -147,17 +153,17 @@ export function BookingCalendar({
 
       // Sort bookings by start date, then by duration (longer first)
       const sortedBookings = [...bookings].sort((a, b) => {
-        const startDiff = new Date(a.dateFrom).getTime() - new Date(b.dateFrom).getTime();
+        const startDiff = parseLocalDate(a.dateFrom).getTime() - parseLocalDate(b.dateFrom).getTime();
         if (startDiff !== 0) return startDiff;
         // Longer bookings first
-        const durationA = new Date(a.dateTo).getTime() - new Date(a.dateFrom).getTime();
-        const durationB = new Date(b.dateTo).getTime() - new Date(b.dateFrom).getTime();
+        const durationA = parseLocalDate(a.dateTo).getTime() - parseLocalDate(a.dateFrom).getTime();
+        const durationB = parseLocalDate(b.dateTo).getTime() - parseLocalDate(b.dateFrom).getTime();
         return durationB - durationA;
       });
 
       sortedBookings.forEach((booking) => {
-        const bookingStart = new Date(booking.dateFrom);
-        const bookingEnd = new Date(booking.dateTo);
+        const bookingStart = parseLocalDate(booking.dateFrom);
+        const bookingEnd = parseLocalDate(booking.dateTo);
 
         // Check if booking overlaps with this week
         const weekStartDate = new Date(currentWeekStart);

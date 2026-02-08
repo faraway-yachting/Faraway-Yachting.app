@@ -27,6 +27,8 @@ import { FinanceSection, PaymentRecord, LinkedDocument, BankAccountOption, Compa
 import { cashCollectionsApi, CashCollection } from '@/lib/supabase/api/cashCollections';
 import { bankAccountsApi } from '@/lib/supabase/api/bankAccounts';
 import { companiesApi } from '@/lib/supabase/api/companies';
+import { authApi } from '@/lib/supabase/api/auth';
+import { useAuth } from '@/components/auth/AuthProvider';
 import { employeesApi } from '@/lib/supabase/api/employees';
 import { meetGreetersApi, MeetGreeter } from '@/lib/supabase/api/meetGreeters';
 import RecordCashModal from '@/components/cash-collections/RecordCashModal';
@@ -64,22 +66,26 @@ export function BookingFormContainer({
   canEdit = true,
 }: BookingFormContainerProps) {
   const isEditing = !!booking;
+  const { user: authUser } = useAuth();
   const [externalBoats, setExternalBoats] = useState<{ id: string; name: string; displayName?: string }[]>([]);
   const [meetGreeters, setMeetGreeters] = useState<MeetGreeter[]>([]);
   const [companies, setCompanies] = useState<CompanyOption[]>([]);
+  const [userProfiles, setUserProfiles] = useState<{ id: string; full_name: string | null; email: string }[]>([]);
 
   // Load external boats, meet greeters, and companies from database
   useEffect(() => {
     async function loadData() {
       try {
-        const [boats, greeters, companiesData] = await Promise.all([
+        const [boats, greeters, companiesData, profiles] = await Promise.all([
           externalBoatsApi.getActive(),
           meetGreetersApi.getActive(),
           companiesApi.getAll(),
+          authApi.getAllProfiles(),
         ]);
         setExternalBoats(boats.map(b => ({ id: b.id, name: b.name, displayName: b.display_name })));
         setMeetGreeters(greeters);
         setCompanies(companiesData.map(c => ({ id: c.id, name: c.name })));
+        setUserProfiles(profiles);
       } catch (err) {
         console.error('Failed to load data:', err);
       }
@@ -181,6 +187,7 @@ export function BookingFormContainer({
   const [titleManuallyEdited, setTitleManuallyEdited] = useState(false);
   const [cashCollections, setCashCollections] = useState<CashCollection[]>([]);
   const [showCashModal, setShowCashModal] = useState(false);
+  const [editingCash, setEditingCash] = useState<CashCollection | null>(null);
   const [bankAccounts, setBankAccounts] = useState<BankAccountOption[]>([]);
 
   // Load sales employees for booking owner dropdown + bank accounts
@@ -1023,7 +1030,8 @@ export function BookingFormContainer({
                 linkedDocuments={linkedDocuments}
                 onViewDocument={handleViewDocument}
                 cashCollections={cashCollections}
-                onRecordCash={() => setShowCashModal(true)}
+                onRecordCash={() => { setEditingCash(null); setShowCashModal(true); }}
+                onEditCash={(cash) => { setEditingCash(cash); setShowCashModal(true); }}
                 bankAccounts={bankAccounts}
                 companies={companies}
                 onAddPaymentFromInvoice={handleAddPaymentFromInvoice}
@@ -1155,30 +1163,52 @@ export function BookingFormContainer({
           </div>
         </div>
       )}
-      {showCashModal && booking?.id && (
+      {showCashModal && booking?.id && authUser?.id && (
         <RecordCashModal
-          onClose={() => setShowCashModal(false)}
+          onClose={() => { setShowCashModal(false); setEditingCash(null); }}
           bookingId={booking.id}
           defaultCurrency={formData.currency || 'THB'}
+          currentUserId={authUser.id}
+          users={userProfiles}
+          editData={editingCash ? {
+            id: editingCash.id,
+            amount: editingCash.amount,
+            currency: editingCash.currency,
+            collected_by: editingCash.collected_by,
+            collection_notes: editingCash.collection_notes,
+          } : undefined}
           onSubmit={async (data) => {
-            const resolvedCompanyId = projects.find(p => p.id === formData.projectId)?.companyId;
-            if (!resolvedCompanyId) {
-              alert('Cannot record cash: no company associated with this booking. Please select a boat/project first.');
-              return;
+            if (editingCash) {
+              await cashCollectionsApi.update(editingCash.id, {
+                amount: data.amount,
+                currency: data.currency,
+                collected_by: data.collected_by_id,
+                collection_notes: data.collection_notes || null,
+              });
+            } else {
+              const resolvedCompanyId = projects.find(p => p.id === formData.projectId)?.companyId;
+              if (!resolvedCompanyId) {
+                alert('Cannot record cash: no company associated with this booking. Please select a boat/project first.');
+                return;
+              }
+              await cashCollectionsApi.create({
+                company_id: resolvedCompanyId,
+                booking_id: booking.id,
+                amount: data.amount,
+                currency: data.currency,
+                collected_by: data.collected_by_id,
+                collection_notes: data.collection_notes,
+              });
             }
-            const supabase = createClient();
-            const { data: { user: authUser } } = await supabase.auth.getUser();
-            if (!authUser?.id) return;
-            await cashCollectionsApi.create({
-              company_id: resolvedCompanyId,
-              booking_id: booking.id,
-              amount: data.amount,
-              currency: data.currency,
-              collected_by: authUser.id,
-              collection_notes: data.collection_notes,
-            });
             const updated = await cashCollectionsApi.getByBookingId(booking.id);
             setCashCollections(updated);
+            setEditingCash(null);
+          }}
+          onDelete={async (id) => {
+            await cashCollectionsApi.delete(id);
+            const updated = await cashCollectionsApi.getByBookingId(booking.id);
+            setCashCollections(updated);
+            setEditingCash(null);
           }}
         />
       )}

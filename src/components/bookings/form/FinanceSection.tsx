@@ -78,6 +78,7 @@ interface FinanceSectionProps {
   onViewDocument?: (doc: LinkedDocument) => void;
   cashCollections?: CashCollection[];
   onRecordCash?: () => void;
+  onEditCash?: (cash: CashCollection) => void;
   bankAccounts?: BankAccountOption[];
   companies?: CompanyOption[];
   onAddPaymentFromInvoice?: (paymentIndex: number) => void;
@@ -102,6 +103,7 @@ export function FinanceSection({
   onViewDocument,
   cashCollections = [],
   onRecordCash,
+  onEditCash,
   bankAccounts = [],
   companies = [],
   onAddPaymentFromInvoice,
@@ -362,9 +364,9 @@ export function FinanceSection({
               <button
                 type="button"
                 onClick={addPayment}
-                className="flex items-center gap-1 px-2 py-1 text-xs text-[#5A7A8F] hover:bg-[#5A7A8F]/10 rounded transition-colors"
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-[#5A7A8F] rounded-md hover:bg-[#4a6a7f] transition-colors shadow-sm"
               >
-                <Plus className="h-3 w-3" />
+                <Plus className="h-3.5 w-3.5" />
                 Add Payment
               </button>
             )}
@@ -548,30 +550,45 @@ export function FinanceSection({
                 <button
                   type="button"
                   onClick={onRecordCash}
-                  className="flex items-center gap-1 px-2 py-1 text-xs text-[#5A7A8F] border border-[#5A7A8F]/30 rounded hover:bg-[#5A7A8F]/5"
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-emerald-600 rounded-md hover:bg-emerald-700 transition-colors shadow-sm"
                 >
-                  <Plus className="h-3 w-3" />
+                  <Plus className="h-3.5 w-3.5" />
                   Record Cash
                 </button>
               )}
             </div>
             {cashCollections.length > 0 ? (
               <div className="space-y-1">
-                {cashCollections.map((c) => (
-                  <div key={c.id} className="flex items-center justify-between px-3 py-1.5 bg-white rounded border border-gray-200 text-sm">
-                    <span className="font-medium text-gray-900">
-                      {c.currency} {c.amount.toLocaleString('en-US', { minimumFractionDigits: 2 })}
-                    </span>
-                    <span className={`px-1.5 py-0.5 text-xs rounded-full ${
-                      c.status === 'accepted' ? 'bg-green-100 text-green-800' :
-                      c.status === 'pending_handover' ? 'bg-blue-100 text-blue-800' :
-                      c.status === 'rejected' ? 'bg-red-100 text-red-800' :
-                      'bg-yellow-100 text-yellow-800'
-                    }`}>
-                      {c.status === 'pending_handover' ? 'Pending' : c.status.charAt(0).toUpperCase() + c.status.slice(1)}
-                    </span>
-                  </div>
-                ))}
+                {cashCollections.map((c) => {
+                  const canEditCash = canEdit && onEditCash && c.status === 'collected';
+                  return (
+                    <button
+                      key={c.id}
+                      type="button"
+                      onClick={() => canEditCash && onEditCash(c)}
+                      className={`w-full flex items-center justify-between px-3 py-1.5 bg-white rounded border border-gray-200 text-sm ${
+                        canEditCash ? 'hover:bg-gray-50 hover:border-[#5A7A8F]/30 cursor-pointer' : 'cursor-default'
+                      }`}
+                    >
+                      <span className="font-medium text-gray-900">
+                        {c.currency} {c.amount.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className={`px-1.5 py-0.5 text-xs rounded-full ${
+                          c.status === 'accepted' ? 'bg-green-100 text-green-800' :
+                          c.status === 'pending_handover' ? 'bg-blue-100 text-blue-800' :
+                          c.status === 'rejected' ? 'bg-red-100 text-red-800' :
+                          'bg-yellow-100 text-yellow-800'
+                        }`}>
+                          {c.status === 'pending_handover' ? 'Pending' : c.status.charAt(0).toUpperCase() + c.status.slice(1)}
+                        </span>
+                        {canEditCash && (
+                          <span className="text-xs text-gray-400">Edit</span>
+                        )}
+                      </div>
+                    </button>
+                  );
+                })}
                 <p className="text-xs text-gray-400 mt-1">
                   Total: {cashCollections.reduce((s, c) => s + c.amount, 0).toLocaleString('en-US', { minimumFractionDigits: 2 })} {cashCollections[0]?.currency || 'THB'}
                 </p>

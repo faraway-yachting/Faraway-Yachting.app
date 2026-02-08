@@ -143,6 +143,23 @@ export const cashCollectionsApi = {
     if (error) throw error;
   },
 
+  async update(id: string, record: {
+    amount?: number;
+    currency?: string;
+    collected_by?: string;
+    collection_notes?: string | null;
+  }): Promise<CashCollection> {
+    const supabase = createClient();
+    const { data, error } = await (supabase as any)
+      .from('cash_collections')
+      .update({ ...record, updated_at: new Date().toISOString() })
+      .eq('id', id)
+      .select()
+      .single();
+    if (error) throw error;
+    return data as CashCollection;
+  },
+
   async delete(id: string): Promise<void> {
     const supabase = createClient();
     const { error } = await (supabase as any)
