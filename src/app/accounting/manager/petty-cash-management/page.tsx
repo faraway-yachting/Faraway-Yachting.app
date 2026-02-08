@@ -190,8 +190,11 @@ export default function PettyCashManagementPage() {
   const [selectedReimbursement, setSelectedReimbursement] = useState<PettyCashReimbursement | null>(null);
   const [selectedExpense, setSelectedExpense] = useState<PettyCashExpense | null>(null);
 
-  // View mode toggle: 'all-wallets' (default) or 'my-wallet'
-  const [viewMode, setViewMode] = useState<'all-wallets' | 'my-wallet'>('all-wallets');
+  // View mode toggle: 'all-wallets' (default), 'my-wallet', or 'add-expense'
+  const [viewMode, setViewMode] = useState<'all-wallets' | 'my-wallet' | 'add-expense'>('all-wallets');
+
+  // Add Expense tab state
+  const [addExpenseWalletId, setAddExpenseWalletId] = useState<string>('');
 
   // My wallet state (fetched from Supabase for current user)
   const [myWallet, setMyWallet] = useState<SupabaseWallet | null>(null);
@@ -465,6 +468,13 @@ export default function PettyCashManagementPage() {
   const wallets = useMemo(() => {
     return allWalletsDb.map(transformWalletWithCalculatedBalance);
   }, [allWalletsDb]);
+
+  // Derive selected wallet for "Add Expense" tab
+  const addExpenseWallet = useMemo(() => {
+    if (!addExpenseWalletId) return null;
+    const w = allWalletsDb.find(w => w.id === addExpenseWalletId);
+    return w ? transformWalletWithCalculatedBalance(w) : null;
+  }, [addExpenseWalletId, allWalletsDb]);
 
   // Transform expenses for display in All Wallets view
   const allExpenses = useMemo(() => {
@@ -785,6 +795,78 @@ export default function PettyCashManagementPage() {
       }
     },
     [transformedMyWallet, myWallet, companies]
+  );
+
+  // Handle expense creation for any wallet (Add Expense tab)
+  const handleCreateExpenseForWallet = useCallback(
+    async (expenseData: SimplifiedExpenseInput) => {
+      const wallet = allWalletsDb.find(w => w.id === addExpenseWalletId);
+      if (!wallet) {
+        alert('Please select a wallet first.');
+        return;
+      }
+      if (!expenseData.projectId) {
+        alert('Please select a project for this expense.');
+        return;
+      }
+      if (!expenseData.expenseDate) {
+        alert('Please select an expense date.');
+        return;
+      }
+
+      try {
+        const expensePayload = {
+          wallet_id: wallet.id,
+          company_id: expenseData.companyId || null,
+          expense_date: expenseData.expenseDate,
+          description: expenseData.description || null,
+          project_id: expenseData.projectId,
+          amount: expenseData.amount,
+          status: 'submitted' as const,
+          created_by: wallet.user_id || null,
+          attachments: expenseData.attachments ? JSON.stringify(expenseData.attachments) : '[]',
+        };
+        const expense = await pettyCashApi.createExpenseWithNumber(expensePayload);
+
+        const reimbursementPayload = {
+          expense_id: expense.id,
+          wallet_id: expense.wallet_id,
+          company_id: expense.company_id,
+          amount: expense.amount || 0,
+          adjustment_amount: null,
+          adjustment_reason: null,
+          final_amount: expense.amount || 0,
+          status: 'pending' as const,
+          bank_account_id: null,
+          payment_date: null,
+          payment_reference: null,
+          approved_by: null,
+          rejected_by: null,
+          rejection_reason: null,
+          bank_feed_line_id: null,
+          created_by: wallet.user_id || null,
+        };
+        const reimbursement = await pettyCashApi.createReimbursementWithNumber(reimbursementPayload);
+
+        const walletTransformed = transformWalletWithCalculatedBalance(wallet as SupabaseWalletWithBalance);
+        notifyAccountantNewReimbursement(
+          reimbursement.id,
+          reimbursement.reimbursement_number,
+          walletTransformed.userName,
+          expense.amount || 0
+        );
+
+        alert(`Expense created for ${walletTransformed.userName}'s wallet.`);
+        setAddExpenseWalletId('');
+        setRefreshKey((prev) => prev + 1);
+      } catch (error: unknown) {
+        const supabaseError = error as { message?: string };
+        const errorMessage = supabaseError.message || (error instanceof Error ? error.message : 'Unknown error');
+        console.error('Failed to create expense:', error);
+        alert(`Failed to create expense: ${errorMessage}`);
+      }
+    },
+    [addExpenseWalletId, allWalletsDb]
   );
 
   // Handle resubmit for rejected claims - opens form to EDIT the same expense
@@ -1688,27 +1770,29 @@ export default function PettyCashManagementPage() {
             <p className="mt-1 text-sm text-gray-500">
               {viewMode === 'all-wallets'
                 ? 'Monitor all petty cash wallets, approve reimbursements, and manage top-ups'
+                : viewMode === 'add-expense'
+                ? 'Add an expense on behalf of any wallet holder'
                 : 'Manage your personal petty cash wallet'
               }
             </p>
           </div>
 
-          {/* View Mode Toggle - Only show if user has own wallet */}
-          {hasOwnWallet && (
-            <div className="flex items-center gap-1 p-1 bg-gray-100 rounded-lg">
-              <button
-                onClick={() => setViewMode('all-wallets')}
-                className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
-                  viewMode === 'all-wallets'
-                    ? 'bg-white text-gray-900 shadow-sm'
-                    : 'text-gray-500 hover:text-gray-700'
-                }`}
-              >
-                <span className="flex items-center gap-2">
-                  <Users className="h-4 w-4" />
-                  All Wallets
-                </span>
-              </button>
+          {/* View Mode Toggle */}
+          <div className="flex items-center gap-1 p-1 bg-gray-100 rounded-lg">
+            <button
+              onClick={() => setViewMode('all-wallets')}
+              className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+                viewMode === 'all-wallets'
+                  ? 'bg-white text-gray-900 shadow-sm'
+                  : 'text-gray-500 hover:text-gray-700'
+              }`}
+            >
+              <span className="flex items-center gap-2">
+                <Users className="h-4 w-4" />
+                All Wallets
+              </span>
+            </button>
+            {hasOwnWallet && (
               <button
                 onClick={() => setViewMode('my-wallet')}
                 className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
@@ -1722,8 +1806,21 @@ export default function PettyCashManagementPage() {
                   My Wallet
                 </span>
               </button>
-            </div>
-          )}
+            )}
+            <button
+              onClick={() => setViewMode('add-expense')}
+              className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+                viewMode === 'add-expense'
+                  ? 'bg-white text-gray-900 shadow-sm'
+                  : 'text-gray-500 hover:text-gray-700'
+              }`}
+            >
+              <span className="flex items-center gap-2">
+                <Plus className="h-4 w-4" />
+                Add Expense
+              </span>
+            </button>
+          </div>
         </div>
       </div>
 
@@ -1984,6 +2081,78 @@ export default function PettyCashManagementPage() {
             />
           )}
         </>
+      )}
+
+      {/* ========== ADD EXPENSE VIEW ========== */}
+      {viewMode === 'add-expense' && (
+        <div className="space-y-6">
+          {/* Info Banner */}
+          <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
+            <div className="flex items-start gap-3">
+              <Receipt className="h-5 w-5 text-amber-600 flex-shrink-0 mt-0.5" />
+              <div>
+                <p className="text-sm font-medium text-amber-900">
+                  Add Expense on Behalf
+                </p>
+                <p className="text-sm text-amber-700 mt-1">
+                  Select a wallet and submit an expense on behalf of the wallet holder. The expense will appear in their wallet and create a reimbursement claim.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Wallet Selector */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Select Wallet</label>
+            <select
+              value={addExpenseWalletId}
+              onChange={(e) => setAddExpenseWalletId(e.target.value)}
+              className="w-full max-w-md px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#5A7A8F]/50 focus:border-[#5A7A8F]"
+            >
+              <option value="">— Select a wallet —</option>
+              {allWalletsDb
+                .filter(w => w.status === 'active')
+                .map(w => (
+                  <option key={w.id} value={w.id}>
+                    {w.wallet_name} ({w.user_name})
+                  </option>
+                ))}
+            </select>
+          </div>
+
+          {/* Selected Wallet Info */}
+          {addExpenseWallet && (
+            <div className="rounded-lg border border-gray-200 bg-white p-4 max-w-md">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-gray-900">{addExpenseWallet.walletName}</p>
+                  <p className="text-xs text-gray-500">Holder: {addExpenseWallet.userName}</p>
+                </div>
+                <div className="text-right">
+                  <p className="text-sm font-semibold text-gray-900">
+                    {formatCurrency(addExpenseWallet.balance, addExpenseWallet.currency)}
+                  </p>
+                  <p className="text-xs text-gray-500">Balance</p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Expense Form */}
+          {addExpenseWalletId ? (
+            <ExpenseForm
+              walletId={addExpenseWalletId}
+              walletHolderName={addExpenseWallet?.userName || ''}
+              onSave={handleCreateExpenseForWallet}
+              onCancel={() => setAddExpenseWalletId('')}
+            />
+          ) : (
+            <div className="text-center py-12 text-gray-400">
+              <Wallet className="h-12 w-12 mx-auto mb-3 opacity-50" />
+              <p className="text-sm">Select a wallet above to add an expense</p>
+            </div>
+          )}
+        </div>
       )}
 
       {/* ========== ALL WALLETS VIEW ========== */}

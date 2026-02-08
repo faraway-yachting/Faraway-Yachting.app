@@ -17,7 +17,7 @@ import type { SimplifiedExpenseInput } from '@/data/petty-cash/expenses';
 interface ExpenseFormProps {
   walletId: string;
   walletHolderName: string;
-  onSave: (expense: SimplifiedExpenseInput) => void;
+  onSave: (expense: SimplifiedExpenseInput) => void | Promise<void>;
   onCancel: () => void;
   initialData?: {
     projectId: string;
@@ -176,7 +176,7 @@ export default function ExpenseForm({
         createdBy: walletHolderName,
       };
 
-      onSave(expenseData);
+      await onSave(expenseData);
     } catch (error) {
       setErrors({ submit: 'Failed to save expense. Please try again.' });
     } finally {
