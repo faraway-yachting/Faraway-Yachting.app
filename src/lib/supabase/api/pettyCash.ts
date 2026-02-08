@@ -1246,6 +1246,7 @@ export const pettyCashApi = {
     id: string,
     bankAccountId: string,
     approvedBy: string,
+    companyId?: string,
     adjustmentAmount?: number,
     adjustmentReason?: string
   ): Promise<PettyCashReimbursement> {
@@ -1271,6 +1272,7 @@ export const pettyCashApi = {
         bank_account_id: bankAccountId,
         approved_by: approvedBy,
         approved_at: new Date().toISOString(),
+        company_id: companyId || null,
         adjustment_amount: adjustmentAmount || 0,
         adjustment_reason: adjustmentReason || null,
         final_amount: finalAmount,
@@ -1558,7 +1560,7 @@ export const pettyCashApi = {
         *,
         wallet:petty_cash_wallets(id, wallet_name, user_name),
         company:companies(id, name),
-        bank_account:bank_accounts(id, account_name, account_number)
+        bank_account:bank_accounts(id, account_name, account_number, bank_information)
       `)
       .eq('status', 'approved')
       .not('bank_account_id', 'is', null)
@@ -1591,14 +1593,19 @@ export const pettyCashApi = {
       amount: number;
       wallet: { id: string; wallet_name: string; user_name: string } | null;
       company: { id: string; name: string } | null;
-      bank_account: { id: string; account_name: string; account_number: string } | null;
+      bank_account: { id: string; account_name: string; account_number: string; bank_information: unknown } | null;
     }>) {
       const walletId = r.wallet_id;
       const walletName = r.wallet?.wallet_name || 'Unknown Wallet';
       const holderName = r.wallet?.user_name || 'Unknown';
       const bankAccountId = r.bank_account_id;
+      const bankInfo = r.bank_account?.bank_information
+        ? (typeof r.bank_account.bank_information === 'string'
+          ? JSON.parse(r.bank_account.bank_information)
+          : r.bank_account.bank_information) as { bankName?: string }
+        : null;
       const bankAccountName = r.bank_account
-        ? `${r.bank_account.account_name} (${r.bank_account.account_number})`
+        ? `${bankInfo?.bankName || 'Bank'} (${r.bank_account.account_number})`
         : 'Unknown Bank';
       const companyId = r.company_id || '';
       const companyName = r.company?.name || 'Unknown';

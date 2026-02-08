@@ -410,6 +410,7 @@ export default function ReimbursementsPage() {
             reimbursementId,
             bankAccountId,
             user.id,
+            companyId,
             adjustmentAmount,
             adjustmentReason
           );

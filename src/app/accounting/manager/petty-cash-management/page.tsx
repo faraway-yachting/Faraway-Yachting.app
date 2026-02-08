@@ -945,6 +945,7 @@ export default function PettyCashManagementPage() {
             reimbursementId,
             bankAccountId,
             user.id,
+            companyId,
             adjustmentAmount,
             adjustmentReason
           );
