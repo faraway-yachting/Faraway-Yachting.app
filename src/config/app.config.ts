@@ -5,7 +5,7 @@ export const appConfig = {
   appInitials: "FY",
   tagline: "Run your entire yacht operation from one dashboard",
   description:
-    "From accounting and operations to everything in between — built for multi-boat, multi-company yacht businesses.",
+    "Powerful modules designed specifically for yacht management businesses.",
   benefits: [
     {
       icon: Anchor,

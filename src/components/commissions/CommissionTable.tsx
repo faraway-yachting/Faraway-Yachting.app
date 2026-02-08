@@ -5,10 +5,13 @@ import { Loader2, Plus, Pencil, Trash2, Download, X, Check, AlertCircle, Link2, 
 import { commissionRecordsApi } from '@/lib/supabase/api/commissionRecords';
 import { projectsApi } from '@/lib/supabase/api/projects';
 import { authApi } from '@/lib/supabase/api/auth';
+import { employeesApi } from '@/lib/supabase/api/employees';
+import { useAuth } from '@/components/auth/AuthProvider';
 import type { Database } from '@/lib/supabase/database.types';
 
 type CommissionRecord = Database['public']['Tables']['commission_records']['Row'];
 type Project = Database['public']['Tables']['projects']['Row'];
+type Employee = Database['public']['Tables']['employees']['Row'];
 
 interface UserProfile {
   id: string;
@@ -61,9 +64,14 @@ const emptyRecord: EditingRecord = {
 };
 
 export default function CommissionTable() {
+  const { user, isSuperAdmin, getModuleRole } = useAuth();
+  const accountingRole = getModuleRole('accounting');
+  const isSalesOnly = !isSuperAdmin && accountingRole === 'sales';
+
   const [records, setRecords] = useState<CommissionRecord[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [users, setUsers] = useState<UserProfile[]>([]);
+  const [salesEmployees, setSalesEmployees] = useState<Employee[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -120,12 +128,14 @@ export default function CommissionTable() {
     try {
       setLoading(true);
       setLoadError(null);
-      const [allProjects, allUsers] = await Promise.all([
+      const [allProjects, allUsers, allSalesEmployees] = await Promise.all([
         projectsApi.getAll(),
         authApi.getAllProfiles(),
+        employeesApi.getByDepartment('Sales'),
       ]);
       setProjects(allProjects);
       setUsers(allUsers as UserProfile[]);
+      setSalesEmployees(allSalesEmployees);
 
       // Sync from bookings first
       setSyncing(true);
@@ -142,7 +152,19 @@ export default function CommissionTable() {
       }
 
       // Load records after sync
-      const allRecords = await commissionRecordsApi.getAll();
+      let allRecords = await commissionRecordsApi.getAll();
+
+      // Sales role: filter to only show own commissions
+      if (isSalesOnly && user) {
+        const myEmployee = allSalesEmployees.find(e => e.user_profile_id === user.id);
+        if (myEmployee) {
+          allRecords = allRecords.filter(r => r.booking_owner_id === myEmployee.id);
+        } else {
+          // No employee record linked — show nothing
+          allRecords = [];
+        }
+      }
+
       setRecords(allRecords);
     } catch (error) {
       console.error('Failed to load commission data:', error);
@@ -150,7 +172,7 @@ export default function CommissionTable() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [isSalesOnly, user]);
 
   useEffect(() => {
     loadData();
@@ -159,6 +181,7 @@ export default function CommissionTable() {
   // Lookup maps
   const projectMap = useMemo(() => new Map(projects.map((p) => [p.id, p])), [projects]);
   const userMap = useMemo(() => new Map(users.map((u) => [u.id, u])), [users]);
+  const employeeMap = useMemo(() => new Map(salesEmployees.map((e) => [e.id, e.full_name_en])), [salesEmployees]);
 
   // Filtered records
   const filteredRecords = useMemo(() => {
@@ -193,8 +216,7 @@ export default function CommissionTable() {
       if ((r as any).payment_status === 'paid') paidCommission += r.total_commission;
 
       if (r.booking_owner_id) {
-        const user = userMap.get(r.booking_owner_id);
-        const name = user?.full_name || user?.email || 'Unknown';
+        const name = getUserName(r.booking_owner_id);
         if (!byOwner.has(r.booking_owner_id)) {
           byOwner.set(r.booking_owner_id, { name, totalCommission: 0, totalNetIncome: 0, count: 0 });
         }
@@ -206,7 +228,7 @@ export default function CommissionTable() {
     }
 
     return { totalNetIncome, totalCommission, earnedCommission, paidCommission, byOwner: Array.from(byOwner.values()) };
-  }, [filteredRecords, userMap, isEarned]);
+  }, [filteredRecords, userMap, employeeMap, isEarned]);
 
   // Unique boat options from records
   const boatOptions = useMemo(() => {
@@ -225,12 +247,11 @@ export default function CommissionTable() {
     const seen = new Map<string, string>();
     for (const r of records) {
       if (r.booking_owner_id && !seen.has(r.booking_owner_id)) {
-        const u = userMap.get(r.booking_owner_id);
-        seen.set(r.booking_owner_id, u?.full_name || u?.email || 'Unknown');
+        seen.set(r.booking_owner_id, getUserName(r.booking_owner_id));
       }
     }
     return Array.from(seen.entries()).sort((a, b) => a[1].localeCompare(b[1]));
-  }, [records, userMap]);
+  }, [records, userMap, employeeMap]);
 
   // Unique booking types from records
   const bookingTypeOptions = useMemo(() => {
@@ -467,6 +488,9 @@ export default function CommissionTable() {
 
   const getUserName = (id: string | null) => {
     if (!id) return '-';
+    // Check employees first (sales_owner_id), then auth profiles (legacy booking_owner)
+    const empName = employeeMap.get(id);
+    if (empName) return empName;
     const u = userMap.get(id);
     return u?.full_name || u?.email || 'Unknown';
   };
@@ -578,11 +602,13 @@ export default function CommissionTable() {
           {boatOptions.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
         </select>
 
-        <select value={filterOwner} onChange={(e) => setFilterOwner(e.target.value)}
-          className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#5A7A8F]/20 focus:border-[#5A7A8F]">
-          <option value="all">All Sales Persons</option>
-          {ownerOptions.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
-        </select>
+        {!isSalesOnly && (
+          <select value={filterOwner} onChange={(e) => setFilterOwner(e.target.value)}
+            className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#5A7A8F]/20 focus:border-[#5A7A8F]">
+            <option value="all">All Sales Persons</option>
+            {ownerOptions.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+          </select>
+        )}
 
         <select value={filterBookingType} onChange={(e) => setFilterBookingType(e.target.value)}
           className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#5A7A8F]/20 focus:border-[#5A7A8F]">

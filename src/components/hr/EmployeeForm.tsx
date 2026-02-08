@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { Loader2, Save, Camera, User, Plus } from 'lucide-react';
 import { employeesApi } from '@/lib/supabase/api/employees';
 import { companiesApi } from '@/lib/supabase/api/companies';
+import { authApi } from '@/lib/supabase/api/auth';
 import { CurrencySelect } from '@/components/shared/CurrencySelect';
 import { hrEmploymentTypesApi } from '@/lib/supabase/api/hrEmploymentTypes';
 import { hrPositionsApi } from '@/lib/supabase/api/hrPositions';
@@ -49,6 +50,7 @@ export default function EmployeeForm({ employee, onSaved, onCancel }: EmployeeFo
   const [showAddDepartment, setShowAddDepartment] = useState(false);
   const [newDepartmentName, setNewDepartmentName] = useState('');
   const [addingDepartment, setAddingDepartment] = useState(false);
+  const [userProfiles, setUserProfiles] = useState<{id: string; full_name: string | null; email: string}[]>([]);
 
   const [form, setForm] = useState({
     full_name_en: employee?.full_name_en || '',
@@ -72,6 +74,7 @@ export default function EmployeeForm({ employee, onSaved, onCancel }: EmployeeFo
     ssf_override: (employee as any)?.ssf_override?.toString() || '',
     currency: employee?.currency || 'THB',
     notes: employee?.notes || '',
+    user_profile_id: (employee as any)?.user_profile_id || '',
   });
 
   useEffect(() => {
@@ -79,10 +82,12 @@ export default function EmployeeForm({ employee, onSaved, onCancel }: EmployeeFo
       companiesApi.getAll(),
       hrEmploymentTypesApi.getActive(),
       hrDepartmentsApi.getActive(),
-    ]).then(async ([c, et, dept]) => {
+      authApi.getAllProfiles(),
+    ]).then(async ([c, et, dept, profiles]) => {
       setCompanies(c);
       setEmploymentTypes(et);
       setDepartments(dept);
+      setUserProfiles(profiles);
       // Load positions filtered by employee's current department
       const empDept = (employee as any)?.department;
       const deptObj = empDept ? dept.find((d: HRDepartment) => d.name === empDept) : null;
@@ -226,6 +231,7 @@ export default function EmployeeForm({ employee, onSaved, onCancel }: EmployeeFo
         ssf_override: form.ssf_override ? parseFloat(form.ssf_override) : null,
         currency: form.currency,
         notes: form.notes.trim() || null,
+        user_profile_id: form.user_profile_id || null,
       };
 
       if (isEdit && employee) {
@@ -361,6 +367,22 @@ export default function EmployeeForm({ employee, onSaved, onCancel }: EmployeeFo
               onChange={handleChange}
               className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#5A7A8F]/50 focus:border-[#5A7A8F]"
             />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-700 mb-1">Linked User Account</label>
+            <select
+              name="user_profile_id"
+              value={form.user_profile_id}
+              onChange={handleChange}
+              className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#5A7A8F]/50 focus:border-[#5A7A8F]"
+            >
+              <option value="">— Not linked —</option>
+              {userProfiles.map((u) => (
+                <option key={u.id} value={u.id}>
+                  {u.full_name || u.email} ({u.email})
+                </option>
+              ))}
+            </select>
           </div>
         </div>
       </div>

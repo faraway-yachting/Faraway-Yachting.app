@@ -3,7 +3,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
-import { Footer } from "@/components/Footer";
+
 import { Button } from "@/components/ui/Button";
 import { Section } from "@/components/ui/Section";
 import { ModuleCard } from "@/components/ModuleCard";
@@ -123,35 +123,7 @@ export default function Home() {
         </div>
       </section>
 
-      <Section background="white">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-          {appConfig.benefits.map((benefit) => {
-            const Icon = benefit.icon;
-            return (
-              <div key={benefit.title} className="text-center">
-                <div className="inline-flex items-center justify-center w-12 h-12 bg-[#3b9fc2] rounded-full mb-4">
-                  <Icon size={24} className="text-white" />
-                </div>
-                <h3 className="text-lg font-semibold text-gray-900 mb-2">
-                  {benefit.title}
-                </h3>
-                <p className="text-sm text-gray-600">{benefit.description}</p>
-              </div>
-            );
-          })}
-        </div>
-      </Section>
-
       <Section background="gray">
-        <div className="text-center mb-12">
-          <h2 className="text-3xl md:text-4xl font-bold text-gray-900 mb-4">
-            Everything You Need in One Platform
-          </h2>
-          <p className="text-lg text-gray-600 max-w-2xl mx-auto">
-            Powerful modules designed specifically for yacht management
-            businesses.
-          </p>
-        </div>
         {user && !isLoading && visibleModules.length === 0 ? (
           <div className="text-center py-12">
             <div className="inline-flex items-center justify-center w-16 h-16 bg-gray-200 rounded-full mb-4">
@@ -192,7 +164,29 @@ export default function Home() {
         </div>
       </Section>
 
-      <Footer />
+      <footer className="bg-[#A8C5D6]">
+        <div className="max-w-7xl mx-auto px-6 py-12">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            {appConfig.benefits.map((benefit) => {
+              const Icon = benefit.icon;
+              return (
+                <div key={benefit.title} className="text-center">
+                  <div className="inline-flex items-center justify-center w-12 h-12 bg-[#3b9fc2] rounded-full mb-4">
+                    <Icon size={24} className="text-white" />
+                  </div>
+                  <h3 className="text-lg font-semibold text-gray-900 mb-2">
+                    {benefit.title}
+                  </h3>
+                  <p className="text-sm text-gray-600">{benefit.description}</p>
+                </div>
+              );
+            })}
+          </div>
+          <div className="border-t border-white/30 mt-10 pt-6 text-center">
+            <p className="text-sm text-gray-700">&copy; 2026 Faraway Yachting. All rights reserved.</p>
+          </div>
+        </div>
+      </footer>
 
       <NotifyMeModal
         isOpen={modalOpen}

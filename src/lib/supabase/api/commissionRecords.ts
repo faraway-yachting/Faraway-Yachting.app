@@ -153,7 +153,7 @@ export const commissionRecordsApi = {
           net_income: netIncome,
           commission_rate: commissionRate,
           total_commission: totalCommission,
-          booking_owner_id: booking.booking_owner || null,
+          booking_owner_id: (booking as any).sales_owner_id || booking.booking_owner || null,
           currency: booking.currency || 'THB',
           management_fee_overridden: false,
         };
@@ -172,7 +172,7 @@ export const commissionRecordsApi = {
           booking_type: booking.type,
           charter_fee: charterFee,
           commission_rate: commissionRate,
-          booking_owner_id: booking.booking_owner || null,
+          booking_owner_id: (booking as any).sales_owner_id || booking.booking_owner || null,
           currency: booking.currency || 'THB',
         };
 

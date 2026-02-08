@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { AppShell } from "@/components/accounting/AppShell";
 import { KPICard } from "@/components/accounting/KPICard";
@@ -17,10 +17,13 @@ import {
   CreditCard,
   Clock,
   ExternalLink,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import { bookingsApi } from "@/lib/supabase/api/bookings";
 import { bookingPaymentsApi, type BookingPaymentExtended } from "@/lib/supabase/api/bookingPayments";
 import { invoicesApi } from "@/lib/supabase/api/invoices";
+import { externalBoatsApi } from "@/lib/supabase/api/externalBoats";
 import { useProjects } from "@/hooks/queries/useProjects";
 import { useUpcomingBookings, usePendingCharterExpenses } from "@/hooks/queries/useBookings";
 import { useDataScope } from "@/hooks/useDataScope";
@@ -40,10 +43,30 @@ const STATUS_COLORS: Record<string, string> = {
 
 export default function ManagerDashboard() {
   const now = useMemo(() => new Date(), []);
-  const monthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
-  const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
-  const monthEnd = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${lastDay}`;
-  const monthLabel = now.toLocaleDateString("en-US", { month: "long", year: "numeric" });
+  const [selectedYear, setSelectedYear] = useState(now.getFullYear());
+  const [selectedMonth, setSelectedMonth] = useState(now.getMonth() + 1); // 1-based
+
+  const lastDay = new Date(selectedYear, selectedMonth, 0).getDate();
+  const monthStart = `${selectedYear}-${String(selectedMonth).padStart(2, "0")}-01`;
+  const monthEnd = `${selectedYear}-${String(selectedMonth).padStart(2, "0")}-${lastDay}`;
+  const monthLabel = new Date(selectedYear, selectedMonth - 1).toLocaleDateString("en-US", { month: "long", year: "numeric" });
+
+  const handlePrevMonth = () => {
+    if (selectedMonth === 1) {
+      setSelectedYear((y) => y - 1);
+      setSelectedMonth(12);
+    } else {
+      setSelectedMonth((m) => m - 1);
+    }
+  };
+  const handleNextMonth = () => {
+    if (selectedMonth === 12) {
+      setSelectedYear((y) => y + 1);
+      setSelectedMonth(1);
+    } else {
+      setSelectedMonth((m) => m + 1);
+    }
+  };
 
   // Data scoping — restricted roles only see their assigned projects
   const { projectIds } = useDataScope();
@@ -67,8 +90,13 @@ export default function ManagerDashboard() {
     queryFn: () => invoicesApi.getOverdue(),
     staleTime: 60 * 1000,
   });
+  const { data: externalBoats = [], isLoading: l7 } = useQuery({
+    queryKey: ['externalBoats'],
+    queryFn: () => externalBoatsApi.getAll(),
+    staleTime: 10 * 60 * 1000,
+  });
 
-  const loading = l1 || l2 || l3 || l4 || l5 || l6;
+  const loading = l1 || l2 || l3 || l4 || l5 || l6 || l7;
 
   if (loading) {
     return (
@@ -141,9 +169,9 @@ export default function ManagerDashboard() {
         )
       : 0;
 
-  // Upcoming charters table data
-  const upcomingData = upcoming
-    .filter((b) => b.status === "booked")
+  // Charters table data — shows confirmed bookings for the selected month
+  const chartersData = confirmedBookings
+    .sort((a, b) => new Date(a.dateFrom).getTime() - new Date(b.dateFrom).getTime())
     .slice(0, 10)
     .map((b) => ({
       id: b.id,
@@ -171,7 +199,7 @@ export default function ManagerDashboard() {
     { key: "bookings", header: "Bookings", align: "right" as const },
   ];
 
-  const upcomingColumns = [
+  const chartersColumns = [
     { key: "customer", header: "Customer" },
     { key: "boat", header: "Boat" },
     { key: "type", header: "Type" },
@@ -179,12 +207,69 @@ export default function ManagerDashboard() {
     { key: "amount", header: "Amount", align: "right" as const },
   ];
 
+  // External boat statistics for the selected month
+  const externalBookings = monthBookings.filter(
+    (b) => b.externalBoatName && (b.status === "booked" || b.status === "completed")
+  );
+
+  const operatorMap = new Map(
+    externalBoats.map((eb) => [eb.name, eb.operator_name || "Unknown"])
+  );
+
+  const externalBoatStatsMap = new Map<string, { operator: string; bookings: number; revenue: number }>();
+  for (const b of externalBookings) {
+    const boatName = b.externalBoatName!;
+    const existing = externalBoatStatsMap.get(boatName) || {
+      operator: operatorMap.get(boatName) || "-",
+      bookings: 0,
+      revenue: 0,
+    };
+    existing.bookings += 1;
+    existing.revenue += b.totalPrice || 0;
+    externalBoatStatsMap.set(boatName, existing);
+  }
+
+  const externalBoatData = Array.from(externalBoatStatsMap.entries())
+    .map(([boat, stats]) => ({
+      boat,
+      operator: stats.operator,
+      bookings: stats.bookings,
+      revenue: formatMoney(stats.revenue),
+    }))
+    .sort((a, b) => b.bookings - a.bookings);
+
+  const externalBoatColumns = [
+    { key: "boat", header: "Boat" },
+    { key: "operator", header: "Operator" },
+    { key: "bookings", header: "Bookings", align: "right" as const },
+    { key: "revenue", header: "Revenue", align: "right" as const },
+  ];
+
   return (
     <AppShell>
       {/* Header */}
-      <div className="mb-8">
-        <h1 className="text-2xl font-bold text-gray-900">Manager Dashboard</h1>
-        <p className="mt-1 text-sm text-gray-500">Bookings overview for {monthLabel}</p>
+      <div className="mb-8 flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Manager Dashboard</h1>
+          <p className="mt-1 text-sm text-gray-500">Bookings overview for {monthLabel}</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handlePrevMonth}
+            className="p-2 rounded-lg border border-gray-300 hover:bg-gray-50 transition-colors"
+          >
+            <ChevronLeft className="h-4 w-4 text-gray-600" />
+          </button>
+          <span className="text-sm font-medium text-gray-700 min-w-[140px] text-center">
+            {monthLabel}
+          </span>
+          <button
+            onClick={handleNextMonth}
+            className="p-2 rounded-lg border border-gray-300 hover:bg-gray-50 transition-colors"
+          >
+            <ChevronRight className="h-4 w-4 text-gray-600" />
+          </button>
+        </div>
       </div>
 
       {/* KPI Cards */}
@@ -419,12 +504,29 @@ export default function ManagerDashboard() {
         <DataTable columns={boatColumns} data={boatUtilData} emptyMessage="No active boats found." />
       </div>
 
-      {/* Upcoming Charters */}
+      {/* External Boat Bookings */}
+      <div className="mb-8">
+        <h2 className="text-lg font-semibold text-gray-900 mb-4">
+          External Boats — {monthLabel}
+          {externalBookings.length > 0 && (
+            <span className="ml-2 text-sm font-normal text-gray-500">
+              {externalBookings.length} booking{externalBookings.length !== 1 ? "s" : ""}
+            </span>
+          )}
+        </h2>
+        <DataTable
+          columns={externalBoatColumns}
+          data={externalBoatData}
+          emptyMessage="No external boat bookings this month."
+        />
+      </div>
+
+      {/* Confirmed Charters for selected month */}
       <div>
         <h2 className="text-lg font-semibold text-gray-900 mb-4">
-          Upcoming Confirmed Charters
+          Confirmed Charters — {monthLabel}
         </h2>
-        <DataTable columns={upcomingColumns} data={upcomingData} emptyMessage="No upcoming charters." />
+        <DataTable columns={chartersColumns} data={chartersData} emptyMessage="No confirmed charters this month." />
       </div>
     </AppShell>
   );
