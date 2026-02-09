@@ -9,11 +9,13 @@ import { hrEmploymentTypesApi } from '@/lib/supabase/api/hrEmploymentTypes';
 import type { Database } from '@/lib/supabase/database.types';
 import { EMPLOYEE_STATUS_LABELS } from '@/data/hr/types';
 import type { EmployeeStatus } from '@/data/hr/types';
+import { useIsMobile } from '@/hooks/useIsMobile';
 
 type Employee = Database['public']['Tables']['employees']['Row'];
 type HREmploymentType = Database['public']['Tables']['hr_employment_types']['Row'];
 
 export default function EmployeeList() {
+  const isMobile = useIsMobile();
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [companyMap, setCompanyMap] = useState<Map<string, string>>(new Map());
   const [employmentTypes, setEmploymentTypes] = useState<HREmploymentType[]>([]);
@@ -120,7 +122,47 @@ export default function EmployeeList() {
         </span>
       </div>
 
-      {/* Table */}
+      {/* Table / Card list */}
+      {isMobile ? (
+        <div className="space-y-3">
+          {filtered.length === 0 ? (
+            <div className="rounded-xl border border-gray-200 bg-white px-6 py-12 text-center text-sm text-gray-500">
+              {employees.length === 0 ? 'No employees yet.' : 'No employees match your filters.'}
+            </div>
+          ) : filtered.map((emp) => (
+            <Link key={emp.id} href={`/hr/manager/employees/${emp.id}`} className="block rounded-xl border border-gray-200 bg-white p-4 shadow-sm active:bg-gray-50">
+              <div className="mb-2 flex items-center justify-between">
+                <span className="text-sm font-semibold text-[#5A7A8F]">
+                  {emp.full_name_en}
+                  {emp.nickname && <span className="text-xs text-gray-400 ml-1">({emp.nickname})</span>}
+                </span>
+                <span className={`inline-flex px-2 py-0.5 text-xs font-medium rounded-full ${
+                  emp.status === 'active' ? 'bg-green-100 text-green-800' :
+                  emp.status === 'on_leave' ? 'bg-amber-100 text-amber-800' :
+                  emp.status === 'resigned' ? 'bg-gray-100 text-gray-600' :
+                  'bg-red-100 text-red-800'
+                }`}>
+                  {EMPLOYEE_STATUS_LABELS[emp.status as EmployeeStatus]}
+                </span>
+              </div>
+              <dl className="space-y-1">
+                <div className="flex items-start justify-between gap-2">
+                  <dt className="shrink-0 text-xs font-medium text-gray-500">ID</dt>
+                  <dd className="text-right text-sm text-gray-900 font-mono">{emp.employee_id}</dd>
+                </div>
+                <div className="flex items-start justify-between gap-2">
+                  <dt className="shrink-0 text-xs font-medium text-gray-500">Position</dt>
+                  <dd className="text-right text-sm text-gray-900">{emp.position || '-'}</dd>
+                </div>
+                <div className="flex items-start justify-between gap-2">
+                  <dt className="shrink-0 text-xs font-medium text-gray-500">Type</dt>
+                  <dd className="text-right text-sm text-gray-900">{empTypeMap.get(emp.employment_type) || emp.employment_type}</dd>
+                </div>
+              </dl>
+            </Link>
+          ))}
+        </div>
+      ) : (
       <div className="bg-white border border-gray-200 rounded-lg shadow-sm overflow-x-auto">
         <table className="min-w-full divide-y divide-gray-200">
           <thead className="bg-gray-50">
@@ -169,6 +211,7 @@ export default function EmployeeList() {
           </tbody>
         </table>
       </div>
+      )}
     </div>
   );
 }

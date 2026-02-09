@@ -3,14 +3,17 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useParams, useSearchParams, useRouter } from 'next/navigation';
 import { useQueryClient } from '@tanstack/react-query';
-import { Plus, Calendar as CalendarIcon, Ship } from 'lucide-react';
+import { Plus, Calendar as CalendarIcon, Ship, BedDouble } from 'lucide-react';
 import { BookingCalendar } from '@/components/bookings/BookingCalendar';
 import { CalendarDisplayPopover } from '@/components/bookings/CalendarDisplayPopover';
 import { BookingForm } from '@/components/bookings/BookingForm';
 import { Booking, BookingType, BookingStatus } from '@/data/booking/types';
 import { Project } from '@/data/project/types';
 import { Currency } from '@/data/company/types';
-import { bookingsApi } from '@/lib/supabase/api/bookings';
+import { bookingsApi, createBookingWithNumber } from '@/lib/supabase/api/bookings';
+import { cabinAllocationsApi } from '@/lib/supabase/api/cabinAllocations';
+import { projectCabinsApi } from '@/lib/supabase/api/projectCabins';
+import { yachtProductsApi } from '@/lib/supabase/api/yachtProducts';
 import { useYachtProjects } from '@/hooks/queries/useProjects';
 import { useBookingsByMonth } from '@/hooks/queries/useBookings';
 import { useDataScope } from '@/hooks/useDataScope';
@@ -54,6 +57,18 @@ export default function BookingCalendarPage() {
   const { data: projects = [], isLoading: projectsLoading } = useYachtProjects(projectIds);
   const { data: bookings = [], isLoading: bookingsLoading } = useBookingsByMonth(currentYear, currentMonth, projectIds);
   const isLoading = projectsLoading || bookingsLoading;
+
+  // Load cabin counts for cabin charter bookings
+  const [cabinCounts, setCabinCounts] = useState<Map<string, { total: number; booked: number }>>(new Map());
+  useEffect(() => {
+    const cabinBookingIds = bookings
+      .filter(b => b.type === 'cabin_charter')
+      .map(b => b.id);
+    if (cabinBookingIds.length === 0) return; // Keep existing empty map, avoid new reference
+    cabinAllocationsApi.getCabinCountsByBookingIds(cabinBookingIds)
+      .then(setCabinCounts)
+      .catch(() => {}); // Silently ignore if table doesn't exist yet
+  }, [bookings]);
 
   // Real-time updates: when another user creates/edits a booking, this calendar auto-refreshes
   useRealtimeSubscription([{
@@ -159,6 +174,52 @@ export default function BookingCalendarPage() {
     return { projectId: project.id };
   };
 
+  // Quick-create cabin charter with flexible schedule
+  const handleQuickCreateCabinCharter = async () => {
+    const projectId = selectedBoatFilter && selectedBoatFilter !== 'external'
+      ? selectedBoatFilter
+      : projects[0]?.id;
+    if (!projectId) return;
+
+    const prefill: Partial<Booking> = {
+      projectId,
+      type: 'cabin_charter' as BookingType,
+      title: 'Cabin Charter',
+    };
+
+    // Look up cabin charter product for schedule defaults
+    try {
+      const product = await yachtProductsApi.findMatchingProduct('own', projectId, 'cabin_charter');
+      if (product?.defaultStartDay !== undefined && product?.defaultNights) {
+        // Calculate next occurrence of the start day
+        const today = new Date();
+        const currentDay = today.getDay(); // 0=Sun
+        let daysUntilStart = product.defaultStartDay - currentDay;
+        if (daysUntilStart <= 0) daysUntilStart += 7; // Next week if today or past
+
+        const startDate = new Date(today);
+        startDate.setDate(startDate.getDate() + daysUntilStart);
+        const endDate = new Date(startDate);
+        endDate.setDate(endDate.getDate() + product.defaultNights);
+
+        prefill.dateFrom = startDate.toISOString().split('T')[0];
+        prefill.dateTo = endDate.toISOString().split('T')[0];
+        if (product.name) prefill.title = product.name;
+        if (product.price) prefill.totalPrice = product.price;
+        if (product.currency) prefill.currency = product.currency;
+        if (product.departFrom) prefill.departureFrom = product.departFrom;
+        if (product.destination) prefill.destination = product.destination;
+      }
+    } catch (err) {
+      console.error('Error loading cabin charter product:', err);
+    }
+
+    setPrefilledBooking(prefill);
+    setSelectedBooking(null);
+    setSelectedDate(null);
+    setShowBookingForm(true);
+  };
+
   // Booking handlers
   const handleDateClick = (date: string) => {
     if (!canCreate) return;
@@ -192,13 +253,8 @@ export default function BookingCalendarPage() {
       await bookingsApi.update(selectedBooking.id, bookingData);
     } else {
       // Create NEW booking (only happens on explicit save)
-      const now = new Date();
-      const year = now.getFullYear();
-      const month = String(now.getMonth() + 1).padStart(2, '0');
-      const rand = String(Math.floor(Math.random() * 10000)).padStart(4, '0');
-      await bookingsApi.create({
+      await createBookingWithNumber({
         ...bookingData,
-        bookingNumber: `FA-${year}${month}${rand}`,
         bookingOwner: bookingData.bookingOwner || undefined,
       });
     }
@@ -311,21 +367,30 @@ export default function BookingCalendarPage() {
           {/* Display settings */}
           <CalendarDisplayPopover />
 
-          {/* Add booking button */}
+          {/* Add booking buttons */}
           {canCreate && (
-            <button
-              onClick={() => {
-                const prefill = buildBoatPrefill();
-                setPrefilledBooking(prefill);
-                setSelectedBooking(null);
-                setSelectedDate(null);
-                setShowBookingForm(true);
-              }}
-              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors shadow-sm"
-            >
-              <Plus className="h-4 w-4" />
-              <span>New</span>
-            </button>
+            <>
+              <button
+                onClick={handleQuickCreateCabinCharter}
+                className="flex items-center gap-2 px-3 py-2 text-indigo-700 bg-indigo-100 rounded-lg hover:bg-indigo-200 transition-colors text-sm font-medium"
+              >
+                <BedDouble className="h-4 w-4" />
+                <span>Cabin Charter</span>
+              </button>
+              <button
+                onClick={() => {
+                  const prefill = buildBoatPrefill();
+                  setPrefilledBooking(prefill);
+                  setSelectedBooking(null);
+                  setSelectedDate(null);
+                  setShowBookingForm(true);
+                }}
+                className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors shadow-sm"
+              >
+                <Plus className="h-4 w-4" />
+                <span>New</span>
+              </button>
+            </>
           )}
         </div>
       </div>
@@ -346,6 +411,7 @@ export default function BookingCalendarPage() {
         selectedBoatFilter={selectedBoatFilter}
         allBookingsDisplayFields={calendarDisplay.allBookingsFields}
         boatTabDisplayFields={calendarDisplay.boatTabFields}
+        cabinCounts={cabinCounts}
       />
 
       {/* Booking Form Modal */}

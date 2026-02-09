@@ -16,12 +16,12 @@ export default function SalesDashboard() {
       : mockInvoices.filter((inv) => inv.status.toLowerCase() === statusFilter);
 
   const invoiceColumns = [
-    { key: "id", header: "Invoice ID" },
+    { key: "id", header: "Invoice ID", primary: true },
     { key: "client", header: "Client" },
-    { key: "boat", header: "Boat" },
+    { key: "boat", header: "Boat", hideOnMobile: true },
     { key: "amount", header: "Amount", align: "right" as const },
     { key: "date", header: "Date" },
-    { key: "dueDate", header: "Due Date" },
+    { key: "dueDate", header: "Due Date", hideOnMobile: true },
     {
       key: "status",
       header: "Status",

@@ -22,7 +22,7 @@ import {
 
 export default function AccountantDashboard() {
   const transactionColumns = [
-    { key: "id", header: "ID" },
+    { key: "id", header: "ID", primary: true },
     { key: "date", header: "Date" },
     {
       key: "type",
@@ -39,12 +39,13 @@ export default function AccountantDashboard() {
         </span>
       ),
     },
-    { key: "category", header: "Category" },
-    { key: "boat", header: "Boat" },
+    { key: "category", header: "Category", hideOnMobile: true },
+    { key: "boat", header: "Boat", hideOnMobile: true },
     { key: "amount", header: "Amount", align: "right" as const },
     {
       key: "receipt",
       header: "Receipt",
+      hideOnMobile: true,
       align: "center" as const,
       render: (row: any) =>
         row.receipt === "Yes" ? (
@@ -56,10 +57,10 @@ export default function AccountantDashboard() {
   ];
 
   const reconciliationColumns = [
-    { key: "date", header: "Date" },
+    { key: "date", header: "Date", primary: true },
     { key: "description", header: "Description" },
     { key: "bankAmount", header: "Bank Amount", align: "right" as const },
-    { key: "systemAmount", header: "System Amount", align: "right" as const },
+    { key: "systemAmount", header: "System Amount", align: "right" as const, hideOnMobile: true },
     {
       key: "status",
       header: "Status",
@@ -79,9 +80,9 @@ export default function AccountantDashboard() {
   ];
 
   const missingDocsColumns = [
-    { key: "transaction", header: "Transaction ID" },
+    { key: "transaction", header: "Transaction ID", primary: true },
     { key: "date", header: "Date" },
-    { key: "description", header: "Description" },
+    { key: "description", header: "Description", hideOnMobile: true },
     { key: "amount", header: "Amount", align: "right" as const },
     { key: "documentType", header: "Missing Document" },
   ];

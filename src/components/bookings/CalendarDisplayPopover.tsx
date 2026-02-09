@@ -7,7 +7,8 @@ import { useBookingSettings, CALENDAR_DISPLAY_FIELD_OPTIONS } from '@/contexts/B
 export function CalendarDisplayPopover() {
   const [isOpen, setIsOpen] = useState(false);
   const popoverRef = useRef<HTMLDivElement>(null);
-  const { calendarDisplay, setCalendarDisplayFields } = useBookingSettings();
+  const saveTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const { calendarDisplay, setCalendarDisplayFields, saveSettings } = useBookingSettings();
 
   // Close on outside click
   useEffect(() => {
@@ -21,12 +22,25 @@ export function CalendarDisplayPopover() {
     return () => document.removeEventListener('mousedown', handleClick);
   }, [isOpen]);
 
+  // Clean up debounce timer on unmount
+  useEffect(() => {
+    return () => {
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    };
+  }, []);
+
   const toggleField = (view: 'all' | 'boat', fieldKey: string) => {
     const currentFields = view === 'all' ? calendarDisplay.allBookingsFields : calendarDisplay.boatTabFields;
     const newFields = currentFields.includes(fieldKey)
       ? currentFields.filter(f => f !== fieldKey)
       : [...currentFields, fieldKey];
     setCalendarDisplayFields(view, newFields);
+
+    // Debounced auto-save so rapid clicks batch into one API call
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(() => {
+      saveSettings().catch(err => console.error('Failed to save display settings:', err));
+    }, 500);
   };
 
   return (

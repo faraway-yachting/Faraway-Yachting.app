@@ -125,18 +125,20 @@ export async function middleware(request: NextRequest) {
   if (needsPermissionCheck && user) {
     // Fetch profile with 3-second timeout
     let isSuperAdmin = false;
+    let canManageUsers = false;
     let profileCheckFailed = false;
     try {
-      const profilePromise = Promise.resolve(supabase.from('user_profiles').select('is_super_admin').eq('id', user.id).single());
+      const profilePromise = Promise.resolve(supabase.from('user_profiles').select('is_super_admin, can_manage_users').eq('id', user.id).single());
       const profileResult = await withTimeout(profilePromise, 10000);
       isSuperAdmin = (profileResult.data as { is_super_admin?: boolean } | null)?.is_super_admin === true;
+      canManageUsers = (profileResult.data as { can_manage_users?: boolean } | null)?.can_manage_users === true;
     } catch (err) {
       console.error('Middleware profile check timeout:', err);
       profileCheckFailed = true;
     }
 
     // Admin route - requires super admin (but allow if profile check failed - fail open)
-    if (isAdminRoute && !isSuperAdmin && !profileCheckFailed) {
+    if (isAdminRoute && !isSuperAdmin && !canManageUsers && !profileCheckFailed) {
       const url = request.nextUrl.clone();
       url.pathname = '/unauthorized';
       return createRedirect(url);

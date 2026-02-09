@@ -11,6 +11,7 @@ export interface BookingPaymentExtended extends BookingPaymentRow {
   bank_account_id?: string | null;
   synced_to_receipt?: boolean;
   needs_accounting_action?: boolean;
+  cabin_allocation_id?: string | null;
 }
 
 export const bookingPaymentsApi = {
@@ -25,6 +26,17 @@ export const bookingPaymentsApi = {
     return (data ?? []) as BookingPaymentExtended[];
   },
 
+  async getByAllocationId(allocationId: string): Promise<BookingPaymentExtended[]> {
+    const supabase = createClient();
+    const { data, error } = await (supabase as any)
+      .from('booking_payments')
+      .select('*')
+      .eq('cabin_allocation_id', allocationId)
+      .order('created_at', { ascending: true });
+    if (error) throw error;
+    return (data ?? []) as BookingPaymentExtended[];
+  },
+
   async create(record: Partial<BookingPaymentInsert> & {
     receipt_id?: string;
     payment_method?: string;
@@ -32,6 +44,7 @@ export const bookingPaymentsApi = {
     paid_to_company_id?: string;
     synced_to_receipt?: boolean;
     needs_accounting_action?: boolean;
+    cabin_allocation_id?: string;
   }): Promise<BookingPaymentExtended> {
     const supabase = createClient();
     const { data, error } = await (supabase as any)

@@ -400,60 +400,16 @@ export const pettyCashApi = {
   async getAllWalletsWithCalculatedBalances(): Promise<(PettyCashWallet & { calculated_balance: number })[]> {
     const supabase = createClient();
 
-    // Get all wallets
-    const { data: wallets, error: walletsError } = await supabase
-      .from('petty_cash_wallets')
-      .select('*')
-      .order('wallet_name');
+    // Single RPC call replaces 4 separate queries (wallets + topups + expenses + reimbursements)
+    // The SQL function handles balance aggregation and RLS filtering
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data, error } = await (supabase as any).rpc('get_wallets_with_balances');
 
-    if (walletsError) throw walletsError;
-    if (!wallets || wallets.length === 0) return [];
+    if (error) throw error;
 
-    // Get all topups and expenses in one query each for efficiency
-    const walletIds = wallets.map(w => w.id);
-
-    const { data: allTopups } = await supabase
-      .from('petty_cash_topups')
-      .select('wallet_id, amount')
-      .in('wallet_id', walletIds)
-      .eq('status', 'completed');
-
-    const { data: allExpenses } = await supabase
-      .from('petty_cash_expenses')
-      .select('wallet_id, amount')
-      .in('wallet_id', walletIds)
-      .eq('status', 'submitted');
-
-    const { data: allReimbursements } = await (supabase as any)
-      .from('petty_cash_reimbursements')
-      .select('wallet_id, final_amount')
-      .in('wallet_id', walletIds)
-      .eq('status', 'paid');
-
-    // Group topups, expenses, and reimbursements by wallet
-    const topupsByWallet = new Map<string, number>();
-    const expensesByWallet = new Map<string, number>();
-    const reimbursementsByWallet = new Map<string, number>();
-
-    for (const topup of allTopups ?? []) {
-      const current = topupsByWallet.get(topup.wallet_id) || 0;
-      topupsByWallet.set(topup.wallet_id, current + (topup.amount || 0));
-    }
-
-    for (const expense of allExpenses ?? []) {
-      const current = expensesByWallet.get(expense.wallet_id) || 0;
-      expensesByWallet.set(expense.wallet_id, current + (expense.amount || 0));
-    }
-
-    for (const reimb of (allReimbursements ?? []) as any[]) {
-      const current = reimbursementsByWallet.get(reimb.wallet_id) || 0;
-      reimbursementsByWallet.set(reimb.wallet_id, current + (reimb.final_amount || 0));
-    }
-
-    // Calculate current balance for each wallet
-    return wallets.map(wallet => ({
-      ...wallet,
-      calculated_balance: (wallet.balance || 0) + (topupsByWallet.get(wallet.id) || 0) + (reimbursementsByWallet.get(wallet.id) || 0) - (expensesByWallet.get(wallet.id) || 0),
+    return ((data ?? []) as Array<PettyCashWallet & { calculated_balance: number }>).map(row => ({
+      ...row,
+      calculated_balance: Number(row.calculated_balance) || 0,
     }));
   },
 
@@ -488,6 +444,17 @@ export const pettyCashApi = {
     const { data, error } = await supabase
       .from('petty_cash_expenses')
       .select('*')
+      .order('expense_date', { ascending: false });
+    if (error) throw error;
+    return data ?? [];
+  },
+
+  async getExpensesByStatus(status: 'draft' | 'submitted' | 'rejected'): Promise<PettyCashExpense[]> {
+    const supabase = createClient();
+    const { data, error } = await supabase
+      .from('petty_cash_expenses')
+      .select('*')
+      .eq('status', status)
       .order('expense_date', { ascending: false });
     if (error) throw error;
     return data ?? [];
@@ -1226,6 +1193,60 @@ export const pettyCashApi = {
     });
   },
 
+  /**
+   * Batch-create reimbursements for multiple expenses in a single INSERT.
+   * Uses 3 queries total: 1 count (for sequential numbers) + 1 filter (existing) + 1 insert.
+   */
+  async batchCreateReimbursements(
+    reimbursements: Omit<PettyCashReimbursementInsert, 'reimbursement_number'>[]
+  ): Promise<PettyCashReimbursement[]> {
+    if (reimbursements.length === 0) return [];
+
+    const supabase = createClient();
+
+    // 1. Single count query to generate sequential reimbursement numbers
+    const now = new Date();
+    const yymm = `${now.getFullYear().toString().slice(-2)}${(now.getMonth() + 1).toString().padStart(2, '0')}`;
+    const prefix = `PC-RMB-${yymm}`;
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { count, error: countError } = await (supabase as any)
+      .from('petty_cash_reimbursements')
+      .select('*', { count: 'exact', head: true })
+      .like('reimbursement_number', `${prefix}%`);
+
+    if (countError) throw countError;
+
+    const baseSeq = (count || 0) + 1;
+    const withNumbers = reimbursements.map((r, i) => ({
+      ...r,
+      reimbursement_number: `${prefix}${(baseSeq + i).toString().padStart(4, '0')}`,
+    }));
+
+    // 2. Filter out expenses that already have a reimbursement
+    const expenseIds = reimbursements.map(r => r.expense_id);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: existing } = await (supabase as any)
+      .from('petty_cash_reimbursements')
+      .select('expense_id')
+      .in('expense_id', expenseIds);
+
+    const existingSet = new Set((existing ?? []).map((e: { expense_id: string }) => e.expense_id));
+    const toInsert = withNumbers.filter(r => !existingSet.has(r.expense_id));
+
+    if (toInsert.length === 0) return [];
+
+    // 3. Single batch insert
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data, error } = await (supabase as any)
+      .from('petty_cash_reimbursements')
+      .insert(toInsert)
+      .select();
+
+    if (error) throw error;
+    return (data ?? []) as PettyCashReimbursement[];
+  },
+
   async updateReimbursement(id: string, updates: Partial<PettyCashReimbursementInsert>): Promise<PettyCashReimbursement> {
     const supabase = createClient();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1599,11 +1620,7 @@ export const pettyCashApi = {
       const walletName = r.wallet?.wallet_name || 'Unknown Wallet';
       const holderName = r.wallet?.user_name || 'Unknown';
       const bankAccountId = r.bank_account_id;
-      const bankInfo = r.bank_account?.bank_information
-        ? (typeof r.bank_account.bank_information === 'string'
-          ? JSON.parse(r.bank_account.bank_information)
-          : r.bank_account.bank_information) as { bankName?: string }
-        : null;
+      const bankInfo = r.bank_account?.bank_information as { bankName?: string } | null;
       const bankAccountName = r.bank_account
         ? `${bankInfo?.bankName || 'Bank'} (${r.bank_account.account_number})`
         : 'Unknown Bank';

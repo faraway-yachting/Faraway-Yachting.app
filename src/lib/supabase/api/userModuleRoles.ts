@@ -27,6 +27,7 @@ export interface UserWithModuleRoles {
   full_name: string | null;
   avatar_url: string | null;
   is_super_admin: boolean;
+  can_manage_users: boolean;
   last_module: string | null;
   created_at: string;
   module_roles: UserModuleRole[];
@@ -88,6 +89,7 @@ export const userModuleRolesApi = {
       full_name: profile.full_name,
       avatar_url: profile.avatar_url || null,
       is_super_admin: profile.is_super_admin || false,
+      can_manage_users: (profile as any).can_manage_users || false,
       last_module: profile.last_module || null,
       created_at: profile.created_at,
       module_roles: moduleRoles.filter(role => role.user_id === profile.id),
@@ -197,6 +199,18 @@ export const userModuleRolesApi = {
     if (error) throw error;
   },
 
+  // Update user's can_manage_users status
+  async setUserCanManageUsers(userId: string, canManageUsers: boolean): Promise<void> {
+    const supabase = createClient();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error } = await (supabase as any)
+      .from('user_profiles')
+      .update({ can_manage_users: canManageUsers })
+      .eq('id', userId);
+
+    if (error) throw error;
+  },
+
   // Invite a new user with module roles (uses server API route)
   async inviteUserWithRoles(
     email: string,
@@ -232,6 +246,7 @@ export const userModuleRolesApi = {
         full_name: fullName,
         avatar_url: null,
         is_super_admin: isSuperAdmin,
+        can_manage_users: false,
         last_module: null,
         created_at: new Date().toISOString(),
         module_roles: roles.map(r => ({

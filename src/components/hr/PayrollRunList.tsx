@@ -7,8 +7,10 @@ import { payrollRunsApi, type PayrollRun } from '@/lib/supabase/api/payrollRuns'
 import { payrollSlipsApi } from '@/lib/supabase/api/payrollSlips';
 import { createClient } from '@/lib/supabase/client';
 import { PAYROLL_RUN_STATUS_LABELS, PAYROLL_RUN_STATUS_COLORS, type PayrollRunStatus } from '@/data/hr/types';
+import { useIsMobile } from '@/hooks/useIsMobile';
 
 export default function PayrollRunList() {
+  const isMobile = useIsMobile();
   const router = useRouter();
   const [runs, setRuns] = useState<PayrollRun[]>([]);
   const [loading, setLoading] = useState(true);
@@ -135,6 +137,48 @@ export default function PayrollRunList() {
           <p className="text-gray-500">No payroll runs found.</p>
         </div>
       ) : (
+        isMobile ? (
+          <div className="space-y-3">
+            {runs.map(run => (
+              <div
+                key={run.id}
+                className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm cursor-pointer active:bg-gray-50"
+                onClick={() => router.push(`/hr/manager/payroll/${run.id}`)}
+              >
+                <div className="mb-2 flex items-center justify-between">
+                  <span className="text-sm font-semibold text-gray-900">{run.run_number}</span>
+                  <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${PAYROLL_RUN_STATUS_COLORS[run.status as PayrollRunStatus] || 'bg-gray-100 text-gray-800'}`}>
+                    {PAYROLL_RUN_STATUS_LABELS[run.status as PayrollRunStatus] || run.status}
+                  </span>
+                </div>
+                <dl className="space-y-1">
+                  <div className="flex items-start justify-between gap-2">
+                    <dt className="shrink-0 text-xs font-medium text-gray-500">Period</dt>
+                    <dd className="text-right text-sm text-gray-900">{monthNames[run.period_month]} {run.period_year}</dd>
+                  </div>
+                  <div className="flex items-start justify-between gap-2">
+                    <dt className="shrink-0 text-xs font-medium text-gray-500">Employees</dt>
+                    <dd className="text-right text-sm text-gray-900">{run.employee_count}</dd>
+                  </div>
+                  <div className="flex items-start justify-between gap-2">
+                    <dt className="shrink-0 text-xs font-medium text-gray-500">Net Pay</dt>
+                    <dd className="text-right text-sm font-medium text-gray-900">{formatMoney(run.total_net)}</dd>
+                  </div>
+                </dl>
+                {run.status === 'draft' && (
+                  <div className="mt-3 flex items-center gap-2 border-t border-gray-100 pt-3" onClick={(e) => e.stopPropagation()}>
+                    <button
+                      onClick={() => handleDelete(run.id, run.run_number)}
+                      className="text-xs px-2 py-1 rounded bg-red-50 text-red-600 hover:bg-red-100"
+                    >
+                      <Trash2 className="h-3.5 w-3.5 inline mr-1" />Delete
+                    </button>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        ) : (
         <div className="bg-white border border-gray-200 rounded-lg shadow-sm overflow-hidden">
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">
@@ -188,6 +232,7 @@ export default function PayrollRunList() {
             </tbody>
           </table>
         </div>
+        )
       )}
 
       {/* Create Modal */}

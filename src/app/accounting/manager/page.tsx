@@ -184,9 +184,9 @@ export default function ManagerDashboard() {
     }));
 
   const boatColumns = [
-    { key: "boat", header: "Boat" },
+    { key: "boat", header: "Boat", primary: true },
     { key: "bookedDays", header: "Booked Days", align: "right" as const },
-    { key: "available", header: "Available", align: "right" as const },
+    { key: "available", header: "Available", align: "right" as const, hideOnMobile: true },
     { key: "utilization", header: "Utilization", align: "right" as const, render: (row: any) => {
       const pct = parseInt(row.utilization);
       return (
@@ -196,13 +196,13 @@ export default function ManagerDashboard() {
       );
     }},
     { key: "revenue", header: "Revenue", align: "right" as const },
-    { key: "bookings", header: "Bookings", align: "right" as const },
+    { key: "bookings", header: "Bookings", align: "right" as const, hideOnMobile: true },
   ];
 
   const chartersColumns = [
-    { key: "customer", header: "Customer" },
+    { key: "customer", header: "Customer", primary: true },
     { key: "boat", header: "Boat" },
-    { key: "type", header: "Type" },
+    { key: "type", header: "Type", hideOnMobile: true },
     { key: "dates", header: "Dates" },
     { key: "amount", header: "Amount", align: "right" as const },
   ];
@@ -239,9 +239,9 @@ export default function ManagerDashboard() {
     .sort((a, b) => b.bookings - a.bookings);
 
   const externalBoatColumns = [
-    { key: "boat", header: "Boat" },
+    { key: "boat", header: "Boat", primary: true },
     { key: "operator", header: "Operator" },
-    { key: "bookings", header: "Bookings", align: "right" as const },
+    { key: "bookings", header: "Bookings", align: "right" as const, hideOnMobile: true },
     { key: "revenue", header: "Revenue", align: "right" as const },
   ];
 

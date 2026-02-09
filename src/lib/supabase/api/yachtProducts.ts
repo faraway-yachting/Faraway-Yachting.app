@@ -24,6 +24,8 @@ interface DbYachtProduct {
   is_active: boolean | null;
   notes: string | null;
   created_by: string | null;
+  default_start_day: number | null;
+  default_nights: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -43,6 +45,8 @@ function dbYachtProductToFrontend(db: DbYachtProduct): YachtProduct {
     price: db.price ?? undefined,
     currency: (db.currency || 'THB') as Currency,
     defaultTime: db.default_time ?? undefined,
+    defaultStartDay: db.default_start_day ?? undefined,
+    defaultNights: db.default_nights ?? undefined,
     displayOrder: db.display_order ?? 0,
     isActive: db.is_active ?? true,
     notes: db.notes ?? undefined,
@@ -68,12 +72,14 @@ interface DbYachtProductInsert {
   is_active?: boolean;
   notes?: string | null;
   created_by?: string | null;
+  default_start_day?: number | null;
+  default_nights?: number | null;
 }
 
 function frontendYachtProductToDb(
   product: Partial<YachtProduct>
 ): DbYachtProductInsert {
-  return {
+  const result: DbYachtProductInsert = {
     yacht_source: product.yachtSource!,
     project_id: product.projectId ?? null,
     external_yacht_id: product.externalYachtId ?? null,
@@ -90,6 +96,14 @@ function frontendYachtProductToDb(
     notes: product.notes ?? null,
     created_by: product.createdBy ?? null,
   };
+  // Only include schedule fields when set (graceful if migration not yet applied)
+  if (product.defaultStartDay != null) {
+    result.default_start_day = product.defaultStartDay;
+  }
+  if (product.defaultNights != null) {
+    result.default_nights = product.defaultNights;
+  }
+  return result;
 }
 
 export const yachtProductsApi = {
@@ -267,6 +281,10 @@ export const yachtProductsApi = {
       dbUpdates.display_order = updates.displayOrder;
     if (updates.isActive !== undefined) dbUpdates.is_active = updates.isActive;
     if (updates.notes !== undefined) dbUpdates.notes = updates.notes ?? null;
+    if (updates.defaultStartDay !== undefined)
+      dbUpdates.default_start_day = updates.defaultStartDay ?? null;
+    if (updates.defaultNights !== undefined)
+      dbUpdates.default_nights = updates.defaultNights ?? null;
 
     const { data, error } = await supabase
       .from('yacht_products' as any)

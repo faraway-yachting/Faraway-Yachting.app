@@ -1,4 +1,7 @@
+'use client';
+
 import { ReactNode } from "react";
+import { useIsMobile } from "@/hooks/useIsMobile";
 
 export interface Column<T> {
   key: string;
@@ -6,6 +9,12 @@ export interface Column<T> {
   render?: (row: T) => ReactNode;
   align?: "left" | "center" | "right";
   width?: string;
+  /** Show this column prominently at the top of the mobile card */
+  primary?: boolean;
+  /** Hide this column on mobile */
+  hideOnMobile?: boolean;
+  /** Plain text label for mobile card view. Falls back to header if it's a string. */
+  mobileLabel?: string;
 }
 
 interface DataTableProps<T> {
@@ -15,12 +24,70 @@ interface DataTableProps<T> {
   onRowClick?: (row: T) => void;
 }
 
+function getColumnLabel<T>(column: Column<T>): string {
+  if (column.mobileLabel) return column.mobileLabel;
+  if (typeof column.header === "string") return column.header;
+  return column.key;
+}
+
 export function DataTable<T extends Record<string, any>>({
   columns,
   data,
   emptyMessage = "No data available",
   onRowClick,
 }: DataTableProps<T>) {
+  const isMobile = useIsMobile();
+
+  if (isMobile) {
+    const primaryCol = columns.find((c) => c.primary) || columns[0];
+    const detailCols = columns.filter((c) => c !== primaryCol && !c.hideOnMobile);
+
+    if (data.length === 0) {
+      return (
+        <div className="rounded-xl border border-gray-200 bg-white px-6 py-12 text-center text-sm text-gray-500">
+          {emptyMessage}
+        </div>
+      );
+    }
+
+    return (
+      <div className="space-y-3">
+        {data.map((row, rowIndex) => (
+          <div
+            key={rowIndex}
+            className={`rounded-xl border border-gray-200 bg-white p-4 shadow-sm ${
+              onRowClick ? "cursor-pointer active:bg-gray-50" : ""
+            }`}
+            onClick={() => onRowClick?.(row)}
+          >
+            {/* Primary value */}
+            <div className="mb-2 text-sm font-semibold text-gray-900">
+              {primaryCol.render
+                ? primaryCol.render(row)
+                : (row[primaryCol.key]?.toString() || "—")}
+            </div>
+
+            {/* Key-value pairs */}
+            <dl className="space-y-1">
+              {detailCols.map((col) => (
+                <div key={col.key} className="flex items-start justify-between gap-2">
+                  <dt className="shrink-0 text-xs font-medium text-gray-500">
+                    {getColumnLabel(col)}
+                  </dt>
+                  <dd className="text-right text-sm text-gray-900">
+                    {col.render
+                      ? col.render(row)
+                      : (row[col.key]?.toString() || "—")}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
   return (
     <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
       <div className="overflow-x-auto">

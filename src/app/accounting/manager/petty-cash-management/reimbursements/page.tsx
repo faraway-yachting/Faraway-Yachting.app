@@ -4,7 +4,11 @@ import { useState, useMemo, useCallback, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { AppShell } from '@/components/accounting/AppShell';
 import { DataTable } from '@/components/accounting/DataTable';
-import ReimbursementApprovalModal from '@/components/petty-cash/ReimbursementApprovalModal';
+import dynamic from 'next/dynamic';
+
+const ReimbursementApprovalModal = dynamic(() =>
+  import('@/components/petty-cash/ReimbursementApprovalModal')
+);
 import {
   ArrowLeft,
   Clock,
@@ -16,6 +20,11 @@ import {
   User,
   DollarSign,
   Loader2,
+  ChevronDown,
+  ChevronUp,
+  History,
+  Landmark,
+  ArrowUpCircle,
 } from 'lucide-react';
 
 // Data imports - mock data as fallback
@@ -34,14 +43,30 @@ import {
   getStatusLabel,
   getStatusColor,
 } from '@/lib/petty-cash/utils';
-import { pettyCashApi, type PettyCashReimbursement as DbReimbursement } from '@/lib/supabase/api/pettyCash';
+import { pettyCashApi, type PettyCashReimbursement as DbReimbursement, type PettyCashBatch } from '@/lib/supabase/api/pettyCash';
 import { companiesApi } from '@/lib/supabase/api/companies';
 import { projectsApi } from '@/lib/supabase/api/projects';
+import { bankAccountsApi } from '@/lib/supabase/api/bankAccounts';
 import { useAuth } from '@/components/auth/AuthProvider';
 import { notifyWalletHolderClaimPaid, notifyWalletHolderClaimRejected } from '@/data/notifications/notifications';
 
 type StatusFilter = 'all' | 'pending' | 'approved' | 'paid' | 'rejected';
-type GroupBy = 'none' | 'company' | 'holder' | 'status';
+type GroupBy = 'none' | 'company' | 'holder' | 'status' | 'bank';
+
+type TransferGroup = {
+  walletId: string;
+  walletName: string;
+  holderName: string;
+  bankAccountGroups: {
+    bankAccountId: string;
+    bankAccountName: string;
+    companyId: string;
+    companyName: string;
+    amount: number;
+    reimbursementIds: string[];
+  }[];
+  totalAmount: number;
+};
 
 // Extended reimbursement type with project info
 interface ReimbursementWithProject extends PettyCashReimbursement {
@@ -56,7 +81,8 @@ function transformReimbursement(
   companyName: string,
   expenseNumber: string,
   projectId?: string,
-  projectName?: string
+  projectName?: string,
+  bankAccountName?: string
 ): ReimbursementWithProject {
   return {
     id: db.id,
@@ -73,7 +99,7 @@ function transformReimbursement(
     finalAmount: db.final_amount,
     status: db.status,
     bankAccountId: db.bank_account_id || undefined,
-    bankAccountName: undefined, // Would need to join with bank_accounts
+    bankAccountName: bankAccountName,
     paymentDate: db.payment_date || undefined,
     paymentReference: db.payment_reference || undefined,
     approvedBy: db.approved_by || undefined,
@@ -94,6 +120,7 @@ export default function ReimbursementsPage() {
   const [refreshKey, setRefreshKey] = useState(0);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [companyFilter, setCompanyFilter] = useState<string>('all');
+  const [bankAccountFilter, setBankAccountFilter] = useState<string>('all');
   const [groupBy, setGroupBy] = useState<GroupBy>('company');
 
   // Modal state
@@ -105,19 +132,30 @@ export default function ReimbursementsPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [dbReimbursements, setDbReimbursements] = useState<ReimbursementWithProject[]>([]);
   const [companies, setCompanies] = useState<{ id: string; name: string }[]>([]);
+  const [bankAccounts, setBankAccounts] = useState<{ id: string; name: string }[]>([]);
+  const [paidBatches, setPaidBatches] = useState<(PettyCashBatch & { companyName?: string; bankAccountName?: string })[]>([]);
+  const [showTransferHistory, setShowTransferHistory] = useState(false);
+
+  // Transfer management state
+  const [transferSummary, setTransferSummary] = useState<TransferGroup[]>([]);
+  const [selectedTransfers, setSelectedTransfers] = useState<Set<string>>(new Set());
+  const [isProcessingTransfer, setIsProcessingTransfer] = useState(false);
 
   // Load data from Supabase
   useEffect(() => {
     async function loadData() {
       setIsLoading(true);
       try {
-        // Fetch reimbursements, wallets, expenses, companies, and projects in parallel
-        const [reimbursementsData, walletsData, expensesData, companiesData, projectsData] = await Promise.all([
+        // Fetch reimbursements, wallets, expenses, companies, projects, bank accounts, and batches in parallel
+        const [reimbursementsData, walletsData, expensesData, companiesData, projectsData, bankAccountsData, batchesData, transferSummaryData] = await Promise.all([
           pettyCashApi.getAllReimbursements(),
           pettyCashApi.getAllWallets(),
-          pettyCashApi.getAllExpenses(),
+          pettyCashApi.getExpensesByStatus('submitted'),
           companiesApi.getAll(),
           projectsApi.getAll(),
+          bankAccountsApi.getAll(),
+          pettyCashApi.getBatchesByStatus('paid'),
+          pettyCashApi.getApprovedReimbursementsGroupedForTransfer(),
         ]);
 
         // Create lookup maps
@@ -125,6 +163,16 @@ export default function ReimbursementsPage() {
         const expenseMap = new Map(expensesData.map(e => [e.id, e]));
         const companyMap = new Map(companiesData.map(c => [c.id, c]));
         const projectMap = new Map(projectsData.map(p => [p.id, p]));
+        const bankAccountMap = new Map(bankAccountsData.map(b => [b.id, b]));
+
+        // Set paid batches with enriched names (already filtered to 'paid' by API)
+        const enrichedBatches = batchesData
+          .map(b => ({
+            ...b,
+            companyName: companyMap.get(b.company_id)?.name || 'Unknown',
+            bankAccountName: bankAccountMap.get(b.bank_account_id)?.account_name || 'Unknown',
+          }));
+        setPaidBatches(enrichedBatches);
 
         // Find submitted expenses that don't have reimbursements
         const existingExpenseIds = new Set(reimbursementsData.map(r => r.expense_id));
@@ -132,18 +180,18 @@ export default function ReimbursementsPage() {
           e => e.status === 'submitted' && !existingExpenseIds.has(e.id) && e.company_id
         );
 
-        // Auto-create reimbursements for submitted expenses that don't have them
-        const createdReimbursements = await Promise.all(
-          submittedExpensesWithoutReimbursement.map(async (expense) => {
-            try {
-              const reimbursement = await pettyCashApi.createReimbursementWithNumber({
+        // Auto-create reimbursements in batch (single INSERT instead of N individual calls)
+        let createdReimbursements: DbReimbursement[] = [];
+        if (submittedExpensesWithoutReimbursement.length > 0) {
+          try {
+            createdReimbursements = await pettyCashApi.batchCreateReimbursements(
+              submittedExpensesWithoutReimbursement.map(expense => ({
                 wallet_id: expense.wallet_id,
                 expense_id: expense.id,
                 amount: expense.amount || 0,
                 final_amount: expense.amount || 0,
                 company_id: expense.company_id!,
                 status: 'pending' as const,
-                // Optional fields - set to null for auto-created reimbursements
                 bank_account_id: null,
                 payment_date: null,
                 payment_reference: null,
@@ -154,20 +202,18 @@ export default function ReimbursementsPage() {
                 rejection_reason: null,
                 bank_feed_line_id: null,
                 created_by: null,
-              });
-              console.log(`Auto-created reimbursement for expense ${expense.expense_number}`);
-              return reimbursement;
-            } catch (error) {
-              console.error(`Failed to auto-create reimbursement for expense ${expense.expense_number}:`, error);
-              return null;
-            }
-          })
-        );
+              }))
+            );
+            console.log(`Auto-created ${createdReimbursements.length} reimbursements in batch`);
+          } catch (err) {
+            console.log('Batch reimbursement creation error:', err);
+          }
+        }
 
         // Combine original and newly created reimbursements
         const allReimbursementsData = [
           ...reimbursementsData,
-          ...createdReimbursements.filter((r): r is NonNullable<typeof r> => r !== null),
+          ...createdReimbursements,
         ];
 
         // Transform reimbursements
@@ -177,18 +223,23 @@ export default function ReimbursementsPage() {
           const company = r.company_id ? companyMap.get(r.company_id) : null;
           const project = expense?.project_id ? projectMap.get(expense.project_id) : null;
 
+          const bankAccount = r.bank_account_id ? bankAccountMap.get(r.bank_account_id) : null;
+
           return transformReimbursement(
             r,
             wallet?.user_name || 'Unknown',
             company?.name || 'Unknown',
             expense?.expense_number || 'Unknown',
             expense?.project_id || undefined,
-            project?.name || undefined
+            project?.name || undefined,
+            bankAccount?.account_name || undefined
           );
         });
 
         setDbReimbursements(transformed);
         setCompanies(companiesData.map(c => ({ id: c.id, name: c.name })));
+        setBankAccounts(bankAccountsData.map(b => ({ id: b.id, name: b.account_name })));
+        setTransferSummary(transferSummaryData);
 
       } catch (error) {
         console.error('Error loading reimbursements from Supabase:', error);
@@ -224,10 +275,14 @@ export default function ReimbursementsPage() {
       filtered = filtered.filter((r) => r.companyId === companyFilter);
     }
 
+    if (bankAccountFilter !== 'all') {
+      filtered = filtered.filter((r) => r.bankAccountId === bankAccountFilter);
+    }
+
     return filtered.sort(
       (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
     );
-  }, [allReimbursements, statusFilter, companyFilter]);
+  }, [allReimbursements, statusFilter, companyFilter, bankAccountFilter]);
 
   // Group reimbursements
   const groupedReimbursements = useMemo(() => {
@@ -248,6 +303,9 @@ export default function ReimbursementsPage() {
           break;
         case 'status':
           key = getStatusLabel(r.status);
+          break;
+        case 'bank':
+          key = r.bankAccountName || 'Not Assigned';
           break;
         default:
           key = 'Other';
@@ -542,6 +600,89 @@ export default function ReimbursementsPage() {
     [dbReimbursements, user, selectedReimbursement]
   );
 
+  // Toggle transfer selection
+  const toggleTransferSelection = useCallback((walletId: string, bankAccountId: string) => {
+    const key = `${walletId}::${bankAccountId}`;
+    setSelectedTransfers(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  }, []);
+
+  // Calculate selected transfer amount
+  const selectedTransferAmount = useMemo(() => {
+    let total = 0;
+    for (const key of selectedTransfers) {
+      const [walletId, bankAccountId] = key.split('::');
+      const walletGroup = transferSummary.find(wg => wg.walletId === walletId);
+      const bankGroup = walletGroup?.bankAccountGroups.find(bg => bg.bankAccountId === bankAccountId);
+      if (bankGroup) {
+        total += bankGroup.amount;
+      }
+    }
+    return total;
+  }, [selectedTransfers, transferSummary]);
+
+  // Handle transfer - creates top-up and batch, marks reimbursements as paid
+  const handleTransfer = useCallback(async () => {
+    if (selectedTransfers.size === 0) {
+      alert('Please select at least one transfer group.');
+      return;
+    }
+
+    setIsProcessingTransfer(true);
+
+    try {
+      for (const key of selectedTransfers) {
+        const [walletId, bankAccountId] = key.split('::');
+        const walletGroup = transferSummary.find(wg => wg.walletId === walletId);
+        const bankGroup = walletGroup?.bankAccountGroups.find(bg => bg.bankAccountId === bankAccountId);
+
+        if (!walletGroup || !bankGroup) continue;
+
+        const today = new Date().toISOString().split('T')[0];
+
+        // Create a top-up for this wallet
+        await pettyCashApi.createTopUp({
+          wallet_id: walletId,
+          amount: bankGroup.amount,
+          company_id: bankGroup.companyId || null,
+          bank_account_id: bankAccountId,
+          top_up_date: today,
+          reference: `Reimbursement transfer`,
+          notes: `Transfer for ${bankGroup.reimbursementIds.length} approved reimbursement(s)`,
+          status: 'completed',
+          created_by: user?.id || null,
+        });
+
+        // Create a batch record and mark all reimbursements as paid
+        const batch = await pettyCashApi.createBatch({
+          reimbursementIds: bankGroup.reimbursementIds,
+          companyId: bankGroup.companyId || '',
+          walletHolderName: walletGroup.holderName,
+          walletHolderId: null,
+          bankAccountId: bankAccountId,
+          createdBy: user?.id || '',
+        });
+        await pettyCashApi.markBatchPaid(batch.id, today);
+      }
+
+      setSelectedTransfers(new Set());
+      setRefreshKey((prev) => prev + 1);
+      alert('Transfer completed successfully! Wallet balances have been updated.');
+    } catch (error) {
+      console.error('Failed to process transfer:', error);
+      alert('Failed to process transfer. Please try again.');
+    } finally {
+      setIsProcessingTransfer(false);
+    }
+  }, [selectedTransfers, transferSummary, user?.id]);
+
   // Status badge
   const getStatusBadgeClass = (status: string) => {
     const color = getStatusColor(status);
@@ -557,7 +698,7 @@ export default function ReimbursementsPage() {
 
   // Table columns
   const columns = [
-    { key: 'reimbursementNumber', header: 'Number' },
+    { key: 'reimbursementNumber', header: 'Number', primary: true },
     { key: 'walletHolderName', header: 'Holder' },
     {
       key: 'expenseNumber',
@@ -577,6 +718,7 @@ export default function ReimbursementsPage() {
     {
       key: 'projectName',
       header: 'Project',
+      hideOnMobile: true,
       render: (row: ReimbursementWithProject) => (
         <span className="text-gray-700">{row.projectName || '-'}</span>
       ),
@@ -611,8 +753,23 @@ export default function ReimbursementsPage() {
         ]
       : []),
     {
+      key: 'paymentDate',
+      header: 'Paid On',
+      hideOnMobile: true,
+      render: (row: ReimbursementWithProject) => row.paymentDate ? formatDate(row.paymentDate) : '-',
+    },
+    {
+      key: 'paymentReference',
+      header: 'Reference',
+      hideOnMobile: true,
+      render: (row: ReimbursementWithProject) => (
+        <span className="text-gray-500 text-xs">{row.paymentReference || '-'}</span>
+      ),
+    },
+    {
       key: 'createdAt',
       header: 'Requested',
+      hideOnMobile: true,
       render: (row: ReimbursementWithProject) => formatDate(row.createdAt),
     },
     {
@@ -771,12 +928,30 @@ export default function ReimbursementsPage() {
             </select>
           </div>
 
+          {/* Bank Account Filter */}
+          <div className="flex items-center gap-2">
+            <Landmark className="h-4 w-4 text-gray-400" />
+            <select
+              value={bankAccountFilter}
+              onChange={(e) => setBankAccountFilter(e.target.value)}
+              className="text-sm border border-gray-300 rounded-lg px-3 py-1.5 focus:ring-2 focus:ring-[#5A7A8F]/20 focus:border-[#5A7A8F]"
+            >
+              <option value="all">All Bank Accounts</option>
+              {bankAccounts.map((ba) => (
+                <option key={ba.id} value={ba.id}>
+                  {ba.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
           {/* Group By */}
           <div className="flex items-center gap-2 ml-auto">
             <span className="text-sm text-gray-500">Group by:</span>
             <div className="flex rounded-lg border border-gray-300 overflow-hidden">
               {[
                 { value: 'company', icon: Building2, label: 'Company' },
+                { value: 'bank', icon: Landmark, label: 'Bank' },
                 { value: 'holder', icon: User, label: 'Holder' },
                 { value: 'status', icon: Clock, label: 'Status' },
                 { value: 'none', icon: Wallet, label: 'None' },
@@ -799,7 +974,7 @@ export default function ReimbursementsPage() {
         </div>
 
         {/* Active Filters */}
-        {(statusFilter !== 'all' || companyFilter !== 'all') && (
+        {(statusFilter !== 'all' || companyFilter !== 'all' || bankAccountFilter !== 'all') && (
           <div className="flex items-center gap-2 mt-3 pt-3 border-t border-gray-100">
             <span className="text-xs text-gray-500">Active filters:</span>
             {statusFilter !== 'all' && (
@@ -824,10 +999,22 @@ export default function ReimbursementsPage() {
                 </button>
               </span>
             )}
+            {bankAccountFilter !== 'all' && (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-gray-100 text-gray-700 rounded text-xs">
+                Bank: {bankAccounts.find((b) => b.id === bankAccountFilter)?.name}
+                <button
+                  onClick={() => setBankAccountFilter('all')}
+                  className="ml-1 hover:text-gray-900"
+                >
+                  ×
+                </button>
+              </span>
+            )}
             <button
               onClick={() => {
                 setStatusFilter('all');
                 setCompanyFilter('all');
+                setBankAccountFilter('all');
               }}
               className="text-xs text-[#5A7A8F] hover:underline ml-2"
             >
@@ -861,6 +1048,156 @@ export default function ReimbursementsPage() {
           />
         </div>
       ))}
+
+      {/* Transfer Summary - Execute transfers for approved reimbursements */}
+      {!isLoading && transferSummary.length > 0 && (
+        <div className="mb-6 bg-white border border-gray-200 rounded-lg shadow-sm">
+          <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <ArrowUpCircle className="h-4 w-4 text-green-600" />
+              <h3 className="text-sm font-semibold text-gray-900">Transfer Summary</h3>
+            </div>
+            <span className="px-2 py-1 text-xs font-medium bg-green-100 text-green-800 rounded-full">
+              {transferSummary.reduce((sum, wg) => sum + wg.bankAccountGroups.reduce((s, bg) => s + bg.reimbursementIds.length, 0), 0)} ready to transfer
+            </span>
+          </div>
+          <div className="p-4 space-y-4">
+            {transferSummary.map((walletGroup) => (
+              <div
+                key={walletGroup.walletId}
+                className="border border-gray-200 rounded-lg overflow-hidden"
+              >
+                <div className="px-3 py-2 bg-gray-50 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Wallet className="h-4 w-4 text-[#5A7A8F]" />
+                    <span className="text-sm font-medium text-gray-900">
+                      {walletGroup.walletName} ({walletGroup.holderName})
+                    </span>
+                  </div>
+                  <span className="text-sm font-bold text-green-700">
+                    Total: {formatCurrency(walletGroup.totalAmount)}
+                  </span>
+                </div>
+                <div className="divide-y divide-gray-100">
+                  {walletGroup.bankAccountGroups.map((bankGroup) => {
+                    const isSelected = selectedTransfers.has(`${walletGroup.walletId}::${bankGroup.bankAccountId}`);
+                    return (
+                      <div
+                        key={bankGroup.bankAccountId}
+                        className={`px-3 py-2 flex items-center justify-between text-sm cursor-pointer transition-colors ${
+                          isSelected ? 'bg-green-50' : 'hover:bg-gray-50'
+                        }`}
+                        onClick={() => toggleTransferSelection(walletGroup.walletId, bankGroup.bankAccountId)}
+                      >
+                        <div className="flex items-center gap-3">
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => {}}
+                            className="h-4 w-4 text-[#5A7A8F] border-gray-300 rounded focus:ring-[#5A7A8F]"
+                          />
+                          <div>
+                            <div className="font-medium text-gray-900">{bankGroup.companyName}</div>
+                            <div className="text-xs text-gray-500">{bankGroup.bankAccountName}</div>
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <div className="font-medium text-gray-900">{formatCurrency(bankGroup.amount)}</div>
+                          <div className="text-xs text-gray-500">
+                            {bankGroup.reimbursementIds.length} claim{bankGroup.reimbursementIds.length !== 1 ? 's' : ''}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+            {selectedTransfers.size > 0 && (
+              <div className="pt-2 border-t border-gray-200">
+                <button
+                  onClick={handleTransfer}
+                  disabled={isProcessingTransfer}
+                  className="w-full flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium text-white bg-green-600 rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {isProcessingTransfer ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Processing...
+                    </>
+                  ) : (
+                    <>
+                      <ArrowUpCircle className="h-4 w-4" />
+                      Transfer Selected: {formatCurrency(selectedTransferAmount)}
+                    </>
+                  )}
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Transfer History */}
+      {!isLoading && paidBatches.length > 0 && (
+        <div className="mb-6">
+          <button
+            onClick={() => setShowTransferHistory(!showTransferHistory)}
+            className="w-full flex items-center justify-between bg-white rounded-lg border p-4 hover:bg-gray-50 transition-colors"
+          >
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-emerald-100 rounded-lg">
+                <History className="h-5 w-5 text-emerald-600" />
+              </div>
+              <div className="text-left">
+                <h3 className="text-sm font-semibold text-gray-900">Transfer History</h3>
+                <p className="text-xs text-gray-500">
+                  {paidBatches.length} completed transfer{paidBatches.length !== 1 ? 's' : ''} •{' '}
+                  {formatCurrency(paidBatches.reduce((sum, b) => sum + b.total_amount, 0))}
+                </p>
+              </div>
+            </div>
+            {showTransferHistory ? (
+              <ChevronUp className="h-5 w-5 text-gray-400" />
+            ) : (
+              <ChevronDown className="h-5 w-5 text-gray-400" />
+            )}
+          </button>
+
+          {showTransferHistory && (
+            <div className="mt-2 bg-white rounded-lg border overflow-hidden">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-gray-50 border-b">
+                    <th className="text-left px-4 py-3 font-medium text-gray-600">Batch #</th>
+                    <th className="text-left px-4 py-3 font-medium text-gray-600">Wallet Holder</th>
+                    <th className="text-left px-4 py-3 font-medium text-gray-600 hidden sm:table-cell">Company</th>
+                    <th className="text-left px-4 py-3 font-medium text-gray-600 hidden sm:table-cell">Bank Account</th>
+                    <th className="text-right px-4 py-3 font-medium text-gray-600">Amount</th>
+                    <th className="text-center px-4 py-3 font-medium text-gray-600 hidden sm:table-cell">Claims</th>
+                    <th className="text-left px-4 py-3 font-medium text-gray-600">Paid On</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {paidBatches
+                    .sort((a, b) => new Date(b.payment_date || b.created_at).getTime() - new Date(a.payment_date || a.created_at).getTime())
+                    .map((batch) => (
+                    <tr key={batch.id} className="border-b last:border-b-0 hover:bg-gray-50">
+                      <td className="px-4 py-3 font-medium text-gray-900">{batch.batch_number}</td>
+                      <td className="px-4 py-3 text-gray-700">{batch.wallet_holder_name}</td>
+                      <td className="px-4 py-3 text-gray-700 hidden sm:table-cell">{batch.companyName}</td>
+                      <td className="px-4 py-3 text-gray-700 hidden sm:table-cell">{batch.bankAccountName}</td>
+                      <td className="px-4 py-3 text-right font-medium text-gray-900">{formatCurrency(batch.total_amount)}</td>
+                      <td className="px-4 py-3 text-center text-gray-600 hidden sm:table-cell">{batch.reimbursement_count}</td>
+                      <td className="px-4 py-3 text-gray-600">{batch.payment_date ? formatDate(batch.payment_date) : '-'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
 
       {isLoading && (
         <div className="text-center py-12">

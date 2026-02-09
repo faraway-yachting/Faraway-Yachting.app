@@ -2,6 +2,7 @@
 
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { useState } from "react";
+import { useIsMobile } from "@/hooks/useIsMobile";
 import {
   BalanceSheetSection,
   BalanceSheetSubType,
@@ -43,6 +44,7 @@ export function BalanceSheetTable({ section, showInTHB }: BalanceSheetTableProps
     }
   };
 
+  const isMobile = useIsMobile();
   const colors = getHeaderColors();
   const total = showInTHB ? section.totalTHB : section.total;
 
@@ -59,12 +61,12 @@ export function BalanceSheetTable({ section, showInTHB }: BalanceSheetTableProps
   return (
     <div className="bg-white rounded-lg border border-gray-200 overflow-hidden mb-6">
       {/* Section Header */}
-      <div className={`${colors.bg} px-4 py-3 border-b ${colors.border}`}>
+      <div className={`${colors.bg} px-3 md:px-4 py-3 border-b ${colors.border}`}>
         <div className="flex items-center justify-between">
-          <h3 className={`text-lg font-semibold ${colors.text}`}>
+          <h3 className={`text-base md:text-lg font-semibold ${colors.text}`}>
             {section.name}
           </h3>
-          <span className={`text-lg font-bold ${colors.text}`}>
+          <span className={`text-base md:text-lg font-bold ${colors.text}`}>
             {formatBalance(total)}
           </span>
         </div>
@@ -74,13 +76,15 @@ export function BalanceSheetTable({ section, showInTHB }: BalanceSheetTableProps
       <table className="w-full">
         <thead>
           <tr className="bg-gray-50 border-b border-gray-200">
-            <th className="text-left px-4 py-2 text-xs font-medium text-gray-500 uppercase tracking-wider w-24">
-              Code
-            </th>
-            <th className="text-left px-4 py-2 text-xs font-medium text-gray-500 uppercase tracking-wider">
+            {!isMobile && (
+              <th className="text-left px-4 py-2 text-xs font-medium text-gray-500 uppercase tracking-wider w-24">
+                Code
+              </th>
+            )}
+            <th className="text-left px-3 md:px-4 py-2 text-xs font-medium text-gray-500 uppercase tracking-wider">
               Account Name
             </th>
-            <th className="text-right px-4 py-2 text-xs font-medium text-gray-500 uppercase tracking-wider w-40">
+            <th className="text-right px-3 md:px-4 py-2 text-xs font-medium text-gray-500 uppercase tracking-wider w-28 md:w-40">
               Balance
             </th>
           </tr>
@@ -101,6 +105,7 @@ export function BalanceSheetTable({ section, showInTHB }: BalanceSheetTableProps
                 isExpanded={expandedSubTypes.has(subType.name)}
                 onToggle={() => toggleSubType(subType.name)}
                 formatBalance={formatBalance}
+                isMobile={isMobile}
               />
             ))
           )}
@@ -108,12 +113,12 @@ export function BalanceSheetTable({ section, showInTHB }: BalanceSheetTableProps
       </table>
 
       {/* Section Total Footer */}
-      <div className={`${colors.bg} px-4 py-3 border-t ${colors.border}`}>
+      <div className={`${colors.bg} px-3 md:px-4 py-3 border-t ${colors.border}`}>
         <div className="flex items-center justify-between">
           <span className={`font-semibold ${colors.text}`}>
             Total {section.name}
           </span>
-          <span className={`text-lg font-bold ${colors.text}`}>
+          <span className={`text-base md:text-lg font-bold ${colors.text}`}>
             {formatBalance(total)}
           </span>
         </div>
@@ -128,6 +133,7 @@ interface SubTypeRowsProps {
   isExpanded: boolean;
   onToggle: () => void;
   formatBalance: (balance: number) => string;
+  isMobile: boolean;
 }
 
 function SubTypeRows({
@@ -136,6 +142,7 @@ function SubTypeRows({
   isExpanded,
   onToggle,
   formatBalance,
+  isMobile,
 }: SubTypeRowsProps) {
   const total = showInTHB ? subType.totalTHB : subType.total;
 
@@ -146,20 +153,20 @@ function SubTypeRows({
         className="bg-gray-50 cursor-pointer hover:bg-gray-100"
         onClick={onToggle}
       >
-        <td colSpan={2} className="px-4 py-2">
+        <td colSpan={isMobile ? 1 : 2} className="px-3 md:px-4 py-2">
           <div className="flex items-center gap-2">
             {isExpanded ? (
               <ChevronDown className="h-4 w-4 text-gray-400" />
             ) : (
               <ChevronRight className="h-4 w-4 text-gray-400" />
             )}
-            <span className="font-medium text-gray-700">{subType.name}</span>
-            <span className="text-sm text-gray-500">
-              ({subType.accounts.length} accounts)
+            <span className="font-medium text-gray-700 text-sm md:text-base">{subType.name}</span>
+            <span className="text-xs md:text-sm text-gray-500">
+              ({subType.accounts.length})
             </span>
           </div>
         </td>
-        <td className="px-4 py-2 text-right font-medium text-gray-700">
+        <td className="px-3 md:px-4 py-2 text-right font-medium text-gray-700">
           {formatBalance(total)}
         </td>
       </tr>
@@ -172,6 +179,7 @@ function SubTypeRows({
             account={account}
             showInTHB={showInTHB}
             formatBalance={formatBalance}
+            isMobile={isMobile}
           />
         ))}
     </>
@@ -182,18 +190,21 @@ interface AccountRowProps {
   account: AccountBalance;
   showInTHB: boolean;
   formatBalance: (balance: number) => string;
+  isMobile: boolean;
 }
 
-function AccountRow({ account, showInTHB, formatBalance }: AccountRowProps) {
+function AccountRow({ account, showInTHB, formatBalance, isMobile }: AccountRowProps) {
   const balance = showInTHB ? account.balanceTHB : account.balance;
 
   return (
     <tr className="hover:bg-gray-50">
-      <td className="px-4 py-2 pl-10 text-sm text-gray-600">
-        {account.accountCode}
-      </td>
-      <td className="px-4 py-2 text-sm text-gray-900">{account.accountName}</td>
-      <td className="px-4 py-2 text-sm text-right font-medium text-gray-900">
+      {!isMobile && (
+        <td className="px-4 py-2 pl-10 text-sm text-gray-600">
+          {account.accountCode}
+        </td>
+      )}
+      <td className="px-3 md:px-4 py-2 pl-8 md:pl-4 text-sm text-gray-900">{account.accountName}</td>
+      <td className="px-3 md:px-4 py-2 text-sm text-right font-medium text-gray-900">
         {formatBalance(balance)}
       </td>
     </tr>

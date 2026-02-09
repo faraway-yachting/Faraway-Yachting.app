@@ -34,8 +34,13 @@ import { meetGreetersApi, MeetGreeter } from '@/lib/supabase/api/meetGreeters';
 import RecordCashModal from '@/components/cash-collections/RecordCashModal';
 import CommissionSection from './CommissionSection';
 import CrewSection from './CrewSection';
+import CabinSection from './CabinSection';
 import InternalNoteSection from './InternalNoteSection';
 import CustomerNoteSection from './CustomerNoteSection';
+import { CabinCharterOverview } from './CabinCharterOverview';
+import { CabinAllocation } from '@/data/booking/types';
+import { cabinAllocationsApi } from '@/lib/supabase/api/cabinAllocations';
+import { projectCabinsApi } from '@/lib/supabase/api/projectCabins';
 
 interface BookingFormContainerProps {
   booking?: Booking | null;
@@ -190,6 +195,10 @@ export function BookingFormContainer({
   const [editingCash, setEditingCash] = useState<CashCollection | null>(null);
   const [bankAccounts, setBankAccounts] = useState<BankAccountOption[]>([]);
 
+  // Cabin charter allocations
+  const [cabinAllocations, setCabinAllocations] = useState<CabinAllocation[]>([]);
+  const [cabinCashAllocationId, setCabinCashAllocationId] = useState<string | null>(null);
+
   // Load sales employees for booking owner dropdown + bank accounts
   useEffect(() => {
     async function loadUsers() {
@@ -239,8 +248,38 @@ export function BookingFormContainer({
         }).catch(console.error);
       });
       cashCollectionsApi.getByBookingId(booking.id).then(setCashCollections).catch(console.error);
+
+      // Load cabin allocations for cabin charter bookings
+      if (booking.type === 'cabin_charter') {
+        cabinAllocationsApi.getByBookingId(booking.id).then(setCabinAllocations).catch(console.error);
+      }
     }
   }, [booking?.id]);
+
+  // Auto-initialize cabin allocations when projectId changes for new cabin charters
+  useEffect(() => {
+    if (isEditing || formData.type !== 'cabin_charter' || !formData.projectId) return;
+    if (cabinAllocations.length > 0) return; // Already populated
+
+    projectCabinsApi.getByProjectId(formData.projectId).then(cabins => {
+      if (cabins.length > 0) {
+        setCabinAllocations(cabins.map((cabin, idx) => ({
+          id: `temp-${idx}`,
+          bookingId: '',
+          projectCabinId: cabin.id,
+          cabinLabel: cabin.cabinName,
+          cabinNumber: cabin.cabinNumber,
+          status: 'available' as const,
+          numberOfGuests: 0,
+          currency: formData.currency || 'THB',
+          paymentStatus: 'unpaid' as const,
+          sortOrder: cabin.sortOrder ?? idx,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        })));
+      }
+    }).catch(console.error);
+  }, [formData.type, formData.projectId, isEditing]);
 
   // Load linked documents (receipts, invoices) by booking_id
   useEffect(() => {
@@ -647,6 +686,71 @@ export function BookingFormContainer({
         } catch (paymentErr) {
           console.error('Error persisting payments:', paymentErr);
         }
+
+        // Persist cabin allocations for cabin charter bookings
+        if (dataToSave.type === 'cabin_charter' && cabinAllocations.length > 0) {
+          try {
+            const existingAllocations = await cabinAllocationsApi.getByBookingId(bookingId);
+            const existingIds = new Set(existingAllocations.map(a => a.id));
+            const currentIds = new Set(cabinAllocations.filter(a => !a.id.startsWith('temp-')).map(a => a.id));
+
+            // Delete removed allocations
+            for (const existing of existingAllocations) {
+              if (!currentIds.has(existing.id)) {
+                await cabinAllocationsApi.delete(existing.id);
+              }
+            }
+
+            // Create/update allocations
+            const updatedAllocations: CabinAllocation[] = [];
+            for (const allocation of cabinAllocations) {
+              const allocationFields = {
+                status: allocation.status,
+                guestNames: allocation.guestNames,
+                numberOfGuests: allocation.numberOfGuests,
+                nationality: allocation.nationality,
+                guestNotes: allocation.guestNotes,
+                agentName: allocation.agentName,
+                contactPlatform: allocation.contactPlatform,
+                contactInfo: allocation.contactInfo,
+                bookingOwner: allocation.bookingOwner,
+                extras: allocation.extras,
+                contractNote: allocation.contractNote,
+                contractAttachments: allocation.contractAttachments,
+                commissionRate: allocation.commissionRate,
+                totalCommission: allocation.totalCommission,
+                commissionDeduction: allocation.commissionDeduction,
+                commissionReceived: allocation.commissionReceived,
+                internalNotes: allocation.internalNotes,
+                internalNoteAttachments: allocation.internalNoteAttachments,
+                customerNotes: allocation.customerNotes,
+                price: allocation.price,
+                currency: allocation.currency,
+                paymentStatus: allocation.paymentStatus,
+                sortOrder: allocation.sortOrder,
+              };
+
+              if (allocation.id.startsWith('temp-')) {
+                // Create new
+                const created = await cabinAllocationsApi.create({
+                  bookingId,
+                  projectCabinId: allocation.projectCabinId,
+                  cabinLabel: allocation.cabinLabel,
+                  cabinNumber: allocation.cabinNumber,
+                  ...allocationFields,
+                });
+                updatedAllocations.push(created);
+              } else if (existingIds.has(allocation.id)) {
+                // Update existing
+                const updated = await cabinAllocationsApi.update(allocation.id, allocationFields);
+                updatedAllocations.push(updated);
+              }
+            }
+            setCabinAllocations(updatedAllocations);
+          } catch (cabinErr) {
+            console.error('Error persisting cabin allocations:', cabinErr);
+          }
+        }
       }
     } catch (error: any) {
       console.error('Error saving booking:', error?.message || error?.code || JSON.stringify(error) || error);
@@ -991,14 +1095,16 @@ export function BookingFormContainer({
               onCreateMeetGreeter={handleCreateMeetGreeter}
             />
 
-            {/* Section 2: Customer Information */}
-            <CustomerSection
-              formData={formData}
-              onChange={handleChange}
-              errors={errors}
-              canEdit={canEdit}
-              isAgencyView={isAgencyView}
-            />
+            {/* Section 2: Customer Information (hidden for cabin charter) */}
+            {formData.type !== 'cabin_charter' && (
+              <CustomerSection
+                formData={formData}
+                onChange={handleChange}
+                errors={errors}
+                canEdit={canEdit}
+                isAgencyView={isAgencyView}
+              />
+            )}
 
             {/* Section 3: Booking Details */}
             <BookingDetailsSection
@@ -1009,10 +1115,11 @@ export function BookingFormContainer({
               autoFilledFields={autoFilledFields}
               onUploadContractAttachment={handleUploadContractAttachment}
               onRemoveContractAttachment={handleRemoveContractAttachment}
+              cabinCharterMode={formData.type === 'cabin_charter'}
             />
 
-            {/* Section 4: Finance */}
-            {!isAgencyView && (
+            {/* Section 4: Finance (hidden for cabin charter) */}
+            {!isAgencyView && formData.type !== 'cabin_charter' && (
               <FinanceSection
                 formData={formData}
                 onChange={handleChange}
@@ -1039,8 +1146,8 @@ export function BookingFormContainer({
               />
             )}
 
-            {/* Section 5: Commission */}
-            {!isAgencyView && (
+            {/* Section 5: Commission (hidden for cabin charter) */}
+            {!isAgencyView && formData.type !== 'cabin_charter' && (
               <CommissionSection
                 formData={formData}
                 onChange={handleChange}
@@ -1055,8 +1162,40 @@ export function BookingFormContainer({
               canEdit={canEdit}
             />
 
-            {/* Section 7: Internal Note */}
-            {!isAgencyView && (
+            {/* Section 6.5: Cabin Allocations (cabin charter only) */}
+            {formData.type === 'cabin_charter' && (
+              <CabinSection
+                bookingId={booking?.id}
+                cabinAllocations={cabinAllocations}
+                onAllocationsChange={setCabinAllocations}
+                canEdit={canEdit}
+                currency={formData.currency || 'THB'}
+                bankAccounts={bankAccounts}
+                companies={companies}
+                users={users}
+                onRecordCash={(allocationId) => {
+                  setCabinCashAllocationId(allocationId);
+                  setEditingCash(null);
+                  setShowCashModal(true);
+                }}
+              />
+            )}
+
+            {/* Cabin Charter: Overview panels (Extras, Contract, Finance, Notes summaries) */}
+            {formData.type === 'cabin_charter' && (
+              <CabinCharterOverview
+                cabinAllocations={cabinAllocations}
+                currency={formData.currency || 'THB'}
+                formData={formData}
+                onChange={handleChange}
+                canEdit={canEdit}
+                onUploadInternalAttachment={handleUploadInternalAttachment}
+                onRemoveInternalAttachment={handleRemoveInternalAttachment}
+              />
+            )}
+
+            {/* Section 7: Internal Note (non-cabin-charter only) */}
+            {formData.type !== 'cabin_charter' && !isAgencyView && (
               <InternalNoteSection
                 formData={formData}
                 onChange={handleChange}
@@ -1066,12 +1205,14 @@ export function BookingFormContainer({
               />
             )}
 
-            {/* Section 8: Customer Notes */}
-            <CustomerNoteSection
-              formData={formData}
-              onChange={handleChange}
-              canEdit={canEdit}
-            />
+            {/* Section 8: Customer Notes (non-cabin-charter only) */}
+            {formData.type !== 'cabin_charter' && (
+              <CustomerNoteSection
+                formData={formData}
+                onChange={handleChange}
+                canEdit={canEdit}
+              />
+            )}
           </div>
         </form>
 

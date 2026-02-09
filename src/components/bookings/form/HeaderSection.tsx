@@ -15,6 +15,7 @@ import {
 import {
   Booking,
   BookingStatus,
+  BookingType,
 } from '@/data/booking/types';
 import { Project } from '@/data/project/types';
 import { DynamicSelect } from './DynamicSelect';
@@ -110,86 +111,99 @@ export function HeaderSection({
       </div>
 
       <div className="space-y-4">
-        {/* Boat Selector */}
-        <div>
-          <label className="block text-xs text-gray-500 mb-2">Boat</label>
-          <div className="flex items-center gap-4 mb-2">
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input
-                type="radio"
-                checked={!useExternalBoat}
-                onChange={() => onUseExternalBoatChange(false)}
+        {/* Boat + Charter Type */}
+        <div className="grid grid-cols-5 gap-4">
+          <div className="col-span-3">
+            <label className="block text-xs text-gray-500 mb-2">Boat</label>
+            <div className="flex items-center gap-4 mb-2">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="radio"
+                  checked={!useExternalBoat}
+                  onChange={() => onUseExternalBoatChange(false)}
+                  disabled={!canEdit}
+                  className="text-[#5A7A8F] focus:ring-[#5A7A8F]"
+                />
+                <span className="text-sm text-gray-700">Owned Yacht</span>
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="radio"
+                  checked={useExternalBoat}
+                  onChange={() => onUseExternalBoatChange(true)}
+                  disabled={!canEdit}
+                  className="text-[#5A7A8F] focus:ring-[#5A7A8F]"
+                />
+                <span className="text-sm text-gray-700">External Boat</span>
+              </label>
+            </div>
+
+            {!useExternalBoat ? (
+              <select
+                value={formData.projectId || ''}
+                onChange={(e) => onChange('projectId', e.target.value || undefined)}
                 disabled={!canEdit}
-                className="text-[#5A7A8F] focus:ring-[#5A7A8F]"
-              />
-              <span className="text-sm text-gray-700">Owned Yacht</span>
-            </label>
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input
-                type="radio"
-                checked={useExternalBoat}
-                onChange={() => onUseExternalBoatChange(true)}
+                className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100 ${
+                  errors.projectId ? 'border-red-500' : 'border-gray-300'
+                }`}
+              >
+                <option value="">Select a boat...</option>
+                {projects.map((project) => (
+                  <option key={project.id} value={project.id}>
+                    {project.name}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <select
+                value={formData.externalBoatName || ''}
+                onChange={(e) => onChange('externalBoatName', e.target.value)}
                 disabled={!canEdit}
-                className="text-[#5A7A8F] focus:ring-[#5A7A8F]"
-              />
-              <span className="text-sm text-gray-700">External Boat</span>
-            </label>
+                className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100 ${
+                  errors.externalBoatName ? 'border-red-500' : 'border-gray-300'
+                }`}
+              >
+                <option value="">Select external boat...</option>
+                {externalBoats.map((boat) => (
+                  <option key={boat.id} value={boat.name}>
+                    {boat.displayName || boat.name}
+                  </option>
+                ))}
+              </select>
+            )}
+            {(errors.projectId || errors.externalBoatName) && (
+              <p className="text-sm text-red-500 mt-1">{errors.projectId || errors.externalBoatName}</p>
+            )}
           </div>
 
-          {!useExternalBoat ? (
-            <select
-              value={formData.projectId || ''}
-              onChange={(e) => onChange('projectId', e.target.value || undefined)}
+          <div className="col-span-2 flex flex-col justify-end">
+            <label className="block text-xs text-gray-500 mb-1">Charter Type</label>
+            <DynamicSelect
+              category="charter_type"
+              value={formData.type || 'day_charter'}
+              onChange={(val) => onChange('type', val as BookingType)}
               disabled={!canEdit}
-              className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100 ${
-                errors.projectId ? 'border-red-500' : 'border-gray-300'
-              }`}
-            >
-              <option value="">Select a boat...</option>
-              {projects.map((project) => (
-                <option key={project.id} value={project.id}>
-                  {project.name}
-                </option>
-              ))}
-            </select>
-          ) : (
-            <select
-              value={formData.externalBoatName || ''}
-              onChange={(e) => onChange('externalBoatName', e.target.value)}
-              disabled={!canEdit}
-              className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100 ${
-                errors.externalBoatName ? 'border-red-500' : 'border-gray-300'
-              }`}
-            >
-              <option value="">Select external boat...</option>
-              {externalBoats.map((boat) => (
-                <option key={boat.id} value={boat.name}>
-                  {boat.displayName || boat.name}
-                </option>
-              ))}
-            </select>
-          )}
-          {(errors.projectId || errors.externalBoatName) && (
-            <p className="text-sm text-red-500 mt-1">{errors.projectId || errors.externalBoatName}</p>
-          )}
-
-          {/* Product preset indicator */}
-          {selectedProduct && (
-            <div className="flex items-center gap-2 mt-2 p-2 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-700">
-              <Sparkles className="h-4 w-4" />
-              <span>
-                Applied preset: <strong>{selectedProduct.name}</strong>
-              </span>
-              <button
-                type="button"
-                onClick={onClearProduct}
-                className="ml-auto text-blue-500 hover:text-blue-700"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-          )}
+              placeholder="Select charter type..."
+            />
+          </div>
         </div>
+
+        {/* Product preset indicator */}
+        {selectedProduct && (
+          <div className="flex items-center gap-2 p-2 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-700">
+            <Sparkles className="h-4 w-4" />
+            <span>
+              Applied preset: <strong>{selectedProduct.name}</strong>
+            </span>
+            <button
+              type="button"
+              onClick={onClearProduct}
+              className="ml-auto text-blue-500 hover:text-blue-700"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        )}
 
         {/* Dates */}
         <div>
@@ -240,18 +254,20 @@ export function HeaderSection({
           </div>
         </div>
 
-        {/* Booking Status + Owner */}
+        {/* Booking Status */}
+        <div className="bg-white/60 border border-blue-200 rounded-lg p-3">
+          <label className="block text-sm font-medium text-gray-700 mb-1">Booking Status</label>
+          <DynamicSelect
+            category="booking_status"
+            value={formData.status || 'enquiry'}
+            onChange={(val) => onChange('status', val as BookingStatus)}
+            disabled={!canEdit}
+            placeholder="Select status..."
+          />
+        </div>
+
+        {/* Booking Owner + Meet & Greeter */}
         <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label className="block text-xs text-gray-500 mb-1">Booking Status</label>
-            <DynamicSelect
-              category="booking_status"
-              value={formData.status || 'enquiry'}
-              onChange={(val) => onChange('status', val as BookingStatus)}
-              disabled={!canEdit}
-              placeholder="Select status..."
-            />
-          </div>
           <div>
             <label className="block text-xs text-gray-500 mb-1 flex items-center gap-1">
               <User className="h-3.5 w-3.5" />
@@ -271,45 +287,39 @@ export function HeaderSection({
               ))}
             </select>
           </div>
-        </div>
-
-        {/* Meet & Greeter */}
-        <div>
-          <label className="block text-xs text-gray-500 mb-1 flex items-center gap-1">
-            <UserCheck className="h-3.5 w-3.5" />
-            Meet & Greeter
-          </label>
-          <div className="flex items-start gap-3">
-            <div className="flex-1">
-              <div className="relative">
-                <select
-                  value={formData.meetGreeterId || ''}
-                  onChange={(e) => onChange('meetGreeterId', e.target.value || undefined)}
-                  disabled={!canEdit}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100"
+          <div>
+            <label className="block text-xs text-gray-500 mb-1 flex items-center gap-1">
+              <UserCheck className="h-3.5 w-3.5" />
+              Meet & Greeter
+            </label>
+            <div className="relative">
+              <select
+                value={formData.meetGreeterId || ''}
+                onChange={(e) => onChange('meetGreeterId', e.target.value || undefined)}
+                disabled={!canEdit}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100"
+              >
+                <option value="">Select meet & greeter...</option>
+                {meetGreeters.filter(g => g.is_active).map((greeter) => (
+                  <option key={greeter.id} value={greeter.id}>
+                    {greeter.name}
+                  </option>
+                ))}
+              </select>
+              {canEdit && (
+                <button
+                  type="button"
+                  onClick={() => setShowNewGreeterForm(true)}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-[#5A7A8F] hover:bg-blue-50 rounded transition-colors"
+                  title="Add new meet & greeter"
                 >
-                  <option value="">Select meet & greeter...</option>
-                  {meetGreeters.filter(g => g.is_active).map((greeter) => (
-                    <option key={greeter.id} value={greeter.id}>
-                      {greeter.name}
-                    </option>
-                  ))}
-                </select>
-                {canEdit && (
-                  <button
-                    type="button"
-                    onClick={() => setShowNewGreeterForm(true)}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-[#5A7A8F] hover:bg-blue-50 rounded transition-colors"
-                    title="Add new meet & greeter"
-                  >
-                    <Plus className="h-4 w-4" />
-                  </button>
-                )}
-              </div>
+                  <Plus className="h-4 w-4" />
+                </button>
+              )}
             </div>
             {/* Contact details */}
             {selectedGreeter && (
-              <div className="flex items-center gap-4 text-sm text-gray-600 py-2">
+              <div className="flex items-center gap-3 text-sm text-gray-600 mt-1">
                 {selectedGreeter.phone && (
                   <span className="flex items-center gap-1">
                     <Phone className="h-3.5 w-3.5 text-gray-400" />
@@ -325,81 +335,81 @@ export function HeaderSection({
               </div>
             )}
           </div>
+        </div>
 
-          {/* New Meet & Greeter Form */}
-          {showNewGreeterForm && (
-            <div className="mt-3 p-3 border border-blue-200 bg-blue-50 rounded-lg">
-              <h4 className="text-sm font-medium text-gray-700 mb-2 flex items-center gap-1">
-                <Plus className="h-4 w-4" />
-                Add New Meet & Greeter
-              </h4>
-              <div className="grid grid-cols-3 gap-2">
-                <div>
-                  <label className="block text-xs text-gray-500 mb-1">Name *</label>
-                  <input
-                    type="text"
-                    value={newGreeterName}
-                    onChange={(e) => setNewGreeterName(e.target.value)}
-                    placeholder="Name"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs text-gray-500 mb-1">Phone</label>
-                  <input
-                    type="tel"
-                    value={newGreeterPhone}
-                    onChange={(e) => setNewGreeterPhone(e.target.value)}
-                    placeholder="Phone"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs text-gray-500 mb-1">Email</label>
-                  <input
-                    type="email"
-                    value={newGreeterEmail}
-                    onChange={(e) => setNewGreeterEmail(e.target.value)}
-                    placeholder="Email"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
-                  />
-                </div>
+        {/* New Meet & Greeter Form */}
+        {showNewGreeterForm && (
+          <div className="p-3 border border-blue-200 bg-blue-50 rounded-lg">
+            <h4 className="text-sm font-medium text-gray-700 mb-2 flex items-center gap-1">
+              <Plus className="h-4 w-4" />
+              Add New Meet & Greeter
+            </h4>
+            <div className="grid grid-cols-3 gap-2">
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Name *</label>
+                <input
+                  type="text"
+                  value={newGreeterName}
+                  onChange={(e) => setNewGreeterName(e.target.value)}
+                  placeholder="Name"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
+                />
               </div>
-              <div className="flex items-center gap-2 mt-2">
-                <button
-                  type="button"
-                  onClick={handleCreateGreeter}
-                  disabled={!newGreeterName.trim() || isCreatingGreeter}
-                  className="px-3 py-1.5 bg-[#5A7A8F] text-white text-sm rounded-lg hover:bg-[#4a6a7f] disabled:opacity-50 flex items-center gap-1"
-                >
-                  {isCreatingGreeter ? (
-                    <>
-                      <div className="animate-spin rounded-full h-3 w-3 border-2 border-white border-t-transparent" />
-                      Creating...
-                    </>
-                  ) : (
-                    <>
-                      <Plus className="h-3 w-3" />
-                      Create & Select
-                    </>
-                  )}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowNewGreeterForm(false);
-                    setNewGreeterName('');
-                    setNewGreeterPhone('');
-                    setNewGreeterEmail('');
-                  }}
-                  className="px-3 py-1.5 text-gray-600 text-sm hover:bg-gray-200 rounded-lg transition-colors"
-                >
-                  Cancel
-                </button>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Phone</label>
+                <input
+                  type="tel"
+                  value={newGreeterPhone}
+                  onChange={(e) => setNewGreeterPhone(e.target.value)}
+                  placeholder="Phone"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Email</label>
+                <input
+                  type="email"
+                  value={newGreeterEmail}
+                  onChange={(e) => setNewGreeterEmail(e.target.value)}
+                  placeholder="Email"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
+                />
               </div>
             </div>
-          )}
-        </div>
+            <div className="flex items-center gap-2 mt-2">
+              <button
+                type="button"
+                onClick={handleCreateGreeter}
+                disabled={!newGreeterName.trim() || isCreatingGreeter}
+                className="px-3 py-1.5 bg-[#5A7A8F] text-white text-sm rounded-lg hover:bg-[#4a6a7f] disabled:opacity-50 flex items-center gap-1"
+              >
+                {isCreatingGreeter ? (
+                  <>
+                    <div className="animate-spin rounded-full h-3 w-3 border-2 border-white border-t-transparent" />
+                    Creating...
+                  </>
+                ) : (
+                  <>
+                    <Plus className="h-3 w-3" />
+                    Create & Select
+                  </>
+                )}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowNewGreeterForm(false);
+                  setNewGreeterName('');
+                  setNewGreeterPhone('');
+                  setNewGreeterEmail('');
+                }}
+                className="px-3 py-1.5 text-gray-600 text-sm hover:bg-gray-200 rounded-lg transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Hold Until Section */}
         {formData.status === 'hold' && (

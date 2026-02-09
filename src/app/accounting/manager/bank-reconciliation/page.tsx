@@ -12,8 +12,14 @@ import { DiscrepancyDrilldownModal } from "@/components/banking/DiscrepancyDrill
 import { ImportSyncModal } from "@/components/banking/ImportSyncModal";
 import { ExportOptionsModal } from "@/components/banking/ExportOptionsModal";
 import { FilterInfoBanner } from "@/components/banking/FilterInfoBanner";
-import { CreateTransactionModal } from "@/components/banking/CreateTransactionModal";
-import BeamTransactionsPanel from "@/components/banking/BeamTransactionsPanel";
+import dynamic from "next/dynamic";
+
+const CreateTransactionModal = dynamic(() =>
+  import("@/components/banking/CreateTransactionModal").then(mod => ({ default: mod.CreateTransactionModal }))
+);
+const BeamTransactionsPanel = dynamic(() =>
+  import("@/components/banking/BeamTransactionsPanel")
+);
 import {
   mockBankAccountCoverage,
   getReconciliationStats,

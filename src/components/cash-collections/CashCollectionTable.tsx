@@ -1,6 +1,7 @@
 'use client';
 
 import { CashCollection } from '@/lib/supabase/api/cashCollections';
+import { useIsMobile } from '@/hooks/useIsMobile';
 
 interface UserInfo {
   id: string;
@@ -61,6 +62,8 @@ export default function CashCollectionTable({
   selectedIds,
   selectable = false,
 }: CashCollectionTableProps) {
+  const isMobile = useIsMobile();
+
   const getUserName = (id: string | null) => {
     if (!id) return '—';
     return users.find(u => u.id === id)?.full_name || id.slice(0, 8);
@@ -70,6 +73,65 @@ export default function CashCollectionTable({
     return (
       <div className="text-center py-8 text-sm text-gray-500">
         No cash collections found.
+      </div>
+    );
+  }
+
+  if (isMobile) {
+    return (
+      <div className="space-y-3">
+        {collections.map((c) => (
+          <div key={c.id} className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm relative">
+            {selectable && (
+              <input
+                type="checkbox"
+                checked={selectedIds?.has(c.id) ?? false}
+                onChange={(e) => onSelect?.(c.id, e.target.checked)}
+                className="absolute top-3 right-3 rounded border-gray-300"
+              />
+            )}
+            <div className="mb-2 text-sm font-semibold text-gray-900">
+              {formatAmount(c.amount, c.currency)}
+            </div>
+            <dl className="space-y-1">
+              <div className="flex items-start justify-between gap-2">
+                <dt className="shrink-0 text-xs font-medium text-gray-500">Collected By</dt>
+                <dd className="text-right text-sm text-gray-900">{getUserName(c.collected_by)}</dd>
+              </div>
+              <div className="flex items-start justify-between gap-2">
+                <dt className="shrink-0 text-xs font-medium text-gray-500">Collected At</dt>
+                <dd className="text-right text-sm text-gray-900">{formatDateTime(c.collected_at)}</dd>
+              </div>
+              <div className="flex items-start justify-between gap-2">
+                <dt className="shrink-0 text-xs font-medium text-gray-500">Status</dt>
+                <dd className="text-right">
+                  <span className={`inline-block px-2 py-0.5 text-xs font-medium rounded-full ${statusStyles[c.status] ?? statusStyles.collected}`}>
+                    {statusLabels[c.status] ?? c.status}
+                  </span>
+                </dd>
+              </div>
+              {c.handed_over_to && (
+                <div className="flex items-start justify-between gap-2">
+                  <dt className="shrink-0 text-xs font-medium text-gray-500">Handed To</dt>
+                  <dd className="text-right text-sm text-gray-900">{getUserName(c.handed_over_to)}</dd>
+                </div>
+              )}
+            </dl>
+            {showActions && (
+              <div className="mt-3 flex items-center gap-2 border-t border-gray-100 pt-3">
+                {c.status === 'pending_handover' && onAccept && (
+                  <button onClick={() => onAccept(c.id)} className="text-xs px-2 py-1 rounded bg-green-600 text-white hover:bg-green-700">Accept</button>
+                )}
+                {c.status === 'pending_handover' && onReject && (
+                  <button onClick={() => onReject(c.id)} className="text-xs px-2 py-1 rounded bg-red-600 text-white hover:bg-red-700">Reject</button>
+                )}
+                {c.status === 'collected' && onDelete && (
+                  <button onClick={() => onDelete(c.id)} className="text-xs px-2 py-1 rounded bg-gray-200 text-gray-700 hover:bg-gray-300">Delete</button>
+                )}
+              </div>
+            )}
+          </div>
+        ))}
       </div>
     );
   }

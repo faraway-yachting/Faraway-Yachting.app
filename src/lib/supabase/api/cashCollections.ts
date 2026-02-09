@@ -4,6 +4,7 @@ export interface CashCollection {
   id: string;
   company_id: string;
   booking_id: string | null;
+  cabin_allocation_id: string | null;
   amount: number;
   currency: string;
   collected_by: string;
@@ -58,6 +59,17 @@ export const cashCollectionsApi = {
     return (data ?? []) as CashCollection[];
   },
 
+  async getByAllocationId(allocationId: string): Promise<CashCollection[]> {
+    const supabase = createClient();
+    const { data, error } = await (supabase as any)
+      .from('cash_collections')
+      .select('*')
+      .eq('cabin_allocation_id', allocationId)
+      .order('collected_at', { ascending: false });
+    if (error) throw error;
+    return (data ?? []) as CashCollection[];
+  },
+
   async getPendingHandovers(companyId: string): Promise<CashCollection[]> {
     const supabase = createClient();
     const { data, error } = await (supabase as any)
@@ -73,6 +85,7 @@ export const cashCollectionsApi = {
   async create(record: {
     company_id: string;
     booking_id?: string;
+    cabin_allocation_id?: string;
     amount: number;
     currency: string;
     collected_by: string;

@@ -10,6 +10,7 @@ import { dbProjectToFrontend } from '@/lib/supabase/transforms';
 import { useBookingSettings } from '@/contexts/BookingSettingsContext';
 import { defaultBoatColors, defaultExternalBoatColor } from '@/data/booking/types';
 import { YachtProductManager } from '@/components/bookings/YachtProductManager';
+import { ProjectCabinSettings } from '@/components/bookings/ProjectCabinSettings';
 import BookingLookupsSettings from '@/components/bookings/BookingLookupsSettings';
 import { publicCalendarLinksApi, type PublicCalendarLink } from '@/lib/supabase/api/publicCalendarLinks';
 
@@ -1135,6 +1136,11 @@ export default function BookingSettingsPage() {
                         yachtSource="own"
                         yachtId={project.id}
                         yachtName={project.name}
+                        canEdit={canEdit}
+                      />
+                      <ProjectCabinSettings
+                        projectId={project.id}
+                        projectName={project.name}
                         canEdit={canEdit}
                       />
                     </div>

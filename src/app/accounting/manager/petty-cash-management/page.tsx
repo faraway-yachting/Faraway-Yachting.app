@@ -5,8 +5,12 @@ import { useRouter } from 'next/navigation';
 import { AppShell } from '@/components/accounting/AppShell';
 import { KPICard } from '@/components/accounting/KPICard';
 import { DataTable } from '@/components/accounting/DataTable';
-import TopUpModal from '@/components/petty-cash/TopUpModal';
-import ReimbursementApprovalModal from '@/components/petty-cash/ReimbursementApprovalModal';
+import dynamic from 'next/dynamic';
+
+const TopUpModal = dynamic(() => import('@/components/petty-cash/TopUpModal'));
+const ReimbursementApprovalModal = dynamic(() =>
+  import('@/components/petty-cash/ReimbursementApprovalModal')
+);
 import WalletSummaryCard from '@/components/petty-cash/WalletSummaryCard';
 import ExpenseForm from '@/components/petty-cash/ExpenseForm';
 import ExpenseFilters, { type FilterValues as ExpenseFilterValues } from '@/components/petty-cash/ExpenseFilters';
@@ -207,6 +211,11 @@ export default function PettyCashManagementPage() {
   const [projects, setProjects] = useState<{ id: string; name: string; code: string }[]>([]);
   const [isLoadingData, setIsLoadingData] = useState(true);
 
+  // Supabase data for "All Wallets" view (declared early for use in My Wallet derivation)
+  const [allWalletsDb, setAllWalletsDb] = useState<SupabaseWalletWithBalance[]>([]);
+  const [allExpensesDb, setAllExpensesDb] = useState<SupabaseExpense[]>([]);
+  const [isLoadingAllWallets, setIsLoadingAllWallets] = useState(true);
+
   // My Wallet view state
   const [showExpenseForm, setShowExpenseForm] = useState(false);
   const [myWalletTab, setMyWalletTab] = useState<'expenses' | 'reimbursements' | 'history'>('expenses');
@@ -273,13 +282,11 @@ export default function PettyCashManagementPage() {
         walletsData,
         allExpensesData,
         reimbursementsData,
-        approvedData,
         transferSummaryData,
       ] = await Promise.all([
         pettyCashApi.getAllWalletsWithCalculatedBalances(),
         pettyCashApi.getAllExpenses(),
         pettyCashApi.getPendingReimbursementsWithDetails(),
-        pettyCashApi.getReimbursementsByStatus('approved'),
         pettyCashApi.getApprovedReimbursementsGroupedForTransfer(),
       ]);
 
@@ -312,26 +319,13 @@ export default function PettyCashManagementPage() {
       setPendingReimbursements(transformedPending);
       setIsLoadingPendingReimbursements(false);
 
-      // Transform approved reimbursements
-      const transformedApproved = approvedData.map((r) => ({
-        id: r.id,
-        reimbursementNumber: r.reimbursement_number || '',
-        walletId: r.wallet_id,
-        walletHolderName: '',
-        expenseId: r.expense_id || '',
-        companyId: r.company_id || '',
-        companyName: '',
-        amount: Number(r.amount) || 0,
-        finalAmount: Number(r.final_amount) || Number(r.amount) || 0,
-        status: r.status as 'pending' | 'approved' | 'paid' | 'rejected',
-        createdAt: r.created_at || '',
-        createdBy: r.created_by || '',
-        updatedAt: r.updated_at || '',
-        notes: '',
-        expenseNumber: '',
-      }));
-      setApprovedReimbursements(transformedApproved);
-      setIsLoadingApprovedReimbursements(false);
+      // Derive approved count from transfer summary (avoids a separate query)
+      const approvedCount = transferSummaryData.reduce(
+        (total, group) => total + group.bankAccountGroups.reduce(
+          (sum, bg) => sum + bg.reimbursementIds.length, 0
+        ), 0
+      );
+      setApprovedReimbursementCount(approvedCount);
 
       // Background: Auto-create reimbursements for submitted expenses (non-blocking)
       // Only run ONCE per page load to prevent duplicate creation attempts
@@ -344,11 +338,11 @@ export default function PettyCashManagementPage() {
         );
 
         if (submittedWithoutReimb.length > 0) {
-          // Process in background without blocking UI - one at a time to avoid duplicates
+          // Single batch insert instead of individual requests per expense
           (async () => {
-            for (const expense of submittedWithoutReimb) {
-              try {
-                await pettyCashApi.createReimbursementWithNumber({
+            try {
+              await pettyCashApi.batchCreateReimbursements(
+                submittedWithoutReimb.map(expense => ({
                   wallet_id: expense.wallet_id,
                   expense_id: expense.id,
                   amount: expense.amount || 0,
@@ -365,12 +359,11 @@ export default function PettyCashManagementPage() {
                   rejection_reason: null,
                   bank_feed_line_id: null,
                   created_by: null,
-                });
-                console.log(`Auto-created reimbursement for expense ${expense.expense_number}`);
-              } catch (err) {
-                // Ignore duplicate errors (already handled in API)
-                console.log(`Skipped expense ${expense.expense_number}:`, err);
-              }
+                }))
+              );
+              console.log(`Auto-created ${submittedWithoutReimb.length} reimbursements in batch`);
+            } catch (err) {
+              console.log('Batch reimbursement creation error:', err);
             }
             autoCreateInProgressRef.current = false;
           })();
@@ -383,7 +376,6 @@ export default function PettyCashManagementPage() {
       setIsLoadingData(false);
       setIsLoadingAllWallets(false);
       setIsLoadingPendingReimbursements(false);
-      setIsLoadingApprovedReimbursements(false);
     } finally {
       isFetchingRef.current = false;
     }
@@ -401,44 +393,43 @@ export default function PettyCashManagementPage() {
     }
   }, [refreshKey, loadAllData]);
 
-  // Fetch user's own wallet from Supabase (with calculated balance) - separate for My Wallet view
+  // Derive My Wallet from already-loaded allWalletsDb + allExpensesDb (eliminates 3 redundant queries)
+  // Only fetch reimbursements-by-wallet separately (not loaded in Phase 2)
   useEffect(() => {
-    async function fetchMyWallet() {
-      if (!user?.id) {
-        setMyWalletLoading(false);
+    async function deriveMyWallet() {
+      if (!user?.id || allWalletsDb.length === 0) {
+        if (!authLoading && allWalletsDb.length === 0 && !isLoadingAllWallets) {
+          setMyWalletLoading(false);
+        }
         return;
       }
 
       try {
-        const wallets = await pettyCashApi.getWalletsByUser(user.id);
-        const activeWallet = wallets.find(w => w.status === 'active') || wallets[0] || null;
+        // Find user's wallet from already-loaded data (no extra query needed)
+        const activeWallet = allWalletsDb.find(w => w.user_id === user.id && w.status === 'active')
+          || allWalletsDb.find(w => w.user_id === user.id)
+          || null;
 
-        // Fetch wallet with calculated balance if found
         if (activeWallet) {
-          const walletWithBalance = await pettyCashApi.getWalletWithCalculatedBalance(activeWallet.id);
-          if (walletWithBalance) {
-            // Replace balance with calculated_balance for proper display
-            setMyWallet({
-              ...walletWithBalance,
-              balance: walletWithBalance.calculated_balance,
-            });
-          } else {
-            setMyWallet(activeWallet);
-          }
+          // Use calculated_balance from allWalletsDb (already computed by get_wallets_with_balances())
+          setMyWallet({
+            ...activeWallet,
+            balance: activeWallet.calculated_balance,
+          });
 
-          // Also fetch expenses and reimbursements for this wallet from Supabase
-          const [expensesData, reimbursementsData] = await Promise.all([
-            pettyCashApi.getExpensesByWallet(activeWallet.id),
-            pettyCashApi.getReimbursementsByWallet(activeWallet.id),
-          ]);
-          setMyWalletExpensesDb(expensesData);
+          // Derive expenses from already-loaded allExpensesDb (no extra query needed)
+          const walletExpenses = allExpensesDb.filter(e => e.wallet_id === activeWallet.id);
+          setMyWalletExpensesDb(walletExpenses);
+
+          // Only fetch reimbursements — this is the one query we still need
+          const reimbursementsData = await pettyCashApi.getReimbursementsByWallet(activeWallet.id);
           setMyWalletReimbursementsDb(reimbursementsData);
         } else {
           setMyWallet(null);
           setMyWalletReimbursementsDb([]);
         }
       } catch (error) {
-        console.error('Error fetching my wallet:', error);
+        console.error('Error deriving my wallet:', error);
         setMyWallet(null);
       } finally {
         setMyWalletLoading(false);
@@ -446,9 +437,9 @@ export default function PettyCashManagementPage() {
     }
 
     if (!authLoading) {
-      fetchMyWallet();
+      deriveMyWallet();
     }
-  }, [user?.id, authLoading, refreshKey]);
+  }, [user?.id, authLoading, allWalletsDb, allExpensesDb, isLoadingAllWallets, refreshKey]);
 
   // Transform my wallet to frontend format
   const transformedMyWallet = useMemo(
@@ -458,11 +449,6 @@ export default function PettyCashManagementPage() {
 
   // Check if user has their own wallet
   const hasOwnWallet = !!myWallet;
-
-  // Supabase data for "All Wallets" view
-  const [allWalletsDb, setAllWalletsDb] = useState<SupabaseWalletWithBalance[]>([]);
-  const [allExpensesDb, setAllExpensesDb] = useState<SupabaseExpense[]>([]);
-  const [isLoadingAllWallets, setIsLoadingAllWallets] = useState(true);
 
   // Transform wallets for display (using calculated balance)
   const wallets = useMemo(() => {
@@ -507,8 +493,7 @@ export default function PettyCashManagementPage() {
   // State for pending and approved reimbursements (loaded by consolidated loadAllData)
   const [pendingReimbursements, setPendingReimbursements] = useState<PettyCashReimbursement[]>([]);
   const [isLoadingPendingReimbursements, setIsLoadingPendingReimbursements] = useState(true);
-  const [approvedReimbursements, setApprovedReimbursements] = useState<PettyCashReimbursement[]>([]);
-  const [isLoadingApprovedReimbursements, setIsLoadingApprovedReimbursements] = useState(true);
+  const [approvedReimbursementCount, setApprovedReimbursementCount] = useState(0);
 
   // Transfer Summary state - groups approved reimbursements by wallet → bank account
   type TransferGroup = {
@@ -1123,24 +1108,31 @@ export default function PettyCashManagementPage() {
 
           if (!walletGroup || !bankGroup) continue;
 
+          const today = new Date().toISOString().split('T')[0];
+
           // Create a top-up for this wallet
           await pettyCashApi.createTopUp({
             wallet_id: walletId,
             amount: bankGroup.amount,
             company_id: bankGroup.companyId || null,
             bank_account_id: bankAccountId,
-            top_up_date: new Date().toISOString().split('T')[0],
+            top_up_date: today,
             reference: `Reimbursement transfer`,
             notes: `Transfer for ${bankGroup.reimbursementIds.length} approved reimbursement(s)`,
             status: 'completed',
             created_by: user?.id || null,
           });
 
-          // Mark each reimbursement as paid
-          const today = new Date().toISOString().split('T')[0];
-          for (const reimbursementId of bankGroup.reimbursementIds) {
-            await pettyCashApi.markReimbursementPaid(reimbursementId, today);
-          }
+          // Create a batch record and mark all reimbursements as paid
+          const batch = await pettyCashApi.createBatch({
+            reimbursementIds: bankGroup.reimbursementIds,
+            companyId: bankGroup.companyId || '',
+            walletHolderName: walletGroup.holderName,
+            walletHolderId: null,
+            bankAccountId: bankAccountId,
+            createdBy: user?.id || '',
+          });
+          await pettyCashApi.markBatchPaid(batch.id, today);
         }
 
         // Clear selection and refresh
@@ -1345,7 +1337,7 @@ export default function PettyCashManagementPage() {
 
   // Wallet table columns
   const walletColumns = [
-    { key: 'userName', header: 'Holder Name' },
+    { key: 'userName', header: 'Holder Name', primary: true },
     { key: 'walletName', header: 'Wallet' },
     {
       key: 'balance',
@@ -1364,6 +1356,7 @@ export default function PettyCashManagementPage() {
     {
       key: 'status',
       header: 'Status',
+      hideOnMobile: true,
       align: 'center' as const,
       render: (row: TransformedWallet) => (
         <span className={`inline-flex rounded-full px-2 py-1 text-xs font-semibold ${getStatusBadgeClass(row.status)}`}>
@@ -1409,9 +1402,9 @@ export default function PettyCashManagementPage() {
 
   // Pending reimbursement columns
   const reimbursementColumns = [
-    { key: 'reimbursementNumber', header: 'Number' },
+    { key: 'reimbursementNumber', header: 'Number', primary: true },
     { key: 'walletHolderName', header: 'Holder' },
-    { key: 'companyName', header: 'Company' },
+    { key: 'companyName', header: 'Company', hideOnMobile: true },
     {
       key: 'amount',
       header: 'Amount',
@@ -1421,6 +1414,7 @@ export default function PettyCashManagementPage() {
     {
       key: 'createdAt',
       header: 'Requested',
+      hideOnMobile: true,
       render: (row: PettyCashReimbursement) => formatDate(row.createdAt),
     },
     {
@@ -1484,6 +1478,7 @@ export default function PettyCashManagementPage() {
     {
       key: 'referenceNumber',
       header: 'Reference',
+      primary: true,
       render: (row: PettyCashTransaction) => {
         // Only make clickable for expense type
         if (row.type === 'expense') {
@@ -1502,11 +1497,12 @@ export default function PettyCashManagementPage() {
         return <span className="text-sm">{row.referenceNumber}</span>;
       },
     },
-    { key: 'walletHolderName', header: 'Holder' },
-    { key: 'companyName', header: 'Company' },
+    { key: 'walletHolderName', header: 'Holder', hideOnMobile: true },
+    { key: 'companyName', header: 'Company', hideOnMobile: true },
     {
       key: 'description',
       header: 'Description',
+      hideOnMobile: true,
       render: (row: PettyCashTransaction) => (
         <span className="text-sm text-gray-600 truncate max-w-[150px] block">
           {row.description}
@@ -1526,6 +1522,7 @@ export default function PettyCashManagementPage() {
     {
       key: 'receiptStatus',
       header: 'Receipt',
+      hideOnMobile: true,
       align: 'center' as const,
       render: (row: PettyCashTransaction) => {
         // Only show checkbox for expense type
@@ -1575,6 +1572,7 @@ export default function PettyCashManagementPage() {
     {
       key: 'expenseNumber',
       header: 'Number',
+      primary: true,
       render: (row: ExpenseDisplay) => (
         <button
           onClick={(e) => {
@@ -1593,8 +1591,8 @@ export default function PettyCashManagementPage() {
       render: (row: ExpenseDisplay) => formatDate(row.expenseDate),
     },
     { key: 'companyName', header: 'Company' },
-    { key: 'projectName', header: 'Project' },
-    { key: 'description', header: 'Description' },
+    { key: 'projectName', header: 'Project', hideOnMobile: true },
+    { key: 'description', header: 'Description', hideOnMobile: true },
     {
       key: 'netAmount',
       header: 'Amount',
@@ -1621,9 +1619,9 @@ export default function PettyCashManagementPage() {
 
   // Table columns for reimbursements in My Wallet view
   const myReimbursementColumns = [
-    { key: 'reimbursementNumber', header: 'Number' },
+    { key: 'reimbursementNumber', header: 'Number', primary: true },
     { key: 'expenseNumber', header: 'Expense' },
-    { key: 'companyName', header: 'Company' },
+    { key: 'companyName', header: 'Company', hideOnMobile: true },
     {
       key: 'finalAmount',
       header: 'Amount',
@@ -1647,6 +1645,7 @@ export default function PettyCashManagementPage() {
     {
       key: 'rejectionReason',
       header: 'Rejection Reason',
+      hideOnMobile: true,
       render: (row: PettyCashReimbursement) => (
         row.status === 'rejected' && row.rejectionReason ? (
           <span className="text-sm text-red-600">{row.rejectionReason}</span>
@@ -1658,6 +1657,7 @@ export default function PettyCashManagementPage() {
     {
       key: 'createdAt',
       header: 'Requested',
+      hideOnMobile: true,
       render: (row: PettyCashReimbursement) => formatDate(row.createdAt),
     },
     {
@@ -1685,8 +1685,8 @@ export default function PettyCashManagementPage() {
       header: 'Date',
       render: (row: { date: string }) => formatDate(row.date),
     },
-    { key: 'referenceNumber', header: 'Reference' },
-    { key: 'description', header: 'Description' },
+    { key: 'referenceNumber', header: 'Reference', primary: true },
+    { key: 'description', header: 'Description', hideOnMobile: true },
     {
       key: 'type',
       header: 'Type',
@@ -2286,7 +2286,7 @@ export default function PettyCashManagementPage() {
               Transfer Summary
             </h3>
             <span className="px-2 py-1 text-xs font-medium bg-green-100 text-green-800 rounded-full">
-              {approvedReimbursements.length} approved
+              {approvedReimbursementCount} approved
             </span>
           </div>
           <div className="p-4">

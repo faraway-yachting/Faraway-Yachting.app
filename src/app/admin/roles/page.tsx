@@ -1,6 +1,8 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
+import { useAuth } from '@/components/auth/AuthProvider';
 import { roleConfigApi, type RoleDefinition, type PermissionGroup } from '@/lib/supabase/api';
 import { createClient } from '@/lib/supabase/client';
 import { Loader2, ChevronDown, ChevronUp, RotateCcw, Save, Shield, Plus, X, Trash2 } from 'lucide-react';
@@ -86,6 +88,16 @@ const SCOPE_OPTIONS = [
 ];
 
 export default function AdminRolesPage() {
+  const router = useRouter();
+  const { isSuperAdmin, isLoading: authLoading } = useAuth();
+
+  // Only super admins can access role configuration
+  useEffect(() => {
+    if (!authLoading && !isSuperAdmin) {
+      router.push('/unauthorized');
+    }
+  }, [isSuperAdmin, authLoading, router]);
+
   const [selectedModule, setSelectedModule] = useState('accounting');
   const [roles, setRoles] = useState<RoleDefinition[]>([]);
   const [expandedRole, setExpandedRole] = useState<string | null>(null);
@@ -338,6 +350,10 @@ export default function AdminRolesPage() {
       console.error('Failed to reset:', err);
     }
   };
+
+  if (authLoading || !isSuperAdmin) {
+    return null;
+  }
 
   return (
     <div>

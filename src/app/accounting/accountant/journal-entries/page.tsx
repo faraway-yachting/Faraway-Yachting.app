@@ -1000,6 +1000,7 @@ export default function JournalEntriesPage() {
       {
         key: 'reference_number',
         header: 'Reference',
+        primary: true,
         render: (entry: JournalEntryWithLines) => (
           <span className="font-medium text-gray-900">{entry.reference_number || '-'}</span>
         ),
@@ -1020,6 +1021,7 @@ export default function JournalEntriesPage() {
       {
         key: 'company_id',
         header: 'Company',
+        hideOnMobile: true,
         render: (entry: JournalEntryWithLines) => {
           const company = companies.find((c) => c.id === entry.company_id);
           return <span className="text-gray-900">{company?.name || 'Unknown'}</span>;
@@ -1028,6 +1030,7 @@ export default function JournalEntriesPage() {
       {
         key: 'description',
         header: 'Description',
+        hideOnMobile: true,
         render: (entry: JournalEntryWithLines) => (
           <span className="text-gray-900 line-clamp-2">{entry.description || '-'}</span>
         ),

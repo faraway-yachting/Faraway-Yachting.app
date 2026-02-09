@@ -88,6 +88,7 @@ interface AuthContextType {
   session: Session | null;
   isLoading: boolean;
   isSuperAdmin: boolean;
+  canManageUsers: boolean;
   moduleRoles: UserModuleRole[];
   permissions: string[];
   companyAccess: UserCompanyAccess[];
@@ -139,9 +140,18 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   // Determine if user is super admin from profile
   const isSuperAdmin = profile?.is_super_admin === true;
+  const canManageUsers = profile?.can_manage_users === true;
 
   const fetchProfile = async (userId: string) => {
     try {
+      // Use server-side API route that bypasses RLS (avoids recursive policy issues)
+      const res = await fetch('/api/auth/profile');
+      if (res.ok) {
+        const data = await res.json();
+        console.log('Profile fetched successfully:', data?.full_name, 'is_super_admin:', data?.is_super_admin);
+        return data;
+      }
+      // Fallback to direct Supabase query if API route fails
       const { data, error } = await supabase
         .from('user_profiles')
         .select('*')
@@ -555,6 +565,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     session,
     isLoading,
     isSuperAdmin,
+    canManageUsers,
     moduleRoles,
     permissions,
     companyAccess,

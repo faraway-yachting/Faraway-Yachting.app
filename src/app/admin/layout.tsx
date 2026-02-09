@@ -14,7 +14,8 @@ interface AdminLayoutProps {
 function AdminLayoutContent({ children }: AdminLayoutProps) {
   const router = useRouter();
   const pathname = usePathname();
-  const { user, isSuperAdmin, isLoading } = useAuth();
+  const { user, isSuperAdmin, canManageUsers, isLoading } = useAuth();
+  const hasAdminAccess = isSuperAdmin || canManageUsers;
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
@@ -25,11 +26,11 @@ function AdminLayoutContent({ children }: AdminLayoutProps) {
     if (mounted && !isLoading) {
       if (!user) {
         router.push('/login');
-      } else if (!isSuperAdmin) {
+      } else if (!hasAdminAccess) {
         router.push('/unauthorized');
       }
     }
-  }, [user, isSuperAdmin, isLoading, mounted, router]);
+  }, [user, hasAdminAccess, isLoading, mounted, router]);
 
   // Show loading state
   if (!mounted || isLoading) {
@@ -41,7 +42,7 @@ function AdminLayoutContent({ children }: AdminLayoutProps) {
   }
 
   // Not authorized
-  if (!user || !isSuperAdmin) {
+  if (!user || !hasAdminAccess) {
     return null;
   }
 
@@ -66,8 +67,10 @@ function AdminLayoutContent({ children }: AdminLayoutProps) {
               </div>
             </div>
             <div className="flex items-center gap-2 text-sm text-gray-500">
-              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
-                Super Admin
+              <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                isSuperAdmin ? 'bg-purple-100 text-purple-800' : 'bg-blue-100 text-blue-800'
+              }`}>
+                {isSuperAdmin ? 'Super Admin' : 'User Manager'}
               </span>
               <span>{user.email}</span>
             </div>
@@ -91,17 +94,19 @@ function AdminLayoutContent({ children }: AdminLayoutProps) {
               <Users className="h-5 w-5" />
               User Management
             </Link>
-            <Link
-              href="/admin/roles"
-              className={`flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-lg transition-colors ${
-                pathname === '/admin/roles'
-                  ? 'text-gray-900 bg-gray-100'
-                  : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
-              }`}
-            >
-              <Key className="h-5 w-5" />
-              Role Permissions
-            </Link>
+            {isSuperAdmin && (
+              <Link
+                href="/admin/roles"
+                className={`flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-lg transition-colors ${
+                  pathname === '/admin/roles'
+                    ? 'text-gray-900 bg-gray-100'
+                    : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
+                }`}
+              >
+                <Key className="h-5 w-5" />
+                Role Permissions
+              </Link>
+            )}
           </nav>
         </aside>
 

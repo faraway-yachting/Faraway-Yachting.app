@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Loader2, Plus, Pencil, Trash2, Download, X, Check, AlertCircle, Link2, PenLine, CheckCircle, DollarSign, Calendar, ChevronLeft, ChevronRight } from 'lucide-react';
+import { useIsMobile } from '@/hooks/useIsMobile';
 import { commissionRecordsApi } from '@/lib/supabase/api/commissionRecords';
 import { projectsApi } from '@/lib/supabase/api/projects';
 import { authApi } from '@/lib/supabase/api/auth';
@@ -65,6 +66,7 @@ const emptyRecord: EditingRecord = {
 
 export default function CommissionTable() {
   const { user, isSuperAdmin, getModuleRole } = useAuth();
+  const isMobile = useIsMobile();
   const accountingRole = getModuleRole('accounting');
   const isSalesOnly = !isSuperAdmin && accountingRole === 'sales';
 
@@ -802,11 +804,94 @@ export default function CommissionTable() {
         </div>
       )}
 
-      {/* Table */}
+      {/* Table / Cards */}
       {records.length === 0 && !showForm ? (
         <div className="text-center py-12">
           <p className="text-gray-500 text-sm">No commission records yet.</p>
           <p className="text-gray-400 text-xs mt-1">Click &quot;Add Record&quot; to create your first entry, or records will auto-sync from bookings.</p>
+        </div>
+      ) : isMobile ? (
+        <div className="space-y-3">
+          {filteredRecords.map((r) => {
+            const fromBooking = isBookingSourced(r);
+            const paymentStatus = (r as any).payment_status || 'unpaid';
+            return (
+              <div key={r.id} className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+                <div className="mb-2 flex items-center justify-between">
+                  <span className="text-sm font-semibold text-gray-900">{projectMap.get(r.boat_id || '')?.name || '-'}</span>
+                  <div className="flex items-center gap-1.5">
+                    {fromBooking ? (
+                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-xs font-medium rounded-full bg-blue-100 text-blue-700">
+                        <Link2 className="h-3 w-3" />
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-xs font-medium rounded-full bg-gray-100 text-gray-600">
+                        <PenLine className="h-3 w-3" />
+                      </span>
+                    )}
+                    {isEarned(r) ? (
+                      <span className="inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-full bg-green-100 text-green-700">Earned</span>
+                    ) : (
+                      <span className="inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-full bg-gray-100 text-gray-500">Pending</span>
+                    )}
+                  </div>
+                </div>
+                <dl className="space-y-1">
+                  <div className="flex items-start justify-between gap-2">
+                    <dt className="shrink-0 text-xs font-medium text-gray-500">Charter</dt>
+                    <dd className="text-right text-sm text-gray-900">
+                      {r.charter_date_from || '-'}
+                      {r.charter_date_to && r.charter_date_to !== r.charter_date_from && ` — ${r.charter_date_to}`}
+                    </dd>
+                  </div>
+                  <div className="flex items-start justify-between gap-2">
+                    <dt className="shrink-0 text-xs font-medium text-gray-500">Owner</dt>
+                    <dd className="text-right text-sm text-gray-900">{getUserName(r.booking_owner_id)}</dd>
+                  </div>
+                  <div className="flex items-start justify-between gap-2">
+                    <dt className="shrink-0 text-xs font-medium text-gray-500">Net Income</dt>
+                    <dd className="text-right text-sm text-gray-900">{formatCurrency(r.net_income, r.currency)}</dd>
+                  </div>
+                  <div className="flex items-start justify-between gap-2">
+                    <dt className="shrink-0 text-xs font-medium text-gray-500">Commission ({r.commission_rate}%)</dt>
+                    <dd className="text-right text-sm font-semibold text-[#5A7A8F]">{formatCurrency(r.total_commission, r.currency)}</dd>
+                  </div>
+                  <div className="flex items-start justify-between gap-2">
+                    <dt className="shrink-0 text-xs font-medium text-gray-500">Payment</dt>
+                    <dd className="text-right">{getPaymentStatusBadge(r)}</dd>
+                  </div>
+                </dl>
+                <div className="mt-3 flex items-center flex-wrap gap-2 border-t border-gray-100 pt-3">
+                  <button onClick={() => openEditForm(r)}
+                    className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-gray-600 hover:bg-gray-100 rounded transition-colors">
+                    <Pencil className="h-3.5 w-3.5" />
+                    Edit
+                  </button>
+                  {!fromBooking && (
+                    <button onClick={() => handleDelete(r.id)} disabled={deletingId === r.id}
+                      className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-red-600 hover:bg-red-50 rounded transition-colors disabled:opacity-50">
+                      {deletingId === r.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                      Delete
+                    </button>
+                  )}
+                  {paymentStatus === 'unpaid' && isEarned(r) && (
+                    <button onClick={() => handleApprove(r.id)} disabled={approvingId === r.id}
+                      className="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium text-[#5A7A8F] bg-[#5A7A8F]/10 rounded hover:bg-[#5A7A8F]/20 transition-colors disabled:opacity-50 ml-auto">
+                      {approvingId === r.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <CheckCircle className="h-3 w-3" />}
+                      Approve
+                    </button>
+                  )}
+                  {paymentStatus === 'approved' && (
+                    <button onClick={() => openPayModal(r)}
+                      className="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium text-green-700 bg-green-100 rounded hover:bg-green-200 transition-colors ml-auto">
+                      <DollarSign className="h-3 w-3" />
+                      Mark Paid
+                    </button>
+                  )}
+                </div>
+              </div>
+            );
+          })}
         </div>
       ) : (
         <div className="border border-gray-200 rounded-lg overflow-hidden">

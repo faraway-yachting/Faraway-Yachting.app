@@ -12,7 +12,6 @@ import {
 } from 'lucide-react';
 import {
   Booking,
-  BookingType,
   BookingAttachment,
 } from '@/data/booking/types';
 import { DynamicSelect } from './DynamicSelect';
@@ -26,6 +25,7 @@ interface BookingDetailsSectionProps {
   autoFilledFields: Set<string>;
   onUploadContractAttachment?: (files: File[]) => Promise<void>;
   onRemoveContractAttachment?: (index: number) => void;
+  cabinCharterMode?: boolean;
 }
 
 export function BookingDetailsSection({
@@ -36,6 +36,7 @@ export function BookingDetailsSection({
   autoFilledFields,
   onUploadContractAttachment,
   onRemoveContractAttachment,
+  cabinCharterMode,
 }: BookingDetailsSectionProps) {
   const contractFileRef = useRef<HTMLInputElement>(null);
 
@@ -87,18 +88,6 @@ export function BookingDetailsSection({
             {errors.title && <p className="text-sm text-red-500 mt-1">{errors.title}</p>}
           </div>
 
-          {/* Charter Type */}
-          <div>
-            <label className="block text-xs text-gray-500 mb-1">Charter Type</label>
-            <DynamicSelect
-              category="charter_type"
-              value={formData.type || 'day_charter'}
-              onChange={(val) => onChange('type', val as BookingType)}
-              disabled={!canEdit}
-              placeholder="Select charter type..."
-            />
-          </div>
-
           {/* Destination */}
           <div>
             <label className="block text-xs text-gray-500 mb-1 flex items-center gap-1">
@@ -141,114 +130,121 @@ export function BookingDetailsSection({
             </div>
           </div>
 
-          {/* Number of Guests */}
-          <div>
-            <label className="block text-xs text-gray-500 mb-1">Number of Guests</label>
-            <input
-              type="number"
-              value={formData.numberOfGuests || ''}
-              onChange={(e) =>
-                onChange('numberOfGuests', e.target.value ? parseInt(e.target.value) : undefined)
-              }
-              disabled={!canEdit}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100"
-            />
-          </div>
+          {/* Number of Guests — hidden in cabin charter mode (sum of cabin guests) */}
+          {!cabinCharterMode && (
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Number of Guests</label>
+              <input
+                type="number"
+                value={formData.numberOfGuests || ''}
+                onChange={(e) =>
+                  onChange('numberOfGuests', e.target.value ? parseInt(e.target.value) : undefined)
+                }
+                disabled={!canEdit}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100"
+              />
+            </div>
+          )}
         </div>
       </div>
 
-      {/* Extras Section */}
-      <div className="bg-amber-50 rounded-lg p-4">
-        <div className="flex items-center gap-2 px-3 py-2 -mx-4 -mt-4 mb-3 rounded-t-lg bg-amber-100">
-          <Package className="h-4 w-4 text-amber-600" />
-          <h3 className="text-sm font-semibold text-amber-800">Extras</h3>
-        </div>
-        <DynamicMultiSelect
-          category="extras"
-          values={formData.extras || []}
-          onChange={(vals) => onChange('extras', vals)}
-          disabled={!canEdit}
-          placeholder="Select extras (Taxi, BBQ, Diving...)"
-        />
-      </div>
-
-      {/* Charter Contract Section */}
-      <div className="bg-slate-50 rounded-lg p-4">
-        <div className="flex items-center gap-2 px-3 py-2 -mx-4 -mt-4 mb-3 rounded-t-lg bg-slate-200">
-          <ScrollText className="h-4 w-4 text-slate-600" />
-          <h3 className="text-sm font-semibold text-slate-800">Charter Contract</h3>
-        </div>
-        <div className="space-y-3">
-          <div>
-            <label className="block text-xs text-gray-500 mb-1">Contract Details</label>
-            <textarea
-              value={formData.contractNote || ''}
-              onChange={(e) => onChange('contractNote', e.target.value)}
-              placeholder="Contract notes, terms, or reference..."
+      {/* Extras & Contract — hidden in cabin charter mode (managed per-cabin) */}
+      {!cabinCharterMode && (
+        <>
+          {/* Extras Section */}
+          <div className="bg-amber-50 rounded-lg p-4">
+            <div className="flex items-center gap-2 px-3 py-2 -mx-4 -mt-4 mb-3 rounded-t-lg bg-amber-100">
+              <Package className="h-4 w-4 text-amber-600" />
+              <h3 className="text-sm font-semibold text-amber-800">Extras</h3>
+            </div>
+            <DynamicMultiSelect
+              category="extras"
+              values={formData.extras || []}
+              onChange={(vals) => onChange('extras', vals)}
               disabled={!canEdit}
-              rows={3}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100 resize-none"
+              placeholder="Select extras (Taxi, BBQ, Diving...)"
             />
           </div>
 
-          {/* Attachments */}
-          <div>
-            <label className="block text-xs text-gray-500 mb-1">Attachments</label>
-            {contractAttachments.length > 0 && (
-              <div className="space-y-1.5 mb-2">
-                {contractAttachments.map((att, i) => (
-                  <div
-                    key={att.id}
-                    className="flex items-center justify-between bg-white rounded-md border border-gray-200 px-3 py-2"
-                  >
-                    <span className="text-sm text-gray-700 truncate flex-1">{att.name}</span>
-                    <div className="flex items-center gap-1 ml-2">
-                      <button
-                        type="button"
-                        onClick={() => window.open(att.url, '_blank', 'noopener,noreferrer')}
-                        className="p-1 text-blue-600 hover:bg-blue-50 rounded transition-colors"
-                        title="View file"
-                      >
-                        <Eye className="h-4 w-4" />
-                      </button>
-                      {canEdit && onRemoveContractAttachment && (
-                        <button
-                          type="button"
-                          onClick={() => onRemoveContractAttachment(i)}
-                          className="p-1 text-red-500 hover:bg-red-50 rounded transition-colors"
-                          title="Remove"
-                        >
-                          <X className="h-4 w-4" />
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-            {canEdit && onUploadContractAttachment && (
-              <>
-                <input
-                  ref={contractFileRef}
-                  type="file"
-                  multiple
-                  onChange={handleContractFileChange}
-                  className="hidden"
-                  accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
+          {/* Charter Contract Section */}
+          <div className="bg-slate-50 rounded-lg p-4">
+            <div className="flex items-center gap-2 px-3 py-2 -mx-4 -mt-4 mb-3 rounded-t-lg bg-slate-200">
+              <ScrollText className="h-4 w-4 text-slate-600" />
+              <h3 className="text-sm font-semibold text-slate-800">Charter Contract</h3>
+            </div>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Contract Details</label>
+                <textarea
+                  value={formData.contractNote || ''}
+                  onChange={(e) => onChange('contractNote', e.target.value)}
+                  placeholder="Contract notes, terms, or reference..."
+                  disabled={!canEdit}
+                  rows={3}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100 resize-none"
                 />
-                <button
-                  type="button"
-                  onClick={() => contractFileRef.current?.click()}
-                  className="flex items-center gap-2 px-3 py-2 text-sm text-gray-600 bg-white border border-dashed border-gray-300 rounded-lg hover:border-gray-400 hover:bg-gray-50 transition-colors w-full justify-center"
-                >
-                  <Upload className="h-4 w-4" />
-                  Click to upload files
-                </button>
-              </>
-            )}
+              </div>
+
+              {/* Attachments */}
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Attachments</label>
+                {contractAttachments.length > 0 && (
+                  <div className="space-y-1.5 mb-2">
+                    {contractAttachments.map((att, i) => (
+                      <div
+                        key={att.id}
+                        className="flex items-center justify-between bg-white rounded-md border border-gray-200 px-3 py-2"
+                      >
+                        <span className="text-sm text-gray-700 truncate flex-1">{att.name}</span>
+                        <div className="flex items-center gap-1 ml-2">
+                          <button
+                            type="button"
+                            onClick={() => window.open(att.url, '_blank', 'noopener,noreferrer')}
+                            className="p-1 text-blue-600 hover:bg-blue-50 rounded transition-colors"
+                            title="View file"
+                          >
+                            <Eye className="h-4 w-4" />
+                          </button>
+                          {canEdit && onRemoveContractAttachment && (
+                            <button
+                              type="button"
+                              onClick={() => onRemoveContractAttachment(i)}
+                              className="p-1 text-red-500 hover:bg-red-50 rounded transition-colors"
+                              title="Remove"
+                            >
+                              <X className="h-4 w-4" />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {canEdit && onUploadContractAttachment && (
+                  <>
+                    <input
+                      ref={contractFileRef}
+                      type="file"
+                      multiple
+                      onChange={handleContractFileChange}
+                      className="hidden"
+                      accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => contractFileRef.current?.click()}
+                      className="flex items-center gap-2 px-3 py-2 text-sm text-gray-600 bg-white border border-dashed border-gray-300 rounded-lg hover:border-gray-400 hover:bg-gray-50 transition-colors w-full justify-center"
+                    >
+                      <Upload className="h-4 w-4" />
+                      Click to upload files
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
           </div>
-        </div>
-      </div>
+        </>
+      )}
     </>
   );
 }

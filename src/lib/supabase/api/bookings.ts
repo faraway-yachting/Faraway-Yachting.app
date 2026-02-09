@@ -12,6 +12,60 @@ type DbBookingInsert = Database['public']['Tables']['bookings']['Insert'];
 type DbBookingGuest = Database['public']['Tables']['booking_guests']['Row'];
 type DbBookingGuestInsert = Database['public']['Tables']['booking_guests']['Insert'];
 
+/**
+ * Generate the next sequential booking number for the current month.
+ * Format: FA-YYYYMMXXX (e.g., FA-202602001, FA-202602002)
+ * Resets to 001 each month.
+ */
+export async function getNextBookingNumber(): Promise<string> {
+  const supabase = createClient();
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const prefix = `FA-${year}${month}`;
+
+  const { data, error } = await supabase
+    .from('bookings')
+    .select('booking_number')
+    .like('booking_number', `${prefix}%`)
+    .order('booking_number', { ascending: false })
+    .limit(1);
+
+  let nextSeq = 1;
+  if (!error && data && data.length > 0) {
+    const lastNumber = data[0].booking_number;
+    const seqStr = lastNumber.substring(prefix.length);
+    const lastSeq = parseInt(seqStr, 10);
+    if (!isNaN(lastSeq)) {
+      nextSeq = lastSeq + 1;
+    }
+  }
+
+  return `${prefix}${String(nextSeq).padStart(3, '0')}`;
+}
+
+/**
+ * Create a booking with a sequential booking number.
+ * Retries on UNIQUE constraint collision (race condition between concurrent users).
+ */
+export async function createBookingWithNumber(
+  bookingData: Partial<Booking>
+): Promise<Booking> {
+  const MAX_RETRIES = 3;
+  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    const bookingNumber = await getNextBookingNumber();
+    try {
+      return await bookingsApi.create({ ...bookingData, bookingNumber });
+    } catch (error: any) {
+      if (error?.code === '23505' && attempt < MAX_RETRIES - 1) {
+        continue;
+      }
+      throw error;
+    }
+  }
+  throw new Error('Failed to generate unique booking number after retries');
+}
+
 function dbBookingToFrontend(db: DbBooking): Booking {
   return {
     id: db.id,

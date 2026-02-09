@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { createClient as createServerClient } from '@/lib/supabase/server';
 import { NextRequest, NextResponse } from 'next/server';
 
 function buildInviteEmailHtml(fullName: string, inviteLink: string): string {
@@ -42,8 +43,32 @@ const supabaseAdmin = createClient(
 
 export async function POST(request: NextRequest) {
   try {
+    // Verify the caller is authenticated and authorized
+    const supabaseServer = await createServerClient();
+    const { data: { user: caller }, error: authError } = await supabaseServer.auth.getUser();
+
+    if (authError || !caller) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    // Check if caller is super admin or has can_manage_users permission
+    const { data: callerProfile } = await supabaseAdmin
+      .from('user_profiles')
+      .select('is_super_admin, can_manage_users')
+      .eq('id', caller.id)
+      .single();
+
+    const callerIsSuperAdmin = callerProfile?.is_super_admin === true;
+    const callerCanManageUsers = callerProfile?.can_manage_users === true;
+
+    if (!callerIsSuperAdmin && !callerCanManageUsers) {
+      return NextResponse.json({ error: 'Forbidden: insufficient permissions' }, { status: 403 });
+    }
+
     const body = await request.json();
-    const { email, fullName, roles, isSuperAdmin } = body;
+    const { email, fullName, roles } = body;
+    // Only super admins can create other super admins
+    const isSuperAdmin = callerIsSuperAdmin ? (body.isSuperAdmin || false) : false;
 
     if (!email || !fullName) {
       return NextResponse.json(

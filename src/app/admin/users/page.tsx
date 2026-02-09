@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { createClient } from '@/lib/supabase/client';
+import { useAuth } from '@/components/auth/AuthProvider';
 import {
   userModuleRolesApi,
   UserWithModuleRoles,
@@ -73,6 +74,7 @@ const COMPANY_ACCESS_TYPES = ['admin', 'manager', 'member', 'viewer'] as const;
 const PROJECT_ACCESS_TYPES = ['investor', 'crew', 'manager', 'full'] as const;
 
 export default function AdminUsersPage() {
+  const { isSuperAdmin, companyAccess } = useAuth();
   const [users, setUsers] = useState<ExtendedUser[]>([]);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -113,6 +115,7 @@ export default function AdminUsersPage() {
     hr: '',
   });
   const [editSuperAdmin, setEditSuperAdmin] = useState(false);
+  const [editCanManageUsers, setEditCanManageUsers] = useState(false);
   const [saving, setSaving] = useState(false);
 
   // Company access edit
@@ -227,7 +230,7 @@ export default function AdminUsersPage() {
         inviteEmail,
         inviteFullName,
         roles,
-        inviteSuperAdmin
+        isSuperAdmin ? inviteSuperAdmin : false
       );
 
       if (result.error) {
@@ -264,6 +267,7 @@ export default function AdminUsersPage() {
   const startEditUser = (user: ExtendedUser) => {
     setEditingUserId(user.id);
     setEditSuperAdmin(user.is_super_admin);
+    setEditCanManageUsers(user.can_manage_users || false);
 
     const roles: Record<ModuleName, string> = {
       accounting: '',
@@ -295,6 +299,7 @@ export default function AdminUsersPage() {
       });
 
       await userModuleRolesApi.setUserSuperAdmin(userId, editSuperAdmin);
+      await userModuleRolesApi.setUserCanManageUsers(userId, editCanManageUsers);
       await userModuleRolesApi.setUserModuleRoles(userId, roles);
 
       setEditingUserId(null);
@@ -592,17 +597,19 @@ export default function AdminUsersPage() {
               </div>
 
               <div className="bg-gray-50 rounded-lg p-4">
-                <label className="flex items-center gap-2 mb-4">
-                  <input
-                    type="checkbox"
-                    checked={inviteSuperAdmin}
-                    onChange={(e) => setInviteSuperAdmin(e.target.checked)}
-                    className="rounded border-gray-300 text-purple-600 focus:ring-purple-500"
-                  />
-                  <Shield className="h-4 w-4 text-purple-600" />
-                  <span className="font-medium text-gray-700">Super Admin</span>
-                  <span className="text-sm text-gray-500">(Full access to all modules and admin panel)</span>
-                </label>
+                {isSuperAdmin && (
+                  <label className="flex items-center gap-2 mb-4">
+                    <input
+                      type="checkbox"
+                      checked={inviteSuperAdmin}
+                      onChange={(e) => setInviteSuperAdmin(e.target.checked)}
+                      className="rounded border-gray-300 text-purple-600 focus:ring-purple-500"
+                    />
+                    <Shield className="h-4 w-4 text-purple-600" />
+                    <span className="font-medium text-gray-700">Super Admin</span>
+                    <span className="text-sm text-gray-500">(Full access to all modules and admin panel)</span>
+                  </label>
+                )}
 
                 <h4 className="font-medium text-gray-700 mb-3">Module Roles</h4>
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
@@ -759,14 +766,21 @@ export default function AdminUsersPage() {
                         </div>
                       </td>
                       <td className="px-4 py-4 whitespace-nowrap">
-                        {user.is_super_admin ? (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
-                            <Shield className="h-3 w-3" />
-                            Super Admin
-                          </span>
-                        ) : (
-                          <span className="text-gray-400 text-sm">User</span>
-                        )}
+                        <div className="flex flex-col gap-1">
+                          {user.is_super_admin ? (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800 w-fit">
+                              <Shield className="h-3 w-3" />
+                              Super Admin
+                            </span>
+                          ) : user.can_manage_users ? (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 w-fit">
+                              <Users className="h-3 w-3" />
+                              User Manager
+                            </span>
+                          ) : (
+                            <span className="text-gray-400 text-sm">User</span>
+                          )}
+                        </div>
                       </td>
                       {MODULES.slice(0, 3).map(module => (
                         <td key={module} className="px-4 py-4 whitespace-nowrap">
@@ -795,30 +809,34 @@ export default function AdminUsersPage() {
                       </td>
                       <td className="px-4 py-4 whitespace-nowrap text-right">
                         <div className="flex items-center justify-end gap-2">
-                          <button
-                            onClick={() => startEditUser(user)}
-                            className="text-purple-600 hover:text-purple-800 text-sm font-medium"
-                            title="Edit user"
-                          >
-                            <Edit2 className="h-4 w-4" />
-                          </button>
-                          <button
-                            onClick={() => setDeletingUser(user)}
-                            className="text-red-500 hover:text-red-700 text-sm font-medium"
-                            title="Delete user"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </button>
-                          <button
-                            onClick={() => setExpandedUserId(expandedUserId === user.id ? null : user.id)}
-                            className="text-gray-400 hover:text-gray-600"
-                          >
-                            {expandedUserId === user.id ? (
-                              <ChevronUp className="h-5 w-5" />
-                            ) : (
-                              <ChevronDown className="h-5 w-5" />
-                            )}
-                          </button>
+                          {isSuperAdmin && (
+                            <>
+                              <button
+                                onClick={() => startEditUser(user)}
+                                className="text-purple-600 hover:text-purple-800 text-sm font-medium"
+                                title="Edit user"
+                              >
+                                <Edit2 className="h-4 w-4" />
+                              </button>
+                              <button
+                                onClick={() => setDeletingUser(user)}
+                                className="text-red-500 hover:text-red-700 text-sm font-medium"
+                                title="Delete user"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </button>
+                              <button
+                                onClick={() => setExpandedUserId(expandedUserId === user.id ? null : user.id)}
+                                className="text-gray-400 hover:text-gray-600"
+                              >
+                                {expandedUserId === user.id ? (
+                                  <ChevronUp className="h-5 w-5" />
+                                ) : (
+                                  <ChevronDown className="h-5 w-5" />
+                                )}
+                              </button>
+                            </>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -833,16 +851,28 @@ export default function AdminUsersPage() {
                               <div className="bg-white rounded-lg p-4 border border-gray-200">
                                 <h4 className="font-medium text-gray-900 mb-4">Edit Roles</h4>
 
-                                <label className="flex items-center gap-2 mb-4">
-                                  <input
-                                    type="checkbox"
-                                    checked={editSuperAdmin}
-                                    onChange={(e) => setEditSuperAdmin(e.target.checked)}
-                                    className="rounded border-gray-300 text-purple-600 focus:ring-purple-500"
-                                  />
-                                  <Shield className="h-4 w-4 text-purple-600" />
-                                  <span className="font-medium text-gray-700">Super Admin</span>
-                                </label>
+                                <div className="flex flex-wrap gap-6 mb-4">
+                                  <label className="flex items-center gap-2">
+                                    <input
+                                      type="checkbox"
+                                      checked={editSuperAdmin}
+                                      onChange={(e) => setEditSuperAdmin(e.target.checked)}
+                                      className="rounded border-gray-300 text-purple-600 focus:ring-purple-500"
+                                    />
+                                    <Shield className="h-4 w-4 text-purple-600" />
+                                    <span className="font-medium text-gray-700">Super Admin</span>
+                                  </label>
+                                  <label className="flex items-center gap-2">
+                                    <input
+                                      type="checkbox"
+                                      checked={editCanManageUsers}
+                                      onChange={(e) => setEditCanManageUsers(e.target.checked)}
+                                      className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                                    />
+                                    <Users className="h-4 w-4 text-blue-600" />
+                                    <span className="font-medium text-gray-700">Can Invite Users</span>
+                                  </label>
+                                </div>
 
                                 <div className="grid grid-cols-3 md:grid-cols-6 gap-4 mb-4">
                                   {MODULES.map(module => (

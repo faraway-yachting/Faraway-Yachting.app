@@ -55,10 +55,10 @@ const mockIncomeData = [
 
 export default function IncomePage() {
   const columns = [
-    { key: "id", header: "ID" },
+    { key: "id", header: "ID", primary: true },
     { key: "date", header: "Date" },
-    { key: "category", header: "Category" },
-    { key: "boat", header: "Boat" },
+    { key: "category", header: "Category", hideOnMobile: true },
+    { key: "boat", header: "Boat", hideOnMobile: true },
     { key: "client", header: "Client" },
     { key: "amount", header: "Amount", align: "right" as const },
     {

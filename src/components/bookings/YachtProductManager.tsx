@@ -54,6 +54,8 @@ export function YachtProductManager({
     price: '',
     currency: 'THB' as Currency,
     defaultTime: '',
+    defaultStartDay: '' as string,
+    defaultNights: '' as string,
   });
   const [showCustomDuration, setShowCustomDuration] = useState(false);
   const [showCustomDepartFrom, setShowCustomDepartFrom] = useState(false);
@@ -93,6 +95,8 @@ export function YachtProductManager({
       price: '',
       currency: 'THB',
       defaultTime: '',
+      defaultStartDay: '',
+      defaultNights: '',
     });
     setShowCustomDuration(false);
     setShowCustomDepartFrom(false);
@@ -144,6 +148,8 @@ export function YachtProductManager({
         price: formData.price ? parseFloat(formData.price) : undefined,
         currency: formData.currency,
         defaultTime: formData.defaultTime || undefined,
+        defaultStartDay: formData.defaultStartDay !== '' ? parseInt(formData.defaultStartDay) : undefined,
+        defaultNights: formData.defaultNights !== '' ? parseInt(formData.defaultNights) : undefined,
         displayOrder: products.length,
         isActive: true,
       });
@@ -166,6 +172,8 @@ export function YachtProductManager({
       price: product.price?.toString() || '',
       currency: product.currency,
       defaultTime: product.defaultTime || '',
+      defaultStartDay: product.defaultStartDay !== undefined && product.defaultStartDay !== null ? product.defaultStartDay.toString() : '',
+      defaultNights: product.defaultNights !== undefined && product.defaultNights !== null ? product.defaultNights.toString() : '',
     });
     // Check if duration/departFrom are custom values
     const isCustomDuration = !durationPresets.some(p => p.value === product.duration);
@@ -189,6 +197,8 @@ export function YachtProductManager({
         price: formData.price ? parseFloat(formData.price) : undefined,
         currency: formData.currency,
         defaultTime: formData.defaultTime || undefined,
+        defaultStartDay: formData.defaultStartDay !== '' ? parseInt(formData.defaultStartDay) : undefined,
+        defaultNights: formData.defaultNights !== '' ? parseInt(formData.defaultNights) : undefined,
       });
       setProducts(prev => prev.map(p => (p.id === editingProductId ? updated : p)));
       resetForm();
@@ -522,6 +532,45 @@ export function YachtProductManager({
                       </select>
                     </div>
                   </div>
+
+                  {/* Cabin Charter Schedule Fields */}
+                  {formData.charterType === 'cabin_charter' && (
+                    <div className="grid grid-cols-2 gap-3 mt-3 pt-3 border-t border-blue-200">
+                      <div>
+                        <label className="block text-xs text-gray-500 mb-1">
+                          Default Start Day
+                        </label>
+                        <select
+                          value={formData.defaultStartDay}
+                          onChange={e => handleChange('defaultStartDay', e.target.value)}
+                          className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                        >
+                          <option value="">No default</option>
+                          <option value="0">Sunday</option>
+                          <option value="1">Monday</option>
+                          <option value="2">Tuesday</option>
+                          <option value="3">Wednesday</option>
+                          <option value="4">Thursday</option>
+                          <option value="5">Friday</option>
+                          <option value="6">Saturday</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-xs text-gray-500 mb-1">
+                          Default Nights
+                        </label>
+                        <input
+                          type="number"
+                          value={formData.defaultNights}
+                          onChange={e => handleChange('defaultNights', e.target.value)}
+                          placeholder="e.g., 5"
+                          min="1"
+                          max="30"
+                          className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                        />
+                      </div>
+                    </div>
+                  )}
 
                   {/* Form actions */}
                   <div className="mt-4 flex justify-end gap-2">

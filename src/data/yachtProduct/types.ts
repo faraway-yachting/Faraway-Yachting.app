@@ -85,6 +85,10 @@ export interface YachtProduct {
   // Notes
   notes?: string;
 
+  // Cabin charter schedule defaults
+  defaultStartDay?: number;  // 0=Sunday, 1=Monday, ... 6=Saturday
+  defaultNights?: number;    // Number of nights (e.g., 5 for Sun-Fri)
+
   // Metadata
   createdBy?: string;
   createdAt: string;

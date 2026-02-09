@@ -10,7 +10,7 @@ import { CharterInfoBox } from './CharterInfoBox';
 import type { Quotation, LineItem, PricingType, CharterType } from '@/data/income/types';
 import type { Booking, BookingType, BookingStatus } from '@/data/booking/types';
 import { BookingFormContainer } from '@/components/bookings/form/BookingFormContainer';
-import { bookingsApi } from '@/lib/supabase/api/bookings';
+import { bookingsApi, createBookingWithNumber } from '@/lib/supabase/api/bookings';
 import { charterTypeAccountCodes } from '@/data/income/types';
 import type { Currency, Company } from '@/data/company/types';
 import type { Project } from '@/data/project/types';
@@ -1274,19 +1274,12 @@ Destination: `;
           prefilled={prefilledBooking}
           projects={companyProjects}
           onSave={async (bookingData) => {
-            const now = new Date();
-            const yr = now.getFullYear();
-            const mo = String(now.getMonth() + 1).padStart(2, '0');
-            const seq = String(Math.floor(Math.random() * 1000)).padStart(3, '0');
-            const bookingNumber = `FA-${yr}${mo}${seq}`;
             const supabase = createClient();
             const { data: { user } } = await supabase.auth.getUser();
-            const dataWithDefaults = {
+            await createBookingWithNumber({
               ...bookingData,
-              bookingNumber,
               bookingOwner: bookingData.bookingOwner || user?.id || undefined,
-            };
-            await bookingsApi.create(dataWithDefaults);
+            });
             setShowBookingModal(false);
             setPrefilledBooking(null);
           }}

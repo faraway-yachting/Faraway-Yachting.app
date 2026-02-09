@@ -20,7 +20,7 @@ export default function Home() {
   const router = useRouter();
 
   // Use the centralized AuthProvider instead of a duplicate listener
-  const { user, profile, isSuperAdmin, moduleRoles, isLoading, signOut } = useAuth();
+  const { user, profile, isSuperAdmin, canManageUsers, moduleRoles, isLoading, signOut } = useAuth();
 
   // Derive module access from moduleRoles
   const moduleAccess = useMemo(() =>
@@ -98,7 +98,7 @@ export default function Home() {
                 </div>
                 <span className="text-white text-sm font-medium">{user.email}</span>
               </div>
-              {!isLoading && isSuperAdmin && (
+              {!isLoading && (isSuperAdmin || canManageUsers) && (
                 <Button variant="primary" size="md" href="/admin/users">
                   <Shield className="h-4 w-4 mr-2" />
                   Admin

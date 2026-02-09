@@ -226,6 +226,78 @@ export const paymentStatusLabels: Record<PaymentStatus, string> = {
   paid: 'Paid',
 };
 
+// Project Cabin — configurable cabin inventory per yacht
+export interface ProjectCabin {
+  id: string;
+  projectId: string;
+  cabinName: string;
+  cabinNumber: number;
+  position?: string;
+  maxGuests: number;
+  isEnsuite: boolean;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// Cabin Allocation — per-cabin booking data within a cabin charter
+export type CabinAllocationStatus = 'available' | 'held' | 'booked';
+
+export interface CabinAllocation {
+  id: string;
+  bookingId: string;
+  projectCabinId?: string;
+  cabinLabel: string;
+  cabinNumber: number;
+  status: CabinAllocationStatus;
+  // Guest info
+  guestNames?: string;
+  numberOfGuests: number;
+  nationality?: string;
+  guestNotes?: string;
+  // Agent/source (per cabin)
+  agentName?: string;
+  contactPlatform?: string;
+  contactInfo?: string;
+  // Booking owner (user/employee ID — same as Booking.bookingOwner)
+  bookingOwner?: string;
+  // Extras (same as Booking.extras)
+  extras?: string[];
+  // Charter contract (same as Booking.contractNote/contractAttachments)
+  contractNote?: string;
+  contractAttachments?: BookingAttachment[];
+  // Commission (same as Booking.commissionRate etc.)
+  commissionRate?: number;
+  totalCommission?: number;
+  commissionDeduction?: number;
+  commissionReceived?: number;
+  // Notes (same as Booking.internalNotes/customerNotes)
+  internalNotes?: string;
+  internalNoteAttachments?: BookingAttachment[];
+  customerNotes?: string;
+  // Financial
+  price?: number;
+  currency: string;
+  paymentStatus: PaymentStatus;
+  invoiceId?: string;
+  receiptId?: string;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export const cabinAllocationStatusLabels: Record<CabinAllocationStatus, string> = {
+  available: 'Available',
+  held: 'Held',
+  booked: 'Booked',
+};
+
+export const cabinAllocationStatusColors: Record<CabinAllocationStatus, { bg: string; text: string; border: string }> = {
+  available: { bg: 'bg-gray-50', text: 'text-gray-600', border: 'border-gray-200' },
+  held: { bg: 'bg-orange-50', text: 'text-orange-700', border: 'border-orange-200' },
+  booked: { bg: 'bg-green-50', text: 'text-green-700', border: 'border-green-200' },
+};
+
 // Helper to check if booking spans multiple days
 export function isMultiDayBooking(booking: Booking): boolean {
   return booking.dateFrom !== booking.dateTo;

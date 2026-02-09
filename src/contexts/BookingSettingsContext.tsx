@@ -33,11 +33,13 @@ export const CALENDAR_DISPLAY_FIELD_OPTIONS = [
   { key: 'bookingOwner', label: 'Booking Owner' },
   { key: 'extras', label: 'Extras' },
   { key: 'contractNote', label: 'Charter Contract' },
+  { key: 'meetAndGreeter', label: 'Meet & Greeter' },
+  { key: 'cabinSummary', label: 'Cabin Summary' },
 ] as const;
 
 const DEFAULT_CALENDAR_DISPLAY: CalendarDisplaySettings = {
-  allBookingsFields: ['title', 'customerName'],
-  boatTabFields: ['title', 'customerName', 'bookingType'],
+  allBookingsFields: ['title', 'customerName', 'cabinSummary'],
+  boatTabFields: ['title', 'customerName', 'bookingType', 'cabinSummary'],
 };
 
 interface BookingSettings {

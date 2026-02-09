@@ -22,6 +22,7 @@ interface BookingCalendarProps {
   selectedBoatFilter?: string | null;
   allBookingsDisplayFields?: string[];
   boatTabDisplayFields?: string[];
+  cabinCounts?: Map<string, { total: number; booked: number }>;
 }
 
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -72,6 +73,7 @@ export function BookingCalendar({
   selectedBoatFilter = null,
   allBookingsDisplayFields = ['title'],
   boatTabDisplayFields = ['title'],
+  cabinCounts,
 }: BookingCalendarProps) {
   const [hoveredDate, setHoveredDate] = useState<string | null>(null);
 
@@ -106,6 +108,13 @@ export function BookingCalendar({
       case 'bookingOwner': return booking.bookingOwnerName || '';
       case 'extras': return booking.extras?.length ? booking.extras.join(', ') : '';
       case 'contractNote': return booking.contractNote || '';
+      case 'meetAndGreeter': return booking.meetAndGreeter || '';
+      case 'cabinSummary': {
+        if (booking.type !== 'cabin_charter' || !cabinCounts) return '';
+        const counts = cabinCounts.get(booking.id);
+        if (!counts) return '';
+        return `${counts.booked}/${counts.total} cabins`;
+      }
       default: return '';
     }
   };

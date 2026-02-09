@@ -1,6 +1,7 @@
 'use client';
 
 import { VatTransaction } from '@/data/finances/types';
+import { useIsMobile } from '@/hooks/useIsMobile';
 
 interface VatTransactionTableProps {
   transactions: VatTransaction[];
@@ -36,6 +37,8 @@ export function VatTransactionTable({
   transactions,
   showCompany = false,
 }: VatTransactionTableProps) {
+  const isMobile = useIsMobile();
+
   if (transactions.length === 0) {
     return (
       <div className="bg-white rounded-lg border border-gray-200 p-12 text-center">
@@ -46,6 +49,53 @@ export function VatTransactionTable({
 
   const totalBase = transactions.reduce((sum, t) => sum + t.baseAmount, 0);
   const totalVat = transactions.reduce((sum, t) => sum + t.vatAmount, 0);
+
+  if (isMobile) {
+    return (
+      <div className="space-y-3">
+        {/* Totals summary card */}
+        <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+          <div className="flex justify-between text-sm">
+            <span className="font-medium text-gray-700">Total Base</span>
+            <span className="font-semibold text-gray-900">฿{totalBase.toLocaleString()}</span>
+          </div>
+          <div className="flex justify-between text-sm mt-1">
+            <span className="font-medium text-gray-700">Total VAT</span>
+            <span className="font-bold text-gray-900">฿{totalVat.toLocaleString()}</span>
+          </div>
+        </div>
+        {transactions.map((txn) => {
+          const docBadge = getDocumentTypeBadge(txn.documentType);
+          return (
+            <div key={txn.id} className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+              <div className="mb-2 flex items-center justify-between">
+                <span className="text-sm font-semibold text-[#5A7A8F]">{txn.documentNumber}</span>
+                <span className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${docBadge.bg} ${docBadge.text}`}>{docBadge.label}</span>
+              </div>
+              <dl className="space-y-1">
+                <div className="flex items-start justify-between gap-2">
+                  <dt className="shrink-0 text-xs font-medium text-gray-500">Date</dt>
+                  <dd className="text-right text-sm text-gray-900">{formatDate(txn.date)}</dd>
+                </div>
+                <div className="flex items-start justify-between gap-2">
+                  <dt className="shrink-0 text-xs font-medium text-gray-500">Counterparty</dt>
+                  <dd className="text-right text-sm text-gray-900">{txn.counterpartyName}</dd>
+                </div>
+                <div className="flex items-start justify-between gap-2">
+                  <dt className="shrink-0 text-xs font-medium text-gray-500">Base Amount</dt>
+                  <dd className="text-right text-sm text-gray-900">฿{txn.baseAmount.toLocaleString()}</dd>
+                </div>
+                <div className="flex items-start justify-between gap-2">
+                  <dt className="shrink-0 text-xs font-medium text-gray-500">VAT ({txn.vatRate}%)</dt>
+                  <dd className="text-right text-sm font-semibold text-gray-900">฿{txn.vatAmount.toLocaleString()}</dd>
+                </div>
+              </dl>
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
 
   return (
     <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">

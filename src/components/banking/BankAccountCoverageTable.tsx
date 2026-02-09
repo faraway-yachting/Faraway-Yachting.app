@@ -3,6 +3,7 @@
 import React from 'react';
 import { CheckCircle, AlertCircle, AlertTriangle, Download, ExternalLink, Calendar } from 'lucide-react';
 import { BankAccountCoverage } from '@/data/banking/bankReconciliationTypes';
+import { useIsMobile } from '@/hooks/useIsMobile';
 
 interface BankAccountCoverageTableProps {
   accounts: BankAccountCoverage[];
@@ -81,6 +82,97 @@ export function BankAccountCoverageTable({
     if (percentage >= 80) return 'bg-yellow-600';
     return 'bg-red-600';
   };
+
+  const isMobile = useIsMobile();
+
+  if (isMobile) {
+    return (
+      <div className="space-y-4">
+        {accounts.length === 0 ? (
+          <div className="text-center py-12 rounded-xl border border-gray-200 bg-white">
+            <AlertCircle className="mx-auto h-12 w-12 text-gray-400" />
+            <h3 className="mt-2 text-sm font-medium text-gray-900">No bank accounts</h3>
+            <p className="mt-1 text-sm text-gray-500">No bank accounts match the current filters.</p>
+          </div>
+        ) : (
+          Object.entries(accountsByCompany).map(([companyName, companyAccounts]) => (
+            <div key={`company-group-${companyName}`}>
+              <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider px-1 mb-2">
+                {companyName}
+              </div>
+              <div className="space-y-3">
+                {companyAccounts.map((account) => (
+                  <div
+                    key={account.bankAccountId}
+                    className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm cursor-pointer active:bg-gray-50"
+                    onClick={() => onAccountClick(account.bankAccountId)}
+                  >
+                    <div className="mb-2 flex items-center justify-between">
+                      <span className="text-sm font-semibold text-gray-900">{account.bankAccountName}</span>
+                      {getCurrencyBadge(account.currency)}
+                    </div>
+                    <dl className="space-y-1">
+                      <div className="flex items-start justify-between gap-2">
+                        <dt className="shrink-0 text-xs font-medium text-gray-500">Feed</dt>
+                        <dd className="text-right">{getFeedStatusBadge(account.feedStatus)}</dd>
+                      </div>
+                      <div className="flex items-start justify-between gap-2">
+                        <dt className="shrink-0 text-xs font-medium text-gray-500">Last Import</dt>
+                        <dd className="text-right text-sm text-gray-900">{formatDate(account.lastImportDate)}</dd>
+                      </div>
+                      <div className="flex items-start justify-between gap-2">
+                        <dt className="shrink-0 text-xs font-medium text-gray-500">Lines</dt>
+                        <dd className="text-right text-sm text-gray-900">
+                          {account.totalLinesInRange} total · {account.matchedLines} matched · {account.unmatchedLines} unmatched
+                        </dd>
+                      </div>
+                      <div className="flex items-start justify-between gap-2">
+                        <dt className="shrink-0 text-xs font-medium text-gray-500">Reconciled</dt>
+                        <dd className="flex items-center gap-2">
+                          <div className="flex-1 bg-gray-200 rounded-full h-2 min-w-[60px]">
+                            <div
+                              className={`h-2 rounded-full ${getReconciliationColor(account.reconciledPercentage)}`}
+                              style={{ width: `${account.reconciledPercentage}%` }}
+                            />
+                          </div>
+                          <span className="text-sm font-medium text-gray-900">{account.reconciledPercentage.toFixed(0)}%</span>
+                        </dd>
+                      </div>
+                      <div className="flex items-start justify-between gap-2">
+                        <dt className="shrink-0 text-xs font-medium text-gray-500">Net Diff</dt>
+                        <dd className={`text-right text-sm font-semibold ${
+                          account.netDifference === 0 ? 'text-green-600' :
+                          Math.abs(account.netDifference) < 100 ? 'text-yellow-600' : 'text-red-600'
+                        }`}>
+                          {formatAmount(account.netDifference, account.currency)}
+                        </dd>
+                      </div>
+                    </dl>
+                    <div className="mt-3 flex items-center gap-2 border-t border-gray-100 pt-3" onClick={(e) => e.stopPropagation()}>
+                      <button
+                        onClick={() => onDownloadStatement(account.bankAccountId)}
+                        className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-blue-600 hover:bg-blue-50 rounded transition-colors"
+                      >
+                        <Download className="h-3.5 w-3.5" />
+                        Statement
+                      </button>
+                      <button
+                        onClick={() => onOpenAccountDetails(account.bankAccountId)}
+                        className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-gray-600 hover:bg-gray-100 rounded transition-colors"
+                      >
+                        <ExternalLink className="h-3.5 w-3.5" />
+                        Details
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">

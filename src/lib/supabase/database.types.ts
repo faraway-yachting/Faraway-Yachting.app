@@ -19,6 +19,7 @@ export type Database = {
           role: 'admin' | 'manager' | 'accountant' | 'captain' | 'viewer'
           is_active: boolean
           is_super_admin: boolean
+          can_manage_users: boolean
           last_module: string | null
           created_at: string
           updated_at: string
@@ -32,6 +33,7 @@ export type Database = {
           role?: 'admin' | 'manager' | 'accountant' | 'captain' | 'viewer'
           is_active?: boolean
           is_super_admin?: boolean
+          can_manage_users?: boolean
           last_module?: string | null
           created_at?: string
           updated_at?: string
@@ -45,6 +47,7 @@ export type Database = {
           role?: 'admin' | 'manager' | 'accountant' | 'captain' | 'viewer'
           is_active?: boolean
           is_super_admin?: boolean
+          can_manage_users?: boolean
           last_module?: string | null
           created_at?: string
           updated_at?: string

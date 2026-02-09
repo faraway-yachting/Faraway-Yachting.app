@@ -254,10 +254,10 @@ export default function InvestorDashboard() {
   }));
 
   const boatColumns = [
-    { key: "boat", header: "Boat" },
+    { key: "boat", header: "Boat", primary: true },
     { key: "ownership", header: "Ownership", align: "right" as const },
-    { key: "revenue", header: "Revenue (FY)", align: "right" as const },
-    { key: "expenses", header: "Expenses (FY)", align: "right" as const },
+    { key: "revenue", header: "Revenue (FY)", align: "right" as const, mobileLabel: "Revenue" },
+    { key: "expenses", header: "Expenses (FY)", align: "right" as const, hideOnMobile: true },
     {
       key: "profit",
       header: "Net Profit",
@@ -276,7 +276,7 @@ export default function InvestorDashboard() {
         <span className="font-bold text-[#5A7A8F]">{row.yourShare}</span>
       ),
     },
-    { key: "roi", header: "ROI", align: "right" as const },
+    { key: "roi", header: "ROI", align: "right" as const, hideOnMobile: true },
   ];
 
   // Monthly P&L breakdown (aggregate across all boats)

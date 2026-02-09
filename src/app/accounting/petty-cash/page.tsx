@@ -375,6 +375,7 @@ export default function PettyCashDashboard() {
     {
       key: 'expenseNumber',
       header: 'Number',
+      primary: true,
       render: (row: TransformedExpense) => (
         <button
           onClick={(e) => {
@@ -392,9 +393,9 @@ export default function PettyCashDashboard() {
       header: 'Date',
       render: (row: TransformedExpense) => formatDate(row.expenseDate),
     },
-    { key: 'companyName', header: 'Company' },
-    { key: 'projectName', header: 'Project' },
-    { key: 'description', header: 'Description' },
+    { key: 'companyName', header: 'Company', hideOnMobile: true },
+    { key: 'projectName', header: 'Project', hideOnMobile: true },
+    { key: 'description', header: 'Description', hideOnMobile: true },
     {
       key: 'netAmount',
       header: 'Amount',
@@ -421,9 +422,9 @@ export default function PettyCashDashboard() {
 
   // Table columns for reimbursements
   const reimbursementColumns = [
-    { key: 'reimbursementNumber', header: 'Number' },
+    { key: 'reimbursementNumber', header: 'Number', primary: true },
     { key: 'expenseNumber', header: 'Expense' },
-    { key: 'companyName', header: 'Company' },
+    { key: 'companyName', header: 'Company', hideOnMobile: true },
     {
       key: 'finalAmount',
       header: 'Amount',
@@ -458,8 +459,8 @@ export default function PettyCashDashboard() {
       header: 'Date',
       render: (row: { date: string }) => formatDate(row.date),
     },
-    { key: 'referenceNumber', header: 'Reference' },
-    { key: 'description', header: 'Description' },
+    { key: 'referenceNumber', header: 'Reference', primary: true },
+    { key: 'description', header: 'Description', hideOnMobile: true },
     {
       key: 'type',
       header: 'Type',
