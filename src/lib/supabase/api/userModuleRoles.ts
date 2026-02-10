@@ -3,7 +3,7 @@ import { createClient } from '../client';
 export type ModuleName = 'accounting' | 'bookings' | 'inventory' | 'maintenance' | 'customers' | 'hr';
 
 export type ModuleRole = {
-  accounting: 'admin' | 'manager' | 'accountant' | 'sales' | 'captain' | 'viewer' | 'petty-cash';
+  accounting: 'admin' | 'manager' | 'accountant' | 'sales' | 'captain' | 'viewer' | 'petty-cash' | 'intern';
   bookings: 'admin' | 'manager' | 'agent' | 'crew' | 'investor' | 'viewer';
   inventory: 'admin' | 'manager' | 'warehouse' | 'viewer';
   maintenance: 'admin' | 'manager' | 'technician' | 'viewer';

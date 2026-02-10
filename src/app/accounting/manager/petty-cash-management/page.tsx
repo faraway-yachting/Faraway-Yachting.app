@@ -266,29 +266,28 @@ export default function PettyCashManagementPage() {
     lastFetchTimeRef.current = now;
 
     try {
-      // Phase 1: Load dropdown data (companies, projects) - these are needed by other queries
-      const [companiesData, projectsData] = await Promise.all([
-        companiesApi.getActive(),
-        projectsApi.getActive(),
-      ]);
-      const mappedCompanies = companiesData.map((c: DbCompany) => ({ id: c.id, name: c.name }));
-      const mappedProjects = projectsData.map((p: DbProject) => ({ id: p.id, name: p.name, code: p.code }));
-      setCompanies(mappedCompanies);
-      setProjects(mappedProjects);
-      setIsLoadingData(false);
-
-      // Phase 2: Load all wallets, expenses, and reimbursements in parallel
+      // Load all data in a single parallel batch (companies, projects, wallets, expenses, reimbursements)
       const [
+        companiesData,
+        projectsData,
         walletsData,
         allExpensesData,
         reimbursementsData,
         transferSummaryData,
       ] = await Promise.all([
+        companiesApi.getActive(),
+        projectsApi.getActive(),
         pettyCashApi.getAllWalletsWithCalculatedBalances(),
         pettyCashApi.getAllExpenses(),
         pettyCashApi.getPendingReimbursementsWithDetails(),
         pettyCashApi.getApprovedReimbursementsGroupedForTransfer(),
       ]);
+
+      const mappedCompanies = companiesData.map((c: DbCompany) => ({ id: c.id, name: c.name }));
+      const mappedProjects = projectsData.map((p: DbProject) => ({ id: p.id, name: p.name, code: p.code }));
+      setCompanies(mappedCompanies);
+      setProjects(mappedProjects);
+      setIsLoadingData(false);
 
       setAllWalletsDb(walletsData);
       setAllExpensesDb(allExpensesData);
@@ -327,48 +326,48 @@ export default function PettyCashManagementPage() {
       );
       setApprovedReimbursementCount(approvedCount);
 
-      // Background: Auto-create reimbursements for submitted expenses (non-blocking)
+      // Background: Auto-create reimbursements for submitted expenses (deferred)
       // Only run ONCE per page load to prevent duplicate creation attempts
+      // Deferred by 2s so page renders fully first before doing write operations
       if (!hasAutoCreatedOnceRef.current && !autoCreateInProgressRef.current) {
         hasAutoCreatedOnceRef.current = true; // Mark as attempted - never retry
-        autoCreateInProgressRef.current = true;
         const existingExpenseIds = new Set(reimbursementsData.map(r => r.expense_id));
         const submittedWithoutReimb = allExpensesData.filter(
           e => e.status === 'submitted' && !existingExpenseIds.has(e.id) && e.company_id
         );
 
         if (submittedWithoutReimb.length > 0) {
-          // Single batch insert instead of individual requests per expense
-          (async () => {
-            try {
-              await pettyCashApi.batchCreateReimbursements(
-                submittedWithoutReimb.map(expense => ({
-                  wallet_id: expense.wallet_id,
-                  expense_id: expense.id,
-                  amount: expense.amount || 0,
-                  final_amount: expense.amount || 0,
-                  company_id: expense.company_id!,
-                  status: 'pending' as const,
-                  bank_account_id: null,
-                  payment_date: null,
-                  payment_reference: null,
-                  adjustment_amount: null,
-                  adjustment_reason: null,
-                  approved_by: null,
-                  rejected_by: null,
-                  rejection_reason: null,
-                  bank_feed_line_id: null,
-                  created_by: null,
-                }))
-              );
-              console.log(`Auto-created ${submittedWithoutReimb.length} reimbursements in batch`);
-            } catch (err) {
-              console.log('Batch reimbursement creation error:', err);
-            }
-            autoCreateInProgressRef.current = false;
-          })();
-        } else {
-          autoCreateInProgressRef.current = false;
+          setTimeout(() => {
+            autoCreateInProgressRef.current = true;
+            (async () => {
+              try {
+                await pettyCashApi.batchCreateReimbursements(
+                  submittedWithoutReimb.map(expense => ({
+                    wallet_id: expense.wallet_id,
+                    expense_id: expense.id,
+                    amount: expense.amount || 0,
+                    final_amount: expense.amount || 0,
+                    company_id: expense.company_id!,
+                    status: 'pending' as const,
+                    bank_account_id: null,
+                    payment_date: null,
+                    payment_reference: null,
+                    adjustment_amount: null,
+                    adjustment_reason: null,
+                    approved_by: null,
+                    rejected_by: null,
+                    rejection_reason: null,
+                    bank_feed_line_id: null,
+                    created_by: null,
+                  }))
+                );
+                console.log(`Auto-created ${submittedWithoutReimb.length} reimbursements in batch`);
+              } catch (err) {
+                console.log('Batch reimbursement creation error:', err);
+              }
+              autoCreateInProgressRef.current = false;
+            })();
+          }, 2000);
         }
       }
     } catch (error) {
@@ -1211,13 +1210,13 @@ export default function PettyCashManagementPage() {
 
   // Open reimbursement for review
   const handleViewReimbursement = useCallback(
-    (reimbursement: PettyCashReimbursement) => {
-      // First try to find the expense in Supabase data
-      const dbExpense = allExpensesDb.find((e) => e.id === reimbursement.expenseId);
+    async (reimbursement: PettyCashReimbursement) => {
+      // Fetch full expense data on demand (includes attachments + accounting fields)
+      try {
+        const fullExpense = await pettyCashApi.getExpenseById(reimbursement.expenseId);
 
-      if (dbExpense) {
-        try {
-          // Transform Supabase expense to frontend format
+        if (fullExpense) {
+          const dbExpense = fullExpense as SupabaseExpense;
           const company = companies.find((c) => c.id === dbExpense.company_id);
           const project = projects.find((p) => p.id === dbExpense.project_id);
           const wallet = allWalletsDb.find((w) => w.id === dbExpense.wallet_id);
@@ -1274,10 +1273,10 @@ export default function PettyCashManagementPage() {
           setSelectedReimbursement(reimbursement);
           setSelectedExpense(transformedExpense);
           return;
-        } catch (error) {
-          console.error('Error transforming expense:', error);
-          // Fall through to mock data
         }
+      } catch (error) {
+        console.error('Error fetching expense:', error);
+        // Fall through to mock data
       }
 
       // Fall back to mock data if not found in Supabase
@@ -1319,7 +1318,7 @@ export default function PettyCashManagementPage() {
         setSelectedExpense(minimalExpense);
       }
     },
-    [allExpensesDb, companies, projects, allWalletsDb]
+    [companies, projects, allWalletsDb]
   );
 
   // Status badge helper

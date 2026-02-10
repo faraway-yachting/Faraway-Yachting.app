@@ -164,6 +164,7 @@ const roleDisplayNames: Record<string, string> = {
   sales: 'Sales',
   investor: 'Investor',
   'petty-cash': 'Petty Cash Holder',
+  intern: 'Intern',
 };
 
 function getRoleDisplayName(role: string | null, isSuperAdmin: boolean): string {
@@ -428,7 +429,7 @@ export function AppShell({ children }: AppShellProps) {
               {/* Date range display - optional */}
               <div className="hidden lg:flex items-center gap-2 px-3 py-1.5 bg-gray-50 rounded-lg border border-gray-200">
                 <Calendar className="h-4 w-4 text-gray-500" />
-                <span className="text-sm text-gray-600">
+                <span className="text-sm text-gray-600" suppressHydrationWarning>
                   {new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
                 </span>
               </div>
