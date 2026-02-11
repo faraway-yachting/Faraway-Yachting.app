@@ -25,7 +25,7 @@ interface BookingCalendarProps {
   cabinCounts?: Map<string, { total: number; booked: number }>;
 }
 
-const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const MONTH_NAMES = [
   'January', 'February', 'March', 'April', 'May', 'June',
   'July', 'August', 'September', 'October', 'November', 'December'
@@ -37,10 +37,9 @@ function parseLocalDate(dateStr: string): Date {
   return new Date(y, m - 1, d);
 }
 
-// Helper to convert date to day index within a week (Mon = 0, Sun = 6)
+// Helper to convert date to day index within a week (Sun = 0, Sat = 6)
 function getDayOfWeekIndex(date: Date): number {
-  const day = date.getDay();
-  return day === 0 ? 6 : day - 1;
+  return date.getDay();
 }
 
 interface BookingSegment {
@@ -124,9 +123,8 @@ export function BookingCalendar({
     const firstDay = new Date(year, month - 1, 1);
     const lastDay = new Date(year, month, 0);
 
-    // Find the Monday of the first week
-    let startDayOfWeek = firstDay.getDay() - 1;
-    if (startDayOfWeek < 0) startDayOfWeek = 6;
+    // Find the Sunday of the first week
+    const startDayOfWeek = firstDay.getDay();
     const firstWeekStart = new Date(firstDay);
     firstWeekStart.setDate(firstWeekStart.getDate() - startDayOfWeek);
 

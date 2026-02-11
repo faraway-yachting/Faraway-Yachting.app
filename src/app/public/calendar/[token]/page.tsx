@@ -28,7 +28,7 @@ interface CalendarData {
   error?: string;
 }
 
-const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const MONTH_NAMES = [
   'January', 'February', 'March', 'April', 'May', 'June',
   'July', 'August', 'September', 'October', 'November', 'December',
@@ -41,8 +41,7 @@ const PUBLIC_BOAT_COLORS = [
 ];
 
 function getDayOfWeekIndex(date: Date): number {
-  const day = date.getDay();
-  return day === 0 ? 6 : day - 1;
+  return date.getDay();
 }
 
 interface BookingSegment {
@@ -130,8 +129,7 @@ export default function PublicCalendarPage() {
     const firstDay = new Date(currentYear, currentMonth - 1, 1);
     const lastDay = new Date(currentYear, currentMonth, 0);
 
-    let startDayOfWeek = firstDay.getDay() - 1;
-    if (startDayOfWeek < 0) startDayOfWeek = 6;
+    const startDayOfWeek = firstDay.getDay();
     const firstWeekStart = new Date(firstDay);
     firstWeekStart.setDate(firstWeekStart.getDate() - startDayOfWeek);
 
