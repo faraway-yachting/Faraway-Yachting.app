@@ -13,6 +13,7 @@ interface CabinAllocationRow {
   number_of_guests: number;
   nationality: string | null;
   guest_notes: string | null;
+  booking_source_type: string | null;
   agent_name: string | null;
   contact_platform: string | null;
   contact_info: string | null;
@@ -58,6 +59,7 @@ function rowToAllocation(row: CabinAllocationRow): CabinAllocation {
     numberOfGuests: row.number_of_guests ?? 0,
     nationality: row.nationality ?? undefined,
     guestNotes: row.guest_notes ?? undefined,
+    bookingSourceType: (row.booking_source_type as CabinAllocation['bookingSourceType']) ?? 'direct',
     agentName: row.agent_name ?? undefined,
     contactPlatform: row.contact_platform ?? undefined,
     contactInfo: row.contact_info ?? undefined,
@@ -93,6 +95,7 @@ function allocationToRow(a: Partial<CabinAllocation> & { bookingId: string }): R
   if (a.numberOfGuests !== undefined) row.number_of_guests = a.numberOfGuests;
   if (a.nationality !== undefined) row.nationality = a.nationality || null;
   if (a.guestNotes !== undefined) row.guest_notes = a.guestNotes || null;
+  if (a.bookingSourceType !== undefined) row.booking_source_type = a.bookingSourceType || 'direct';
   if (a.agentName !== undefined) row.agent_name = a.agentName || null;
   if (a.contactPlatform !== undefined) row.contact_platform = a.contactPlatform || null;
   if (a.contactInfo !== undefined) row.contact_info = a.contactInfo || null;
@@ -150,6 +153,7 @@ export const cabinAllocationsApi = {
     if (updates.numberOfGuests !== undefined) dbUpdates.number_of_guests = updates.numberOfGuests;
     if (updates.nationality !== undefined) dbUpdates.nationality = updates.nationality || null;
     if (updates.guestNotes !== undefined) dbUpdates.guest_notes = updates.guestNotes || null;
+    if (updates.bookingSourceType !== undefined) dbUpdates.booking_source_type = updates.bookingSourceType || 'direct';
     if (updates.agentName !== undefined) dbUpdates.agent_name = updates.agentName || null;
     if (updates.contactPlatform !== undefined) dbUpdates.contact_platform = updates.contactPlatform || null;
     if (updates.contactInfo !== undefined) dbUpdates.contact_info = updates.contactInfo || null;

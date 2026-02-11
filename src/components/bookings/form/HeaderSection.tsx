@@ -267,26 +267,28 @@ export function HeaderSection({
         </div>
 
         {/* Booking Owner + Meet & Greeter */}
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label className="block text-xs text-gray-500 mb-1 flex items-center gap-1">
-              <User className="h-3.5 w-3.5" />
-              Booking Owner
-            </label>
-            <select
-              value={formData.bookingOwner || ''}
-              onChange={(e) => onChange('bookingOwner', e.target.value)}
-              disabled={!canEdit}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100"
-            >
-              <option value="">Select owner...</option>
-              {users.map((user) => (
-                <option key={user.id} value={user.id}>
-                  {user.full_name}
-                </option>
-              ))}
-            </select>
-          </div>
+        <div className={`grid ${formData.type === 'cabin_charter' ? 'grid-cols-1' : 'grid-cols-2'} gap-4`}>
+          {formData.type !== 'cabin_charter' && (
+            <div>
+              <label className="block text-xs text-gray-500 mb-1 flex items-center gap-1">
+                <User className="h-3.5 w-3.5" />
+                Booking Owner
+              </label>
+              <select
+                value={formData.bookingOwner || ''}
+                onChange={(e) => onChange('bookingOwner', e.target.value)}
+                disabled={!canEdit}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100"
+              >
+                <option value="">Select owner...</option>
+                {users.map((user) => (
+                  <option key={user.id} value={user.id}>
+                    {user.full_name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
           <div>
             <label className="block text-xs text-gray-500 mb-1 flex items-center gap-1">
               <UserCheck className="h-3.5 w-3.5" />

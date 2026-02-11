@@ -539,7 +539,7 @@ export function BookingFormContainer({
     }
     if (!useExternalBoat && !formData.projectId) newErrors.projectId = 'Please select a boat';
     if (useExternalBoat && !formData.externalBoatName?.trim()) newErrors.externalBoatName = 'External boat name is required';
-    if (!formData.customerName?.trim()) newErrors.customerName = 'Customer name is required';
+    if (formData.type !== 'cabin_charter' && !formData.customerName?.trim()) newErrors.customerName = 'Customer name is required';
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };

@@ -255,6 +255,8 @@ export interface CabinAllocation {
   numberOfGuests: number;
   nationality?: string;
   guestNotes?: string;
+  // Booking source (per cabin — direct or agency)
+  bookingSourceType?: 'direct' | 'agency';
   // Agent/source (per cabin)
   agentName?: string;
   contactPlatform?: string;

@@ -22,6 +22,7 @@ import {
   Eye,
   X,
   Download,
+  Search,
 } from 'lucide-react';
 import {
   CabinAllocation,
@@ -34,10 +35,18 @@ import {
 } from '@/data/booking/types';
 import { bookingPaymentsApi, BookingPaymentExtended } from '@/lib/supabase/api/bookingPayments';
 import { cashCollectionsApi, CashCollection } from '@/lib/supabase/api/cashCollections';
+import { contactsApi } from '@/lib/supabase/api/contacts';
 import { createClient } from '@/lib/supabase/client';
 import { DynamicMultiSelect } from './DynamicMultiSelect';
 import { DynamicSelect } from './DynamicSelect';
 import type { PaymentRecord, BankAccountOption, CompanyOption } from './FinanceSection';
+
+interface AgencyContact {
+  id: string;
+  name: string;
+  email?: string;
+  phone?: string;
+}
 
 interface CabinSectionProps {
   bookingId?: string;
@@ -80,6 +89,8 @@ export default function CabinSection({
   // Per-cabin cash collections: Map<allocationId, CashCollection[]>
   const [cabinCash, setCabinCash] = useState<Map<string, CashCollection[]>>(new Map());
   const [loadingPayments, setLoadingPayments] = useState(false);
+  // Agencies for Direct/Agency dropdown
+  const [agencies, setAgencies] = useState<AgencyContact[]>([]);
 
   // Load payments and cash for all cabin allocations
   useEffect(() => {
@@ -121,6 +132,20 @@ export default function CabinSection({
       setCabinCash(cMap);
     }).catch(console.error).finally(() => setLoadingPayments(false));
   }, [bookingId, cabinAllocations.length]);
+
+  // Customers for Direct guest name search
+  const [customers, setCustomers] = useState<AgencyContact[]>([]);
+
+  // Load agencies and customers on mount
+  useEffect(() => {
+    Promise.all([
+      contactsApi.getAgencies(),
+      contactsApi.getCustomers(),
+    ]).then(([agenciesData, customersData]) => {
+      setAgencies(agenciesData as AgencyContact[]);
+      setCustomers(customersData as AgencyContact[]);
+    }).catch(err => console.error('Error loading contacts:', err));
+  }, []);
 
   // Update a single allocation field
   const updateAllocation = (id: string, field: keyof CabinAllocation, value: any) => {
@@ -390,6 +415,8 @@ export default function CabinSection({
             currency={currency}
             bankAccounts={bankAccounts}
             users={users}
+            agencies={agencies}
+            customers={customers}
             bookingId={bookingId}
             updateAllocation={updateAllocation}
             addCabinPayment={addCabinPayment}
@@ -434,6 +461,8 @@ interface CabinAllocationCardProps {
   currency: string;
   bankAccounts: BankAccountOption[];
   users: { id: string; full_name: string }[];
+  agencies: AgencyContact[];
+  customers: AgencyContact[];
   bookingId?: string;
   updateAllocation: (id: string, field: keyof CabinAllocation, value: any) => void;
   addCabinPayment: (allocationId: string, paymentType: 'deposit' | 'balance') => void;
@@ -460,6 +489,8 @@ function CabinAllocationCard({
   currency,
   bankAccounts,
   users,
+  agencies,
+  customers,
   bookingId,
   updateAllocation,
   addCabinPayment,
@@ -477,6 +508,38 @@ function CabinAllocationCard({
 }: CabinAllocationCardProps) {
   const contractFileRef = useRef<HTMLInputElement>(null);
   const internalFileRef = useRef<HTMLInputElement>(null);
+  const guestSearchRef = useRef<HTMLDivElement>(null);
+
+  // Guest contact search state (Direct mode) — stored in agentName field
+  const [guestSearch, setGuestSearch] = useState(
+    (allocation.bookingSourceType || 'direct') === 'direct' ? (allocation.agentName || '') : ''
+  );
+  const [showGuestDropdown, setShowGuestDropdown] = useState(false);
+
+  // Sync guestSearch when allocation.agentName changes externally
+  useEffect(() => {
+    if ((allocation.bookingSourceType || 'direct') === 'direct' && allocation.agentName !== undefined && allocation.agentName !== guestSearch) {
+      setGuestSearch(allocation.agentName || '');
+    }
+  }, [allocation.agentName, allocation.bookingSourceType]);
+
+  // Close guest dropdown on outside click
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (guestSearchRef.current && !guestSearchRef.current.contains(event.target as Node)) {
+        setShowGuestDropdown(false);
+      }
+    };
+    if (showGuestDropdown) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [showGuestDropdown]);
+
+  const filteredCustomers = customers.filter(c =>
+    c.name.toLowerCase().includes((guestSearch || '').toLowerCase()) ||
+    (c.email?.toLowerCase().includes((guestSearch || '').toLowerCase()))
+  );
 
   const statusColor = cabinAllocationStatusColors[allocation.status];
   const paidTotal = payments.filter(p => p.paidDate && p.amount > 0).reduce((s, p) => s + p.amount, 0);
@@ -649,18 +712,109 @@ function CabinAllocationCard({
                 />
               </div>
 
-              {/* Agent Name */}
-              <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Agent Name</label>
-                <input
-                  type="text"
-                  value={allocation.agentName || ''}
-                  onChange={e => updateAllocation(allocation.id, 'agentName', e.target.value)}
-                  disabled={!canEdit}
-                  placeholder="Agent or agency name"
-                  className="w-full px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 disabled:bg-gray-100"
-                />
+              {/* Direct / Agency Toggle */}
+              <div className="col-span-2 pt-2 border-t border-gray-100">
+                <label className="block text-xs font-medium text-gray-600 mb-2">Booking Type</label>
+                <div className="flex items-center gap-4">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      checked={(allocation.bookingSourceType || 'direct') === 'direct'}
+                      onChange={() => {
+                        onAllocationsChange(
+                          allAllocations.map(a => a.id === allocation.id
+                            ? { ...a, bookingSourceType: 'direct' as const, agentName: '' }
+                            : a)
+                        );
+                      }}
+                      disabled={!canEdit}
+                      className="text-indigo-600 focus:ring-indigo-500"
+                    />
+                    <span className="text-sm text-gray-700">Direct Booking</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      checked={allocation.bookingSourceType === 'agency'}
+                      onChange={() => updateAllocation(allocation.id, 'bookingSourceType', 'agency')}
+                      disabled={!canEdit}
+                      className="text-indigo-600 focus:ring-indigo-500"
+                    />
+                    <span className="text-sm text-gray-700">Agency</span>
+                  </label>
+                </div>
               </div>
+
+              {/* Agency dropdown - only when Agency is selected */}
+              {allocation.bookingSourceType === 'agency' && (
+                <div className="col-span-2">
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Agency</label>
+                  <select
+                    value={allocation.agentName || ''}
+                    onChange={e => updateAllocation(allocation.id, 'agentName', e.target.value)}
+                    disabled={!canEdit}
+                    className="w-full px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 disabled:bg-gray-100"
+                  >
+                    <option value="">Select agency...</option>
+                    {agencies.map(a => (
+                      <option key={a.id} value={a.name}>{a.name}</option>
+                    ))}
+                  </select>
+                  {agencies.length === 0 && (
+                    <p className="text-xs text-gray-400 mt-1">No agencies found. Add agencies in Contacts.</p>
+                  )}
+                </div>
+              )}
+
+              {/* Guest Name with contact search - only when Direct */}
+              {(allocation.bookingSourceType || 'direct') === 'direct' && (
+                <div className="col-span-2" ref={guestSearchRef}>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Guest Name</label>
+                  <div className="relative">
+                    <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400" />
+                    <input
+                      type="text"
+                      value={guestSearch}
+                      onChange={e => {
+                        setGuestSearch(e.target.value);
+                        updateAllocation(allocation.id, 'agentName', e.target.value);
+                        setShowGuestDropdown(true);
+                      }}
+                      onFocus={() => { if (guestSearch) setShowGuestDropdown(true); }}
+                      disabled={!canEdit}
+                      placeholder="Search contact or type guest name..."
+                      className="w-full pl-8 pr-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 disabled:bg-gray-100"
+                    />
+                  </div>
+                  {showGuestDropdown && guestSearch && filteredCustomers.length > 0 && (
+                    <div className="absolute z-10 w-[calc(100%-2rem)] mt-1 bg-white border border-gray-300 rounded-lg shadow-lg overflow-hidden max-h-40 overflow-y-auto">
+                      {filteredCustomers.slice(0, 8).map(contact => (
+                        <button
+                          key={contact.id}
+                          type="button"
+                          onClick={() => {
+                            onAllocationsChange(
+                              allAllocations.map(a => a.id === allocation.id
+                                ? {
+                                    ...a,
+                                    agentName: contact.name,
+                                    contactInfo: contact.email || contact.phone || a.contactInfo || '',
+                                  }
+                                : a)
+                            );
+                            setGuestSearch(contact.name);
+                            setShowGuestDropdown(false);
+                          }}
+                          className="w-full px-3 py-1.5 text-left hover:bg-indigo-50 transition-colors"
+                        >
+                          <p className="text-sm font-medium text-gray-900">{contact.name}</p>
+                          {contact.email && <p className="text-xs text-gray-500">{contact.email}</p>}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Contact Platform */}
               <div>
