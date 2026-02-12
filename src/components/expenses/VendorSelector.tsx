@@ -51,6 +51,7 @@ export function VendorSelector({
   const filteredVendors = useMemo(() => {
     return vendors.filter((vendor) =>
       vendor.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      vendor.alternativeName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       vendor.email?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       vendor.contactPerson?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       vendor.taxId?.toLowerCase().includes(searchQuery.toLowerCase())

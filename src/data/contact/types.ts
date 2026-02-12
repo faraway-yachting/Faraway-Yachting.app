@@ -20,6 +20,7 @@ export interface ContactAddress {
 export interface Contact {
   id: string;
   name: string; // Company or individual name
+  alternativeName?: string; // Alternative name for multi-language search
   type: ContactType[]; // array of types: customer, vendor, agency, boat_operator
   contactPerson?: string; // Primary contact person name
   email?: string;

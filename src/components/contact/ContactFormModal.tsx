@@ -36,6 +36,7 @@ export function ContactFormModal({
 
   // Form state
   const [name, setName] = useState('');
+  const [alternativeName, setAlternativeName] = useState('');
   const [types, setTypes] = useState<ContactType[]>(['customer']);
   const [contactPerson, setContactPerson] = useState('');
   const [email, setEmail] = useState('');
@@ -58,6 +59,7 @@ export function ContactFormModal({
     if (isOpen) {
       if (editingContact) {
         setName(editingContact.name);
+        setAlternativeName(editingContact.alternativeName || '');
         setTypes(editingContact.type);
         setContactPerson(editingContact.contactPerson || '');
         setEmail(editingContact.email || '');
@@ -72,6 +74,7 @@ export function ContactFormModal({
       } else {
         // Reset for new contact
         setName('');
+        setAlternativeName('');
         setTypes(['customer']);
         setContactPerson('');
         setEmail('');
@@ -130,6 +133,7 @@ export function ContactFormModal({
 
     const contactData: Partial<Contact> = {
       name: name.trim(),
+      alternativeName: alternativeName.trim() || undefined,
       type: types,
       contactPerson: contactPerson.trim() || undefined,
       email: email.trim() || undefined,
@@ -202,6 +206,20 @@ export function ContactFormModal({
                     }`}
                   />
                   {errors.name && <p className="mt-1 text-xs text-red-600">{errors.name}</p>}
+                </div>
+
+                <div>
+                  <label htmlFor="contact-alternative-name" className="block text-sm font-medium text-gray-700 mb-1">
+                    Alternative Name
+                  </label>
+                  <input
+                    type="text"
+                    id="contact-alternative-name"
+                    value={alternativeName}
+                    onChange={(e) => setAlternativeName(e.target.value)}
+                    placeholder="Alternative name or translation"
+                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#5A7A8F]/20 focus:border-[#5A7A8F]"
+                  />
                 </div>
 
                 <div>

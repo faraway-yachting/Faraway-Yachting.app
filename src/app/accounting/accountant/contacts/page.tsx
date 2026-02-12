@@ -94,9 +94,10 @@ export default function ContactsPage() {
       if (searchQuery) {
         const query = searchQuery.toLowerCase();
         const matchesName = contact.name.toLowerCase().includes(query);
+        const matchesAltName = contact.alternativeName?.toLowerCase().includes(query);
         const matchesEmail = contact.email?.toLowerCase().includes(query);
         const matchesPerson = contact.contactPerson?.toLowerCase().includes(query);
-        if (!matchesName && !matchesEmail && !matchesPerson) return false;
+        if (!matchesName && !matchesAltName && !matchesEmail && !matchesPerson) return false;
       }
 
       return true;
@@ -265,6 +266,9 @@ export default function ContactsPage() {
                       Name
                     </th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                      Alternative Name
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
                       Type
                     </th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
@@ -299,6 +303,9 @@ export default function ContactsPage() {
                             Tax ID: {contact.taxId}
                           </div>
                         )}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-600">
+                        {contact.alternativeName || '-'}
                       </td>
                       <td className="px-4 py-3">
                         <TypeBadges types={contact.type} />

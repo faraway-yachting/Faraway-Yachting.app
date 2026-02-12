@@ -139,6 +139,7 @@ export type Database = {
         Row: {
           id: string
           name: string
+          alternative_name: string | null
           type: string[]
           contact_person: string | null
           email: string | null
@@ -155,6 +156,7 @@ export type Database = {
         Insert: {
           id?: string
           name: string
+          alternative_name?: string | null
           type: string[]
           contact_person?: string | null
           email?: string | null
@@ -171,6 +173,7 @@ export type Database = {
         Update: {
           id?: string
           name?: string
+          alternative_name?: string | null
           type?: string[]
           contact_person?: string | null
           email?: string | null

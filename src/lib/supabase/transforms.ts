@@ -126,6 +126,7 @@ export function dbContactToFrontend(db: DbContact): Contact {
   return {
     id: db.id,
     name: db.name,
+    alternativeName: db.alternative_name ?? undefined,
     type: db.type as ContactType[],
     contactPerson: db.contact_person ?? undefined,
     email: db.email ?? undefined,
@@ -144,6 +145,7 @@ export function dbContactToFrontend(db: DbContact): Contact {
 export function frontendContactToDb(contact: Partial<Contact>): DbContactInsert {
   return {
     name: contact.name!,
+    alternative_name: contact.alternativeName ?? null,
     type: contact.type!,
     contact_person: contact.contactPerson ?? null,
     email: contact.email ?? null,

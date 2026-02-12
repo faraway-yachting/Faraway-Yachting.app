@@ -51,6 +51,7 @@ export default function ClientSelector({
   const filteredClients = useMemo(() => {
     return customers.filter((client) =>
       client.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      client.alternativeName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       client.email?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       client.contactPerson?.toLowerCase().includes(searchQuery.toLowerCase())
     );

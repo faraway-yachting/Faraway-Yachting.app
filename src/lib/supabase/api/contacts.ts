@@ -40,7 +40,7 @@ export const contactsApi = {
 
     // Add search filter if provided
     if (search && search.trim()) {
-      query = query.or(`name.ilike.%${search}%,email.ilike.%${search}%,contact_person.ilike.%${search}%`);
+      query = query.or(`name.ilike.%${search}%,email.ilike.%${search}%,contact_person.ilike.%${search}%,alternative_name.ilike.%${search}%`);
     }
 
     const { data, error, count } = await query
