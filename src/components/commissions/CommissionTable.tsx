@@ -139,14 +139,10 @@ export default function CommissionTable() {
       setUsers(allUsers as UserProfile[]);
       setSalesEmployees(allSalesEmployees);
 
-      // Sync from bookings first
+      // Sync from bookings (single RPC call — all logic runs server-side)
       setSyncing(true);
       try {
-        const projectsForSync = allProjects.map(p => ({
-          id: p.id,
-          management_fee_percentage: p.management_fee_percentage,
-        }));
-        await commissionRecordsApi.syncFromBookings(projectsForSync);
+        await commissionRecordsApi.syncFromBookings();
       } catch (syncErr) {
         console.error('Failed to sync from bookings:', syncErr);
       } finally {
