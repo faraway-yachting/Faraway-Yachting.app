@@ -181,6 +181,15 @@ export default function CommissionTable() {
   const userMap = useMemo(() => new Map(users.map((u) => [u.id, u])), [users]);
   const employeeMap = useMemo(() => new Map(salesEmployees.map((e) => [e.id, e.full_name_en])), [salesEmployees]);
 
+  const getUserName = useCallback((id: string | null) => {
+    if (!id) return '-';
+    // Check employees first (sales_owner_id), then auth profiles (legacy booking_owner)
+    const empName = employeeMap.get(id);
+    if (empName) return empName;
+    const u = userMap.get(id);
+    return u?.full_name || u?.email || 'Unknown';
+  }, [employeeMap, userMap]);
+
   // Filtered records
   const filteredRecords = useMemo(() => {
     return records.filter((r) => {
@@ -226,7 +235,7 @@ export default function CommissionTable() {
     }
 
     return { totalNetIncome, totalCommission, earnedCommission, paidCommission, byOwner: Array.from(byOwner.values()) };
-  }, [filteredRecords, userMap, employeeMap, isEarned]);
+  }, [filteredRecords, getUserName, isEarned]);
 
   // Unique boat options from records
   const boatOptions = useMemo(() => {
@@ -249,7 +258,7 @@ export default function CommissionTable() {
       }
     }
     return Array.from(seen.entries()).sort((a, b) => a[1].localeCompare(b[1]));
-  }, [records, userMap, employeeMap]);
+  }, [records, getUserName]);
 
   // Unique booking types from records
   const bookingTypeOptions = useMemo(() => {
@@ -482,15 +491,6 @@ export default function CommissionTable() {
   const formatCharterType = (type: string | null) => {
     if (!type) return '-';
     return type.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
-  };
-
-  const getUserName = (id: string | null) => {
-    if (!id) return '-';
-    // Check employees first (sales_owner_id), then auth profiles (legacy booking_owner)
-    const empName = employeeMap.get(id);
-    if (empName) return empName;
-    const u = userMap.get(id);
-    return u?.full_name || u?.email || 'Unknown';
   };
 
   if (loading) {
