@@ -44,6 +44,10 @@ export const ACCOUNTING_PERMISSIONS = {
   CATEGORIZATION_EDIT: 'accounting.categorization.edit',
   FINANCES_VIEW: 'accounting.finances.view',
   FINANCES_MANAGE: 'accounting.finances.manage',
+  COMMISSIONS_VIEW: 'accounting.commissions.view',
+  COMMISSIONS_CREATE: 'accounting.commissions.create',
+  COMMISSIONS_EDIT: 'accounting.commissions.edit',
+  COMMISSIONS_DELETE: 'accounting.commissions.delete',
   SETTINGS_VIEW: 'accounting.settings.view',
   SETTINGS_MANAGE: 'accounting.settings.manage',
 } as const;
@@ -232,6 +236,12 @@ export function usePermissions() {
     // Accounting - Finances
     viewFinances: () => hasPermission(ACCOUNTING_PERMISSIONS.FINANCES_VIEW),
     manageFinances: () => hasPermission(ACCOUNTING_PERMISSIONS.FINANCES_MANAGE),
+
+    // Accounting - Commissions
+    viewCommissions: () => hasPermission(ACCOUNTING_PERMISSIONS.COMMISSIONS_VIEW),
+    createCommissions: () => hasPermission(ACCOUNTING_PERMISSIONS.COMMISSIONS_CREATE),
+    editCommissions: () => hasPermission(ACCOUNTING_PERMISSIONS.COMMISSIONS_EDIT),
+    deleteCommissions: () => hasPermission(ACCOUNTING_PERMISSIONS.COMMISSIONS_DELETE),
 
     // Accounting - Settings
     viewSettings: () => hasPermission(ACCOUNTING_PERMISSIONS.SETTINGS_VIEW),

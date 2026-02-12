@@ -138,7 +138,7 @@ const menuItems = [
     name: "Commissions",
     href: "/accounting/manager/commissions",
     icon: Percent,
-    permission: ACCOUNTING_PERMISSIONS.SETTINGS_VIEW,
+    permission: ACCOUNTING_PERMISSIONS.COMMISSIONS_VIEW,
     menuKey: "commissions",
   },
   {
