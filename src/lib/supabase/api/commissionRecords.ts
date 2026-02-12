@@ -82,30 +82,19 @@ export const commissionRecordsApi = {
       return { created: 0, updated: 0 };
     }
 
-    // 2. Fetch existing booking-sourced commission records
-    // Note: source column may not exist if migration hasn't been applied yet
+    // 2. Fetch existing commission records that have a booking_id
     let existingRecords: CommissionRecord[] | null = null;
     try {
       const { data, error: recordsError } = await supabase
         .from('commission_records')
         .select('*')
-        .eq('source', 'booking');
+        .not('booking_id', 'is', null);
       if (recordsError) throw recordsError;
       existingRecords = data;
     } catch {
-      // source column doesn't exist yet — try fetching by booking_id instead
-      try {
-        const { data, error: fallbackError } = await supabase
-          .from('commission_records')
-          .select('*')
-          .not('booking_id', 'is', null);
-        if (fallbackError) throw fallbackError;
-        existingRecords = data;
-      } catch {
-        // booking_id column also doesn't exist — migration not applied, skip sync
-        console.warn('[commissionRecords.syncFromBookings] Migration not applied yet, skipping sync');
-        return { created: 0, updated: 0 };
-      }
+      // booking_id column doesn't exist — migration not applied, skip sync
+      console.warn('[commissionRecords.syncFromBookings] Migration not applied yet, skipping sync');
+      return { created: 0, updated: 0 };
     }
 
     const existingByBookingId = new Map<string, CommissionRecord>();
@@ -160,7 +149,7 @@ export const commissionRecordsApi = {
 
         const { error: insertError } = await supabase
           .from('commission_records')
-          .insert([newRecord]);
+          .upsert([newRecord], { onConflict: 'booking_id' });
         if (!insertError) created++;
       } else {
         // Update existing record
