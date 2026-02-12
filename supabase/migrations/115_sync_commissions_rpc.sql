@@ -4,6 +4,10 @@
 -- a single RPC call that uses set-based SQL.
 -- ============================================================================
 
+-- Fix: booking_owner_id stores employee IDs (from bookings.sales_owner_id)
+-- but had a FK to auth.users(id). Drop the incorrect constraint.
+ALTER TABLE commission_records DROP CONSTRAINT IF EXISTS commission_records_booking_owner_id_fkey;
+
 CREATE OR REPLACE FUNCTION sync_commissions_from_bookings()
 RETURNS JSON
 LANGUAGE plpgsql
