@@ -97,6 +97,7 @@ export function BookingCalendar({
   const getFieldValue = (booking: Booking, field: string, pMap: Map<string, Project>): string => {
     switch (field) {
       case 'title': return booking.title || '';
+      case 'boatName': return getBoatName(booking);
       case 'customerName': return booking.customerName || '';
       case 'bookingType': return bookingTypeLabels[booking.type] || booking.type || '';
       case 'time': return booking.time || '';
@@ -372,8 +373,8 @@ export function BookingCalendar({
                 const extraFields = isBoatTab ? boatTabDisplayFields : allBookingsDisplayFields;
                 const statusLabel = bookingStatusLabels[segment.booking.status] || segment.booking.status;
 
-                // Row height: base 20px for status + 16px per extra field + 4px padding
-                const rowHeight = 24 + (extraFields.length * 16);
+                // Row height: base 24px for status + 20px per extra field + 4px padding
+                const rowHeight = 28 + (extraFields.length * 20);
 
                 // Calculate position
                 const colWidth = 100 / 7;
@@ -397,25 +398,21 @@ export function BookingCalendar({
                       onClick={() => onBookingClick?.(segment.booking)}
                       onKeyDown={(e) => { if (e.key === 'Enter') onBookingClick?.(segment.booking); }}
                       className={`
-                        w-full text-left px-2 py-0.5 text-xs transition-all cursor-pointer
+                        w-full text-left px-2 py-0.5 text-sm transition-all cursor-pointer
                         hover:shadow-sm hover:brightness-95
                         ${segment.isStart ? 'rounded-l-md' : 'rounded-l-none'}
                         ${segment.isEnd ? 'rounded-r-md' : 'rounded-r-none'}
                       `}
                       style={{
                         backgroundColor: boatColor + '20',
-                        borderColor: boatColor,
-                        borderWidth: '1px',
-                        borderStyle: 'solid',
-                        borderLeftWidth: segment.isStart ? '1px' : '0',
-                        borderRightWidth: segment.isEnd ? '1px' : '0',
+                        borderLeft: segment.isStart ? `4px solid ${boatColor}` : 'none',
                         height: `${rowHeight - 2}px`,
                         overflow: 'hidden',
                       }}
                     >
                       {/* Line 1: Status (always) */}
-                      <div className="flex items-center gap-1" style={{ height: '18px' }}>
-                        {segment.isStart && !isBoatTab && (
+                      <div className="flex items-center gap-1" style={{ height: '22px' }}>
+                        {!isBoatTab && (
                           <div
                             className="w-2 h-2 rounded-full flex-shrink-0"
                             style={{ backgroundColor: boatColor }}
@@ -423,7 +420,7 @@ export function BookingCalendar({
                         )}
                         <span
                           className="truncate font-semibold"
-                          style={{ color: boatColor }}
+                          style={{ color: '#111827' }}
                         >
                           {statusLabel}
                         </span>
@@ -435,8 +432,8 @@ export function BookingCalendar({
                         return (
                           <div
                             key={field}
-                            className="truncate opacity-70"
-                            style={{ color: boatColor, height: '16px', lineHeight: '16px' }}
+                            className="truncate"
+                            style={{ color: '#4B5563', height: '20px', lineHeight: '20px' }}
                           >
                             {value}
                           </div>
@@ -449,7 +446,7 @@ export function BookingCalendar({
             </div>
 
             {/* Spacer for booking rows */}
-            <div style={{ height: `${Math.max(maxRows, week.segments.length > 0 ? Math.max(...week.segments.map(s => s.row + 1)) : 0) * (24 + ((selectedBoatFilter !== null && selectedBoatFilter !== 'external' ? boatTabDisplayFields : allBookingsDisplayFields).length * 16)) + 8}px` }} />
+            <div style={{ height: `${Math.max(maxRows, week.segments.length > 0 ? Math.max(...week.segments.map(s => s.row + 1)) : 0) * (28 + ((selectedBoatFilter !== null && selectedBoatFilter !== 'external' ? boatTabDisplayFields : allBookingsDisplayFields).length * 20)) + 8}px` }} />
           </div>
         ))}
       </div>

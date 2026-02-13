@@ -132,6 +132,7 @@ function dbBookingToFrontend(db: DbBooking): Booking {
     charterCostCurrency: (db as any).charter_cost_currency ?? undefined,
     charterExpenseStatus: db.charter_expense_status ?? undefined,
     linkedExpenseId: db.linked_expense_id ?? undefined,
+    completedSections: (db as any).completed_sections ?? undefined,
   };
 }
 
@@ -196,6 +197,7 @@ function frontendToDb(booking: Partial<Booking>): Partial<DbBookingInsert> {
   if (booking.charterCostCurrency !== undefined) (db as any).charter_cost_currency = booking.charterCostCurrency;
   if (booking.charterExpenseStatus !== undefined) db.charter_expense_status = booking.charterExpenseStatus;
   if (booking.linkedExpenseId !== undefined) db.linked_expense_id = booking.linkedExpenseId;
+  if (booking.completedSections !== undefined) (db as any).completed_sections = booking.completedSections ?? {};
   return db;
 }
 

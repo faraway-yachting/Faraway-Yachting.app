@@ -12,6 +12,7 @@ import {
   Download,
   X,
   Paperclip,
+  ChevronDown,
 } from 'lucide-react';
 import type { Booking, CabinAllocation, BookingAttachment } from '@/data/booking/types';
 import { paymentStatusLabels } from '@/data/booking/types';
@@ -24,6 +25,8 @@ interface CabinCharterOverviewProps {
   canEdit: boolean;
   onUploadInternalAttachment?: (files: File[]) => void;
   onRemoveInternalAttachment?: (index: number) => void;
+  isCollapsed?: boolean;
+  onToggleCollapse?: () => void;
 }
 
 function fmtAmt(amount: number, currency: string): string {
@@ -38,6 +41,8 @@ export function CabinCharterOverview({
   canEdit,
   onUploadInternalAttachment,
   onRemoveInternalAttachment,
+  isCollapsed,
+  onToggleCollapse,
 }: CabinCharterOverviewProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const internalAttachments: BookingAttachment[] = formData.internalNoteAttachments ?? [];
@@ -85,16 +90,28 @@ export function CabinCharterOverview({
 
   return (
     <>
-      {/* Extras Summary */}
+      {/* Extras Summary — with collapse toggle for entire overview */}
       <div className="bg-amber-50 rounded-lg p-4">
-        <div className="flex items-center gap-2 px-3 py-2 -mx-4 -mt-4 mb-3 rounded-t-lg bg-amber-100">
-          <Package className="h-4 w-4 text-amber-600" />
-          <h3 className="text-sm font-semibold text-amber-800">Extras Summary</h3>
-          {hasExtras && (
-            <span className="ml-auto text-xs text-amber-600">{extrasMap.size} extra{extrasMap.size !== 1 ? 's' : ''}</span>
-          )}
+        <div
+          className={`flex items-center justify-between px-3 py-2 -mx-4 -mt-4 rounded-t-lg bg-amber-100 cursor-pointer select-none ${
+            isCollapsed ? '-mb-4 rounded-b-lg' : 'mb-3'
+          }`}
+          onClick={onToggleCollapse}
+        >
+          <div className="flex items-center gap-2">
+            <Package className="h-4 w-4 text-amber-600" />
+            <h3 className="text-sm font-semibold text-amber-800">Cabin Charter Overview</h3>
+          </div>
+          <div className="flex items-center gap-2">
+            {hasExtras && (
+              <span className="text-xs text-amber-600">{extrasMap.size} extra{extrasMap.size !== 1 ? 's' : ''}</span>
+            )}
+            {onToggleCollapse && (
+              <ChevronDown className={`h-4 w-4 text-amber-400 transition-transform duration-200 ${isCollapsed ? '' : 'rotate-180'}`} />
+            )}
+          </div>
         </div>
-        {hasExtras ? (
+        {!isCollapsed && (hasExtras ? (
           <div className="flex flex-wrap gap-2">
             {Array.from(extrasMap.entries())
               .sort((a, b) => b[1] - a[1])
@@ -110,10 +127,10 @@ export function CabinCharterOverview({
           </div>
         ) : (
           <p className="text-sm text-gray-400">No extras added to any cabin yet</p>
-        )}
+        ))}
       </div>
 
-      {/* Contract Status Summary */}
+      {!isCollapsed && <>{/* Contract Status Summary */}
       <div className="bg-slate-50 rounded-lg p-4">
         <div className="flex items-center gap-2 px-3 py-2 -mx-4 -mt-4 mb-3 rounded-t-lg bg-slate-200">
           <ScrollText className="h-4 w-4 text-slate-600" />
@@ -315,6 +332,7 @@ export function CabinCharterOverview({
           </div>
         )}
       </div>
+      </>}
     </>
   );
 }

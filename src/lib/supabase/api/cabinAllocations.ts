@@ -33,6 +33,7 @@ interface CabinAllocationRow {
   payment_status: string;
   invoice_id: string | null;
   receipt_id: string | null;
+  is_completed: boolean | null;
   sort_order: number;
   created_at: string;
   updated_at: string;
@@ -79,6 +80,7 @@ function rowToAllocation(row: CabinAllocationRow): CabinAllocation {
     paymentStatus: row.payment_status as CabinAllocation['paymentStatus'],
     invoiceId: row.invoice_id ?? undefined,
     receiptId: row.receipt_id ?? undefined,
+    isCompleted: row.is_completed ?? false,
     sortOrder: row.sort_order,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -115,6 +117,7 @@ function allocationToRow(a: Partial<CabinAllocation> & { bookingId: string }): R
   if (a.paymentStatus !== undefined) row.payment_status = a.paymentStatus;
   if (a.invoiceId !== undefined) row.invoice_id = a.invoiceId || null;
   if (a.receiptId !== undefined) row.receipt_id = a.receiptId || null;
+  if (a.isCompleted !== undefined) row.is_completed = a.isCompleted ?? false;
   if (a.sortOrder !== undefined) row.sort_order = a.sortOrder;
   return row;
 }
@@ -173,6 +176,7 @@ export const cabinAllocationsApi = {
     if (updates.paymentStatus !== undefined) dbUpdates.payment_status = updates.paymentStatus;
     if (updates.invoiceId !== undefined) dbUpdates.invoice_id = updates.invoiceId || null;
     if (updates.receiptId !== undefined) dbUpdates.receipt_id = updates.receiptId || null;
+    if (updates.isCompleted !== undefined) dbUpdates.is_completed = updates.isCompleted ?? false;
     if (updates.sortOrder !== undefined) dbUpdates.sort_order = updates.sortOrder;
 
     const { data, error } = await (supabase as any)

@@ -1,7 +1,7 @@
 'use client';
 
 import { useRef } from 'react';
-import { FileText, X, Upload, Download } from 'lucide-react';
+import { FileText, X, Upload, Download, ChevronDown, CheckCircle2, Circle } from 'lucide-react';
 import type { Booking, BookingAttachment } from '@/data/booking/types';
 
 interface InternalNoteSectionProps {
@@ -10,6 +10,10 @@ interface InternalNoteSectionProps {
   canEdit: boolean;
   onUploadInternalAttachment: (files: File[]) => void;
   onRemoveInternalAttachment: (index: number) => void;
+  isCollapsed?: boolean;
+  onToggleCollapse?: () => void;
+  isCompleted?: boolean;
+  onToggleCompleted?: () => void;
 }
 
 export default function InternalNoteSection({
@@ -18,6 +22,10 @@ export default function InternalNoteSection({
   canEdit,
   onUploadInternalAttachment,
   onRemoveInternalAttachment,
+  isCollapsed,
+  onToggleCollapse,
+  isCompleted,
+  onToggleCompleted,
 }: InternalNoteSectionProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const attachments: BookingAttachment[] = formData.internalNoteAttachments ?? [];
@@ -33,12 +41,33 @@ export default function InternalNoteSection({
 
   return (
     <div className="bg-gray-50 rounded-lg p-4">
-      <div className="flex items-center gap-2 px-3 py-2 -mx-4 -mt-4 mb-3 rounded-t-lg bg-orange-50">
-        <FileText className="h-4 w-4 text-orange-600" />
-        <h3 className="text-sm font-semibold text-orange-800">Internal Note</h3>
+      <div
+        className={`flex items-center justify-between px-3 py-2 -mx-4 -mt-4 rounded-t-lg bg-orange-50 cursor-pointer select-none ${
+          isCollapsed ? '-mb-4 rounded-b-lg' : 'mb-3'
+        }`}
+        onClick={onToggleCollapse}
+      >
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); onToggleCompleted?.(); }}
+            className="flex-shrink-0 hover:scale-110 transition-transform"
+            disabled={!onToggleCompleted}
+          >
+            {isCompleted
+              ? <CheckCircle2 className="h-5 w-5 text-green-500" />
+              : <Circle className="h-5 w-5 text-gray-400" />
+            }
+          </button>
+          <FileText className="h-4 w-4 text-orange-600" />
+          <h3 className="text-sm font-semibold text-orange-800">Internal Note</h3>
+        </div>
+        {onToggleCollapse && (
+          <ChevronDown className={`h-4 w-4 text-orange-400 transition-transform duration-200 ${isCollapsed ? '' : 'rotate-180'}`} />
+        )}
       </div>
 
-      {/* Textarea */}
+      {!isCollapsed && <>{/* Textarea */}
       <textarea
         rows={6}
         value={formData.internalNotes ?? ''}
@@ -115,6 +144,7 @@ export default function InternalNoteSection({
           </button>
         </div>
       )}
+      </>}
     </div>
   );
 }

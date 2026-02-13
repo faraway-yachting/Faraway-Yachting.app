@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
-import { X, Trash2, FileText } from 'lucide-react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import { X, Trash2, FileText, CheckCircle2 } from 'lucide-react';
 import {
   Booking,
   BookingType,
@@ -198,6 +198,12 @@ export function BookingFormContainer({
   // Cabin charter allocations
   const [cabinAllocations, setCabinAllocations] = useState<CabinAllocation[]>([]);
   const [cabinCashAllocationId, setCabinCashAllocationId] = useState<string | null>(null);
+
+  // Section collapse state — all expanded by default
+  const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>({});
+  const toggleSection = useCallback((id: string) => {
+    setCollapsedSections(prev => ({ ...prev, [id]: !prev[id] }));
+  }, []);
 
   // Load sales employees for booking owner dropdown + bank accounts
   useEffect(() => {
@@ -455,7 +461,7 @@ export function BookingFormContainer({
     }
   }, [formData.customerName, formData.contactChannel, formData.customerEmail, formData.customerPhone, titleManuallyEdited]);
 
-  const handleChange = useCallback((field: keyof Booking, value: string | number | undefined | BookingAttachment[]) => {
+  const handleChange = useCallback((field: keyof Booking, value: any) => {
     setFormData(prev => ({ ...prev, [field]: value }));
     // Track manual title edits
     if (field === 'title') {
@@ -465,6 +471,31 @@ export function BookingFormContainer({
       setErrors(prev => ({ ...prev, [field]: '' }));
     }
   }, [errors]);
+
+  // Section completion toggle
+  const toggleSectionCompleted = useCallback((sectionId: string) => {
+    const current = formData.completedSections || {};
+    handleChange('completedSections', { ...current, [sectionId]: !current[sectionId] });
+  }, [formData.completedSections, handleChange]);
+
+  // Compute whether all visible sections are completed
+  const visibleSectionIds = useMemo(() => {
+    const isCabinCharter = formData.type === 'cabin_charter';
+    const ids: string[] = ['header', 'bookingDetails', 'crew'];
+    if (!isCabinCharter) ids.push('customer', 'customerNote');
+    if (!isCabinCharter && !isAgencyView) ids.push('finance', 'commission', 'internalNote');
+    return ids;
+  }, [formData.type, isAgencyView]);
+
+  const allSectionsCompleted = useMemo(() => {
+    if (visibleSectionIds.length === 0) return false;
+    const cs = formData.completedSections || {};
+    const sectionsComplete = visibleSectionIds.every(id => !!cs[id]);
+    if (formData.type === 'cabin_charter' && cabinAllocations.length > 0) {
+      return sectionsComplete && cabinAllocations.every(a => a.isCompleted);
+    }
+    return sectionsComplete;
+  }, [visibleSectionIds, formData.completedSections, formData.type, cabinAllocations]);
 
   // File upload helpers
   const uploadAttachments = async (files: File[], prefix: string): Promise<BookingAttachment[]> => {
@@ -541,6 +572,25 @@ export function BookingFormContainer({
     if (useExternalBoat && !formData.externalBoatName?.trim()) newErrors.externalBoatName = 'External boat name is required';
     if (formData.type !== 'cabin_charter' && !formData.customerName?.trim()) newErrors.customerName = 'Customer name is required';
     setErrors(newErrors);
+
+    // Auto-expand sections that contain validation errors
+    if (Object.keys(newErrors).length > 0) {
+      const fieldToSection: Record<string, string> = {
+        projectId: 'header', externalBoatName: 'header',
+        dateFrom: 'header', dateTo: 'header',
+        customerName: 'customer',
+        title: 'bookingDetails',
+      };
+      const sectionsToExpand = new Set(
+        Object.keys(newErrors).map(f => fieldToSection[f]).filter(Boolean)
+      );
+      setCollapsedSections(prev => {
+        const next = { ...prev };
+        sectionsToExpand.forEach(s => { next[s] = false; });
+        return next;
+      });
+    }
+
     return Object.keys(newErrors).length === 0;
   };
 
@@ -895,9 +945,15 @@ export function BookingFormContainer({
     const dataToSave = buildSaveData();
 
     // Check for conflicts with existing bookings on the same boat/dates
-    // Skip only for cancelled/completed statuses
+    // Skip for cancelled/completed statuses AND when editing without changing dates/boat/time
     const status = dataToSave.status;
-    if (status !== 'cancelled' && status !== 'completed') {
+    const conflictFieldsChanged = !booking || // new booking — always check
+      booking.dateFrom !== dataToSave.dateFrom ||
+      booking.dateTo !== dataToSave.dateTo ||
+      booking.time !== dataToSave.time ||
+      booking.projectId !== dataToSave.projectId ||
+      booking.externalBoatName !== dataToSave.externalBoatName;
+    if (conflictFieldsChanged && status !== 'cancelled' && status !== 'completed') {
       try {
         let existingBookings: Booking[] = [];
         const dateFrom = dataToSave.dateFrom!;
@@ -1048,6 +1104,7 @@ export function BookingFormContainer({
   };
 
   return (
+    <>
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-xl shadow-2xl w-full max-w-6xl max-h-[90vh] overflow-hidden flex flex-col">
         {/* Header */}
@@ -1059,6 +1116,12 @@ export function BookingFormContainer({
             {booking && (
               <span className="px-3 py-1 bg-blue-100 text-blue-800 text-sm font-medium rounded-lg">
                 {booking.bookingNumber}
+              </span>
+            )}
+            {isEditing && allSectionsCompleted && (
+              <span className="inline-flex items-center gap-1 px-3 py-1 bg-green-100 text-green-700 text-sm font-medium rounded-lg">
+                <CheckCircle2 className="h-4 w-4" />
+                Data Complete
               </span>
             )}
             {booking?.updatedAt && (
@@ -1093,6 +1156,10 @@ export function BookingFormContainer({
               users={users}
               meetGreeters={meetGreeters}
               onCreateMeetGreeter={handleCreateMeetGreeter}
+              isCollapsed={!!collapsedSections.header}
+              onToggleCollapse={() => toggleSection('header')}
+              isCompleted={!!(formData.completedSections || {}).header}
+              onToggleCompleted={canEdit ? () => toggleSectionCompleted('header') : undefined}
             />
 
             {/* Section 2: Customer Information (hidden for cabin charter) */}
@@ -1103,6 +1170,10 @@ export function BookingFormContainer({
                 errors={errors}
                 canEdit={canEdit}
                 isAgencyView={isAgencyView}
+                isCollapsed={!!collapsedSections.customer}
+                onToggleCollapse={() => toggleSection('customer')}
+                isCompleted={!!(formData.completedSections || {}).customer}
+                onToggleCompleted={canEdit ? () => toggleSectionCompleted('customer') : undefined}
               />
             )}
 
@@ -1116,6 +1187,10 @@ export function BookingFormContainer({
               onUploadContractAttachment={handleUploadContractAttachment}
               onRemoveContractAttachment={handleRemoveContractAttachment}
               cabinCharterMode={formData.type === 'cabin_charter'}
+              isCollapsed={!!collapsedSections.bookingDetails}
+              onToggleCollapse={() => toggleSection('bookingDetails')}
+              isCompleted={!!(formData.completedSections || {}).bookingDetails}
+              onToggleCompleted={canEdit ? () => toggleSectionCompleted('bookingDetails') : undefined}
             />
 
             {/* Section 4: Finance (hidden for cabin charter) */}
@@ -1143,6 +1218,10 @@ export function BookingFormContainer({
                 companies={companies}
                 onAddPaymentFromInvoice={handleAddPaymentFromInvoice}
                 loadBankAccountsForCompany={loadBankAccountsForCompany}
+                isCollapsed={!!collapsedSections.finance}
+                onToggleCollapse={() => toggleSection('finance')}
+                isCompleted={!!(formData.completedSections || {}).finance}
+                onToggleCompleted={canEdit ? () => toggleSectionCompleted('finance') : undefined}
               />
             )}
 
@@ -1152,6 +1231,10 @@ export function BookingFormContainer({
                 formData={formData}
                 onChange={handleChange}
                 canEdit={canEdit}
+                isCollapsed={!!collapsedSections.commission}
+                onToggleCollapse={() => toggleSection('commission')}
+                isCompleted={!!(formData.completedSections || {}).commission}
+                onToggleCompleted={canEdit ? () => toggleSectionCompleted('commission') : undefined}
               />
             )}
 
@@ -1160,6 +1243,10 @@ export function BookingFormContainer({
               selectedCrewIds={selectedCrewIds}
               onCrewChange={setSelectedCrewIds}
               canEdit={canEdit}
+              isCollapsed={!!collapsedSections.crew}
+              onToggleCollapse={() => toggleSection('crew')}
+              isCompleted={!!(formData.completedSections || {}).crew}
+              onToggleCompleted={canEdit ? () => toggleSectionCompleted('crew') : undefined}
             />
 
             {/* Section 6.5: Cabin Allocations (cabin charter only) */}
@@ -1178,6 +1265,8 @@ export function BookingFormContainer({
                   setEditingCash(null);
                   setShowCashModal(true);
                 }}
+                isCollapsed={!!collapsedSections.cabinAllocations}
+                onToggleCollapse={() => toggleSection('cabinAllocations')}
               />
             )}
 
@@ -1191,6 +1280,8 @@ export function BookingFormContainer({
                 canEdit={canEdit}
                 onUploadInternalAttachment={handleUploadInternalAttachment}
                 onRemoveInternalAttachment={handleRemoveInternalAttachment}
+                isCollapsed={!!collapsedSections.cabinOverview}
+                onToggleCollapse={() => toggleSection('cabinOverview')}
               />
             )}
 
@@ -1202,6 +1293,10 @@ export function BookingFormContainer({
                 canEdit={canEdit}
                 onUploadInternalAttachment={handleUploadInternalAttachment}
                 onRemoveInternalAttachment={handleRemoveInternalAttachment}
+                isCollapsed={!!collapsedSections.internalNote}
+                onToggleCollapse={() => toggleSection('internalNote')}
+                isCompleted={!!(formData.completedSections || {}).internalNote}
+                onToggleCompleted={canEdit ? () => toggleSectionCompleted('internalNote') : undefined}
               />
             )}
 
@@ -1211,6 +1306,10 @@ export function BookingFormContainer({
                 formData={formData}
                 onChange={handleChange}
                 canEdit={canEdit}
+                isCollapsed={!!collapsedSections.customerNote}
+                onToggleCollapse={() => toggleSection('customerNote')}
+                isCompleted={!!(formData.completedSections || {}).customerNote}
+                onToggleCompleted={canEdit ? () => toggleSectionCompleted('customerNote') : undefined}
               />
             )}
           </div>
@@ -1266,16 +1365,17 @@ export function BookingFormContainer({
           </div>
         </div>
       </div>
+    </div>
       {/* Conflict Dialog */}
       {showConflictDialog && conflictResult && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[60] p-4">
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6 max-h-[calc(100vh-2rem)] flex flex-col">
             <h3 className={`text-lg font-semibold mb-3 ${conflictResult.hasHardConflict ? 'text-red-700' : 'text-amber-700'}`}>
               {conflictResult.hasHardConflict ? 'Booking Conflict' : 'Booking Warning'}
             </h3>
             <p className="text-sm text-gray-700 mb-4">{conflictResult.message}</p>
             {conflictResult.conflicts.length > 0 && (
-              <div className="mb-4 space-y-2">
+              <div className="mb-4 space-y-2 overflow-y-auto flex-1 min-h-0">
                 {conflictResult.conflicts.map((c) => (
                   <div key={c.id} className="text-xs bg-gray-50 rounded-lg p-2 border border-gray-200">
                     <span className="font-medium">{c.title}</span> — {c.customerName}
@@ -1353,6 +1453,6 @@ export function BookingFormContainer({
           }}
         />
       )}
-    </div>
+    </>
   );
 }

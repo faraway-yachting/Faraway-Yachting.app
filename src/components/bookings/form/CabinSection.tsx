@@ -23,6 +23,7 @@ import {
   X,
   Download,
   Search,
+  Circle,
 } from 'lucide-react';
 import {
   CabinAllocation,
@@ -60,6 +61,8 @@ interface CabinSectionProps {
   onRecordCash?: (allocationId: string) => void;
   onCreateInvoice?: (allocation: CabinAllocation) => void;
   onCreateReceipt?: (allocation: CabinAllocation) => void;
+  isCollapsed?: boolean;
+  onToggleCollapse?: () => void;
 }
 
 // Payment methods list
@@ -82,6 +85,8 @@ export default function CabinSection({
   onRecordCash,
   onCreateInvoice,
   onCreateReceipt,
+  isCollapsed,
+  onToggleCollapse,
 }: CabinSectionProps) {
   const [expandedCabinId, setExpandedCabinId] = useState<string | null>(null);
   // Per-cabin payments: Map<allocationId, PaymentRecord[]>
@@ -380,7 +385,10 @@ export default function CabinSection({
   return (
     <div className="bg-indigo-50 rounded-xl p-5 border border-indigo-100">
       {/* Section Header */}
-      <div className="flex items-center justify-between mb-4">
+      <div
+        className={`flex items-center justify-between cursor-pointer select-none ${isCollapsed ? '' : 'mb-4'}`}
+        onClick={onToggleCollapse}
+      >
         <div className="flex items-center gap-2">
           <BedDouble className="h-5 w-5 text-indigo-600" />
           <h3 className="text-base font-semibold text-gray-900">Cabin Allocations</h3>
@@ -392,10 +400,13 @@ export default function CabinSection({
               Total: {currency} {totalRevenue.toLocaleString()}
             </span>
           )}
+          {onToggleCollapse && (
+            <ChevronDown className={`h-4 w-4 text-indigo-400 transition-transform duration-200 ${isCollapsed ? '' : 'rotate-180'}`} />
+          )}
         </div>
       </div>
 
-      {loadingPayments && (
+      {!isCollapsed && <>{loadingPayments && (
         <div className="flex justify-center py-3">
           <div className="animate-spin rounded-full h-5 w-5 border-2 border-indigo-500 border-t-transparent"></div>
         </div>
@@ -431,6 +442,10 @@ export default function CabinSection({
             onRecordCash={onRecordCash}
             onCreateInvoice={onCreateInvoice}
             onCreateReceipt={onCreateReceipt}
+            onDelete={() => {
+              onAllocationsChange(cabinAllocations.filter(a => a.id !== allocation.id));
+              if (expandedCabinId === allocation.id) setExpandedCabinId(null);
+            }}
           />
         ))}
       </div>
@@ -443,6 +458,38 @@ export default function CabinSection({
           <p className="text-xs mt-1">Select a yacht with configured cabins to auto-populate</p>
         </div>
       )}
+
+      {/* Add Cabin Button */}
+      {canEdit && (
+        <button
+          type="button"
+          onClick={() => {
+            const nextNumber = cabinAllocations.length > 0
+              ? Math.max(...cabinAllocations.map(a => a.cabinNumber)) + 1
+              : 1;
+            const newCabin: CabinAllocation = {
+              id: `temp-${Date.now()}`,
+              bookingId: bookingId || '',
+              cabinLabel: `Cabin ${nextNumber}`,
+              cabinNumber: nextNumber,
+              status: 'available' as CabinAllocationStatus,
+              numberOfGuests: 0,
+              currency: currency,
+              paymentStatus: 'unpaid' as PaymentStatus,
+              sortOrder: nextNumber,
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+            };
+            onAllocationsChange([...cabinAllocations, newCabin]);
+            setExpandedCabinId(newCabin.id);
+          }}
+          className="w-full flex items-center justify-center gap-2 mt-3 px-4 py-2.5 rounded-lg border-2 border-dashed border-indigo-300 text-sm font-medium text-indigo-600 hover:bg-indigo-100 hover:border-indigo-400 transition-colors"
+        >
+          <Plus className="h-4 w-4" />
+          Add Cabin
+        </button>
+      )}
+      </>}
     </div>
   );
 }
@@ -477,6 +524,7 @@ interface CabinAllocationCardProps {
   onRecordCash?: (allocationId: string) => void;
   onCreateInvoice?: (allocation: CabinAllocation) => void;
   onCreateReceipt?: (allocation: CabinAllocation) => void;
+  onDelete?: () => void;
 }
 
 function CabinAllocationCard({
@@ -505,6 +553,7 @@ function CabinAllocationCard({
   onRecordCash,
   onCreateInvoice,
   onCreateReceipt,
+  onDelete,
 }: CabinAllocationCardProps) {
   const contractFileRef = useRef<HTMLInputElement>(null);
   const internalFileRef = useRef<HTMLInputElement>(null);
@@ -588,58 +637,117 @@ function CabinAllocationCard({
   return (
     <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
       {/* Collapsed Header */}
-      <button
-        onClick={onToggle}
-        className="w-full px-4 py-3 flex items-center justify-between text-left hover:bg-gray-50 transition-colors"
-      >
-        <div className="flex items-center gap-3 flex-1 min-w-0">
-          <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${statusColor.bg} ${statusColor.text} ${statusColor.border} border`}>
-            {cabinAllocationStatusLabels[allocation.status]}
-          </span>
-          <span className="font-medium text-gray-900 truncate">
-            Cabin {allocation.cabinNumber}: {allocation.cabinLabel}
-          </span>
-          {allocation.numberOfGuests > 0 && (
-            <span className="text-sm text-gray-500 flex items-center gap-1">
-              <Users className="h-3.5 w-3.5" />
-              {allocation.numberOfGuests} guest{allocation.numberOfGuests !== 1 ? 's' : ''}
+      <div className="flex items-center">
+        <div
+          role="button"
+          tabIndex={0}
+          onClick={onToggle}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onToggle(); } }}
+          className="flex-1 px-4 py-3 flex items-center justify-between text-left hover:bg-gray-50 transition-colors min-w-0 cursor-pointer"
+        >
+          <div className="flex items-center gap-3 flex-1 min-w-0">
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                if (canEdit) updateAllocation(allocation.id, 'isCompleted', !allocation.isCompleted);
+              }}
+              className="flex-shrink-0 hover:scale-110 transition-transform"
+              disabled={!canEdit}
+            >
+              {allocation.isCompleted
+                ? <CheckCircle2 className="h-5 w-5 text-green-500" />
+                : <Circle className="h-5 w-5 text-gray-400" />
+              }
+            </button>
+            <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${statusColor.bg} ${statusColor.text} ${statusColor.border} border`}>
+              {cabinAllocationStatusLabels[allocation.status]}
             </span>
-          )}
-          {allocation.guestNames && (
-            <span className="text-sm text-gray-500 truncate">
-              {allocation.guestNames}
+            <span className="font-medium text-gray-900 truncate">
+              Cabin {allocation.cabinNumber}: {allocation.cabinLabel}
             </span>
-          )}
+            {allocation.numberOfGuests > 0 && (
+              <span className="text-sm text-gray-500 flex items-center gap-1">
+                <Users className="h-3.5 w-3.5" />
+                {allocation.numberOfGuests} guest{allocation.numberOfGuests !== 1 ? 's' : ''}
+              </span>
+            )}
+            {allocation.guestNames && (
+              <span className="text-sm text-gray-500 truncate">
+                {allocation.guestNames}
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-3 flex-shrink-0">
+            {allocation.price != null && allocation.price > 0 && (
+              <span className="text-sm font-medium text-gray-700">
+                {allocation.currency} {allocation.price.toLocaleString()}
+              </span>
+            )}
+            {allocation.paymentStatus && allocation.paymentStatus !== 'unpaid' && (
+              <span className={`text-xs px-2 py-0.5 rounded-full ${
+                allocation.paymentStatus === 'paid' ? 'bg-green-100 text-green-700' :
+                allocation.paymentStatus === 'partial' ? 'bg-yellow-100 text-yellow-700' :
+                'bg-gray-100 text-gray-600'
+              }`}>
+                {paymentStatusLabels[allocation.paymentStatus]}
+              </span>
+            )}
+            {isExpanded ? (
+              <ChevronUp className="h-4 w-4 text-gray-400" />
+            ) : (
+              <ChevronDown className="h-4 w-4 text-gray-400" />
+            )}
+          </div>
         </div>
-        <div className="flex items-center gap-3 flex-shrink-0">
-          {allocation.price != null && allocation.price > 0 && (
-            <span className="text-sm font-medium text-gray-700">
-              {allocation.currency} {allocation.price.toLocaleString()}
-            </span>
-          )}
-          {allocation.paymentStatus && allocation.paymentStatus !== 'unpaid' && (
-            <span className={`text-xs px-2 py-0.5 rounded-full ${
-              allocation.paymentStatus === 'paid' ? 'bg-green-100 text-green-700' :
-              allocation.paymentStatus === 'partial' ? 'bg-yellow-100 text-yellow-700' :
-              'bg-gray-100 text-gray-600'
-            }`}>
-              {paymentStatusLabels[allocation.paymentStatus]}
-            </span>
-          )}
-          {isExpanded ? (
-            <ChevronUp className="h-4 w-4 text-gray-400" />
-          ) : (
-            <ChevronDown className="h-4 w-4 text-gray-400" />
-          )}
-        </div>
-      </button>
+        {canEdit && onDelete && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              if (confirm(`Remove Cabin ${allocation.cabinNumber}: ${allocation.cabinLabel}?`)) {
+                onDelete();
+              }
+            }}
+            className="px-3 py-3 text-gray-300 hover:text-red-500 hover:bg-red-50 transition-colors flex-shrink-0"
+            title="Remove cabin"
+          >
+            <Trash2 className="h-4 w-4" />
+          </button>
+        )}
+      </div>
 
       {/* Expanded Content */}
       {isExpanded && (
         <div className="px-4 pb-4 space-y-4 border-t border-gray-100">
 
+          {/* ── Cabin Info ── */}
+          <div className="pt-4 grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Cabin Label</label>
+              <input
+                type="text"
+                value={allocation.cabinLabel}
+                onChange={e => updateAllocation(allocation.id, 'cabinLabel', e.target.value)}
+                disabled={!canEdit}
+                className="w-full px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 disabled:bg-gray-100"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Cabin Number</label>
+              <input
+                type="number"
+                value={allocation.cabinNumber}
+                onChange={e => updateAllocation(allocation.id, 'cabinNumber', parseInt(e.target.value) || 1)}
+                disabled={!canEdit}
+                min="1"
+                className="w-full px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 disabled:bg-gray-100"
+              />
+            </div>
+          </div>
+
           {/* ── A. Guest & Source ── */}
-          <div className="pt-4">
+          <div>
             <h4 className="text-sm font-medium text-gray-700 mb-3 flex items-center gap-1.5">
               <Users className="h-4 w-4 text-gray-400" />
               Guest & Source

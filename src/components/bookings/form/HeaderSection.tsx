@@ -11,6 +11,9 @@ import {
   Plus,
   Phone,
   Mail,
+  ChevronDown,
+  CheckCircle2,
+  Circle,
 } from 'lucide-react';
 import {
   Booking,
@@ -38,6 +41,10 @@ interface HeaderSectionProps {
   users: { id: string; full_name: string }[];
   meetGreeters: MeetGreeter[];
   onCreateMeetGreeter: (name: string, phone: string, email: string) => Promise<MeetGreeter | null>;
+  isCollapsed?: boolean;
+  onToggleCollapse?: () => void;
+  isCompleted?: boolean;
+  onToggleCompleted?: () => void;
 }
 
 export function HeaderSection({
@@ -55,6 +62,10 @@ export function HeaderSection({
   users,
   meetGreeters,
   onCreateMeetGreeter,
+  isCollapsed,
+  onToggleCollapse,
+  isCompleted,
+  onToggleCompleted,
 }: HeaderSectionProps) {
   const [holdUntilMode, setHoldUntilMode] = useState<'days' | 'manual'>('days');
   const [holdDays, setHoldDays] = useState<number>(3);
@@ -105,12 +116,33 @@ export function HeaderSection({
 
   return (
     <div className="bg-blue-50 rounded-lg p-4">
-      <div className="flex items-center gap-2 px-3 py-2 -mx-4 -mt-4 mb-3 rounded-t-lg bg-blue-100">
-        <Ship className="h-4 w-4 text-blue-600" />
-        <h3 className="text-sm font-semibold text-blue-800">Header</h3>
+      <div
+        className={`flex items-center justify-between px-3 py-2 -mx-4 -mt-4 rounded-t-lg bg-blue-100 cursor-pointer select-none ${
+          isCollapsed ? '-mb-4 rounded-b-lg' : 'mb-3'
+        }`}
+        onClick={onToggleCollapse}
+      >
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); onToggleCompleted?.(); }}
+            className="flex-shrink-0 hover:scale-110 transition-transform"
+            disabled={!onToggleCompleted}
+          >
+            {isCompleted
+              ? <CheckCircle2 className="h-5 w-5 text-green-500" />
+              : <Circle className="h-5 w-5 text-gray-400" />
+            }
+          </button>
+          <Ship className="h-4 w-4 text-blue-600" />
+          <h3 className="text-sm font-semibold text-blue-800">Header</h3>
+        </div>
+        {onToggleCollapse && (
+          <ChevronDown className={`h-4 w-4 text-blue-400 transition-transform duration-200 ${isCollapsed ? '' : 'rotate-180'}`} />
+        )}
       </div>
 
-      <div className="space-y-4">
+      {!isCollapsed && <div className="space-y-4">
         {/* Boat + Charter Type */}
         <div className="grid grid-cols-5 gap-4">
           <div className="col-span-3">
@@ -500,7 +532,7 @@ export function HeaderSection({
             <p className="text-xs text-gray-500 mt-2">The booking will be held until this date and time</p>
           </div>
         )}
-      </div>
+      </div>}
     </div>
   );
 }

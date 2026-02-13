@@ -1,16 +1,20 @@
 'use client';
 
 import { useEffect } from 'react';
-import { DollarSign } from 'lucide-react';
+import { DollarSign, ChevronDown, CheckCircle2, Circle } from 'lucide-react';
 import type { Booking } from '@/data/booking/types';
 
 interface CommissionSectionProps {
   formData: Partial<Booking>;
   onChange: (field: keyof Booking, value: any) => void;
   canEdit: boolean;
+  isCollapsed?: boolean;
+  onToggleCollapse?: () => void;
+  isCompleted?: boolean;
+  onToggleCompleted?: () => void;
 }
 
-export default function CommissionSection({ formData, onChange, canEdit }: CommissionSectionProps) {
+export default function CommissionSection({ formData, onChange, canEdit, isCollapsed, onToggleCollapse, isCompleted, onToggleCompleted }: CommissionSectionProps) {
   // For external boats, commission is based on profit (revenue - cost)
   const isExternalBoat = !!formData.externalBoatName && !formData.projectId;
   const commissionBase = isExternalBoat
@@ -54,12 +58,33 @@ export default function CommissionSection({ formData, onChange, canEdit }: Commi
 
   return (
     <div className="bg-teal-50 rounded-lg p-4">
-      <div className="flex items-center gap-2 px-3 py-2 -mx-4 -mt-4 mb-3 rounded-t-lg bg-teal-100">
-        <DollarSign className="h-4 w-4 text-teal-600" />
-        <h3 className="text-sm font-semibold text-teal-800">Booking Owner Commission</h3>
+      <div
+        className={`flex items-center justify-between px-3 py-2 -mx-4 -mt-4 rounded-t-lg bg-teal-100 cursor-pointer select-none ${
+          isCollapsed ? '-mb-4 rounded-b-lg' : 'mb-3'
+        }`}
+        onClick={onToggleCollapse}
+      >
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); onToggleCompleted?.(); }}
+            className="flex-shrink-0 hover:scale-110 transition-transform"
+            disabled={!onToggleCompleted}
+          >
+            {isCompleted
+              ? <CheckCircle2 className="h-5 w-5 text-green-500" />
+              : <Circle className="h-5 w-5 text-gray-400" />
+            }
+          </button>
+          <DollarSign className="h-4 w-4 text-teal-600" />
+          <h3 className="text-sm font-semibold text-teal-800">Booking Owner Commission</h3>
+        </div>
+        {onToggleCollapse && (
+          <ChevronDown className={`h-4 w-4 text-teal-400 transition-transform duration-200 ${isCollapsed ? '' : 'rotate-180'}`} />
+        )}
       </div>
 
-      {isExternalBoat && (
+      {!isCollapsed && <>{isExternalBoat && (
         <p className="text-xs text-teal-700 mb-2">
           Commission based on profit: {commissionBase.toLocaleString('en', { minimumFractionDigits: 2 })}
           {' '}(Charter Fee + Extras - Boat Owner Cost)
@@ -136,6 +161,7 @@ export default function CommissionSection({ formData, onChange, canEdit }: Commi
           />
         </div>
       </div>
+      </>}
     </div>
   );
 }

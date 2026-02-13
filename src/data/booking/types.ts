@@ -110,6 +110,9 @@ export interface Booking {
   customerNotes?: string;
   internalNoteAttachments?: BookingAttachment[];
 
+  // Section completion tracking
+  completedSections?: Record<string, boolean>;
+
   // Metadata
   createdBy: string;
   createdAt: string;
@@ -283,6 +286,9 @@ export interface CabinAllocation {
   paymentStatus: PaymentStatus;
   invoiceId?: string;
   receiptId?: string;
+  // Completion tracking
+  isCompleted?: boolean;
+
   sortOrder: number;
   createdAt: string;
   updatedAt: string;

@@ -23,6 +23,7 @@ export interface CalendarDisplaySettings {
 
 export const CALENDAR_DISPLAY_FIELD_OPTIONS = [
   { key: 'title', label: 'Title' },
+  { key: 'boatName', label: 'Boat Name' },
   { key: 'customerName', label: 'Customer Name' },
   { key: 'bookingType', label: 'Booking Type' },
   { key: 'time', label: 'Time' },

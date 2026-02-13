@@ -6,6 +6,9 @@ import {
   Search,
   Plus,
   Building2,
+  CheckCircle2,
+  Circle,
+  ChevronDown,
 } from 'lucide-react';
 import {
   Booking,
@@ -32,6 +35,10 @@ interface CustomerSectionProps {
   errors: Record<string, string>;
   canEdit: boolean;
   isAgencyView: boolean;
+  isCollapsed?: boolean;
+  onToggleCollapse?: () => void;
+  isCompleted?: boolean;
+  onToggleCompleted?: () => void;
 }
 
 export function CustomerSection({
@@ -40,6 +47,10 @@ export function CustomerSection({
   errors,
   canEdit,
   isAgencyView,
+  isCollapsed,
+  onToggleCollapse,
+  isCompleted,
+  onToggleCompleted,
 }: CustomerSectionProps) {
   // Contact search state
   const [contacts, setContacts] = useState<Contact[]>([]);
@@ -144,12 +155,33 @@ export function CustomerSection({
 
   return (
     <div className="bg-purple-50 rounded-lg p-4">
-      <div className="flex items-center gap-2 px-3 py-2 -mx-4 -mt-4 mb-3 rounded-t-lg bg-purple-100">
-        <User className="h-4 w-4 text-purple-600" />
-        <h3 className="text-sm font-semibold text-purple-800">Customer Information</h3>
+      <div
+        className={`flex items-center justify-between px-3 py-2 -mx-4 -mt-4 rounded-t-lg bg-purple-100 cursor-pointer select-none ${
+          isCollapsed ? '-mb-4 rounded-b-lg' : 'mb-3'
+        }`}
+        onClick={onToggleCollapse}
+      >
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); onToggleCompleted?.(); }}
+            className="flex-shrink-0 hover:scale-110 transition-transform"
+            disabled={!onToggleCompleted}
+          >
+            {isCompleted
+              ? <CheckCircle2 className="h-5 w-5 text-green-500" />
+              : <Circle className="h-5 w-5 text-gray-400" />
+            }
+          </button>
+          <User className="h-4 w-4 text-purple-600" />
+          <h3 className="text-sm font-semibold text-purple-800">Customer Information</h3>
+        </div>
+        {onToggleCollapse && (
+          <ChevronDown className={`h-4 w-4 text-purple-400 transition-transform duration-200 ${isCollapsed ? '' : 'rotate-180'}`} />
+        )}
       </div>
 
-      <div className="space-y-4">
+      {!isCollapsed && <div className="space-y-4">
         {/* Booking Type (Direct/Agency) - MOVED TO TOP */}
         <div>
           <label className="block text-xs text-gray-500 mb-2">Booking Type</label>
@@ -425,7 +457,7 @@ export function CustomerSection({
             </p>
           </div>
         )}
-      </div>
+      </div>}
     </div>
   );
 }

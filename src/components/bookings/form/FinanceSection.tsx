@@ -14,6 +14,8 @@ import {
   CheckCircle2,
   AlertCircle,
   Clock,
+  ChevronDown,
+  Circle,
 } from 'lucide-react';
 import {
   Booking,
@@ -83,6 +85,10 @@ interface FinanceSectionProps {
   companies?: CompanyOption[];
   onAddPaymentFromInvoice?: (paymentIndex: number) => void;
   loadBankAccountsForCompany?: (companyId: string) => Promise<BankAccountOption[]>;
+  isCollapsed?: boolean;
+  onToggleCollapse?: () => void;
+  isCompleted?: boolean;
+  onToggleCompleted?: () => void;
 }
 
 export function FinanceSection({
@@ -108,6 +114,10 @@ export function FinanceSection({
   companies = [],
   onAddPaymentFromInvoice,
   loadBankAccountsForCompany,
+  isCollapsed,
+  onToggleCollapse,
+  isCompleted,
+  onToggleCompleted,
 }: FinanceSectionProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -177,38 +187,58 @@ export function FinanceSection({
 
   return (
     <div className="bg-green-50 rounded-lg p-4">
-      <div className="flex items-center justify-between px-3 py-2 -mx-4 -mt-4 mb-3 rounded-t-lg bg-green-100">
+      <div
+        className={`flex items-center justify-between px-3 py-2 -mx-4 -mt-4 rounded-t-lg bg-green-100 cursor-pointer select-none ${
+          isCollapsed ? '-mb-4 rounded-b-lg' : 'mb-3'
+        }`}
+        onClick={onToggleCollapse}
+      >
         <h3 className="text-sm font-semibold text-green-800 flex items-center gap-2">
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); onToggleCompleted?.(); }}
+            className="flex-shrink-0 hover:scale-110 transition-transform"
+            disabled={!onToggleCompleted}
+          >
+            {isCompleted
+              ? <CheckCircle2 className="h-5 w-5 text-green-500" />
+              : <Circle className="h-5 w-5 text-gray-400" />
+            }
+          </button>
           <DollarSign className="h-4 w-4 text-green-600" />
           Finance
         </h3>
-        {isEditing && canEdit ? (
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={onCreateReceipt}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-green-700 bg-green-50 border border-green-200 rounded-lg hover:bg-green-100 transition-colors"
-            >
-              <Receipt className="h-4 w-4" />
-              Create Receipt
-            </button>
-            <button
-              type="button"
-              onClick={onCreateInvoice}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-blue-700 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors"
-            >
-              <FileCheck className="h-4 w-4" />
-              Create Invoice
-            </button>
-          </div>
-        ) : (
-          !isEditing && (
+        <div className="flex items-center gap-2">
+          {!isCollapsed && isEditing && canEdit && (
+            <>
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); onCreateReceipt?.(); }}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-green-700 bg-green-50 border border-green-200 rounded-lg hover:bg-green-100 transition-colors"
+              >
+                <Receipt className="h-4 w-4" />
+                Create Receipt
+              </button>
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); onCreateInvoice?.(); }}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-blue-700 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors"
+              >
+                <FileCheck className="h-4 w-4" />
+                Create Invoice
+              </button>
+            </>
+          )}
+          {!isCollapsed && !isEditing && (
             <p className="text-xs text-gray-400 italic">Save booking to create receipts/invoices</p>
-          )
-        )}
+          )}
+          {onToggleCollapse && (
+            <ChevronDown className={`h-4 w-4 text-green-400 transition-transform duration-200 ${isCollapsed ? '' : 'rotate-180'}`} />
+          )}
+        </div>
       </div>
 
-      <div className="space-y-4">
+      {!isCollapsed && <div className="space-y-4">
         {/* Charter Fee, Extra Charges, Admin Fee, Total Cost */}
         <div className="grid grid-cols-4 gap-4">
           <div>
@@ -771,7 +801,7 @@ export function FinanceSection({
           )}
         </div>
 
-      </div>
+      </div>}
     </div>
   );
 }

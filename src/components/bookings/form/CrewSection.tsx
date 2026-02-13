@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { Users, X, ChevronDown, Search, AlertTriangle } from 'lucide-react';
+import { Users, X, ChevronDown, Search, AlertTriangle, CheckCircle2, Circle } from 'lucide-react';
 import { employeesApi } from '@/lib/supabase/api/employees';
 import { bookingCrewApi } from '@/lib/supabase/api/bookingCrew';
 import { leaveRequestsApi } from '@/lib/supabase/api/leaveRequests';
@@ -20,9 +20,13 @@ interface CrewSectionProps {
   dateFrom?: string;
   dateTo?: string;
   bookingId?: string;
+  isCollapsed?: boolean;
+  onToggleCollapse?: () => void;
+  isCompleted?: boolean;
+  onToggleCompleted?: () => void;
 }
 
-export default function CrewSection({ selectedCrewIds, onCrewChange, canEdit, dateFrom, dateTo, bookingId }: CrewSectionProps) {
+export default function CrewSection({ selectedCrewIds, onCrewChange, canEdit, dateFrom, dateTo, bookingId, isCollapsed, onToggleCollapse, isCompleted, onToggleCompleted }: CrewSectionProps) {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [loading, setLoading] = useState(true);
   const [isOpen, setIsOpen] = useState(false);
@@ -134,12 +138,33 @@ export default function CrewSection({ selectedCrewIds, onCrewChange, canEdit, da
 
   return (
     <div className="bg-cyan-50 rounded-lg p-4">
-      <div className="flex items-center gap-2 px-3 py-2 -mx-4 -mt-4 mb-3 rounded-t-lg bg-cyan-100">
-        <Users className="h-4 w-4 text-cyan-600" />
-        <h3 className="text-sm font-semibold text-cyan-800">Crew</h3>
+      <div
+        className={`flex items-center justify-between px-3 py-2 -mx-4 -mt-4 rounded-t-lg bg-cyan-100 cursor-pointer select-none ${
+          isCollapsed ? '-mb-4 rounded-b-lg' : 'mb-3'
+        }`}
+        onClick={onToggleCollapse}
+      >
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); onToggleCompleted?.(); }}
+            className="flex-shrink-0 hover:scale-110 transition-transform"
+            disabled={!onToggleCompleted}
+          >
+            {isCompleted
+              ? <CheckCircle2 className="h-5 w-5 text-green-500" />
+              : <Circle className="h-5 w-5 text-gray-400" />
+            }
+          </button>
+          <Users className="h-4 w-4 text-cyan-600" />
+          <h3 className="text-sm font-semibold text-cyan-800">Crew</h3>
+        </div>
+        {onToggleCollapse && (
+          <ChevronDown className={`h-4 w-4 text-cyan-400 transition-transform duration-200 ${isCollapsed ? '' : 'rotate-180'}`} />
+        )}
       </div>
 
-      {/* Selected crew tags */}
+      {!isCollapsed && <>{/* Selected crew tags */}
       {selectedEmployees.length > 0 && (
         <div className="flex flex-wrap gap-2 mb-3">
           {selectedEmployees.map((emp) => {
@@ -248,6 +273,7 @@ export default function CrewSection({ selectedCrewIds, onCrewChange, canEdit, da
           )}
         </div>
       )}
+      </>}
     </div>
   );
 }
