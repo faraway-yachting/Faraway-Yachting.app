@@ -23,10 +23,27 @@ function getDefaultRate(type?: string, agentPlatform?: string): number {
 export default function CommissionSection({ formData, onChange, canEdit, isCollapsed, onToggleCollapse, isCompleted, onToggleCompleted }: CommissionSectionProps) {
   const isExternalBoat = !!formData.externalBoatName && !formData.projectId;
 
-  // Charter fee commission base
-  const charterCommissionBase = isExternalBoat
-    ? (formData.charterFee || 0) - (formData.charterCost || 0)
-    : (formData.charterFee || 0);
+  // Charter fee commission base — normalize currencies when they differ
+  const bookingCurrency = formData.currency || 'THB';
+  const costCurrency = formData.charterCostCurrency || bookingCurrency;
+  const fxRate = formData.fxRate || null;
+
+  let charterCommissionBase: number;
+  if (!isExternalBoat) {
+    charterCommissionBase = formData.charterFee || 0;
+  } else if (bookingCurrency === costCurrency) {
+    // Same currency — subtract directly
+    charterCommissionBase = (formData.charterFee || 0) - (formData.charterCost || 0);
+  } else {
+    // Different currencies — normalize to THB
+    const feeThb = bookingCurrency === 'THB'
+      ? (formData.charterFee || 0)
+      : fxRate ? (formData.charterFee || 0) * fxRate : 0;
+    const costThb = costCurrency === 'THB'
+      ? (formData.charterCost || 0)
+      : 0; // no rate for cost foreign currency
+    charterCommissionBase = Math.round((feeThb - costThb) * 100) / 100;
+  }
 
   // Extras commission base (internal = selling price, external = profit)
   const extraItems = formData.extraItems || [];
@@ -65,6 +82,17 @@ export default function CommissionSection({ formData, onChange, canEdit, isColla
 
     prevDefaultRef.current = newDefault;
   }, [formData.type, formData.agentPlatform]);
+
+  // Recalculate commission when base amounts change (charter fee, cost, fx rate, extras)
+  const prevBaseRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (prevBaseRef.current !== null && prevBaseRef.current !== commissionBase && rate > 0) {
+      const newTotal = Math.round(commissionBase * rate) / 100;
+      onChange('totalCommission', newTotal);
+      onChange('commissionReceived', newTotal - (formData.commissionDeduction || 0));
+    }
+    prevBaseRef.current = commissionBase;
+  }, [commissionBase]);
 
   const handleRateChange = (value: string) => {
     const newRate = value === '' ? undefined : parseFloat(value);
@@ -158,6 +186,7 @@ export default function CommissionSection({ formData, onChange, canEdit, isColla
           {isExternalBoat && (
             <p className="text-xs text-teal-600 pt-1">
               Charter base = Fee - Boat Owner Cost
+              {bookingCurrency !== costCurrency && fxRate ? ' (THB)' : ''}
             </p>
           )}
         </div>
