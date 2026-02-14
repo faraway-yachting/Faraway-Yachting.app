@@ -5,14 +5,14 @@ type CommissionRecord = Database['public']['Tables']['commission_records']['Row'
 type CommissionRecordInsert = Database['public']['Tables']['commission_records']['Insert'];
 
 export const commissionRecordsApi = {
-  async getAll(): Promise<CommissionRecord[]> {
+  async getAll(): Promise<(CommissionRecord & { bookings?: { external_boat_name: string | null } | null })[]> {
     const supabase = createClient();
-    const { data, error } = await supabase
+    const { data, error } = await (supabase as any)
       .from('commission_records')
-      .select('*')
+      .select('*, bookings(external_boat_name)')
       .order('charter_date_from', { ascending: false });
     if (error) throw error;
-    return data ?? [];
+    return (data ?? []) as (CommissionRecord & { bookings?: { external_boat_name: string | null } | null })[];
   },
 
   async getByBookingId(bookingId: string): Promise<CommissionRecord | null> {

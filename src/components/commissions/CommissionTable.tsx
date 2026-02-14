@@ -181,6 +181,14 @@ export default function CommissionTable() {
   const userMap = useMemo(() => new Map(users.map((u) => [u.id, u])), [users]);
   const employeeMap = useMemo(() => new Map(salesEmployees.map((e) => [e.id, e.full_name_en])), [salesEmployees]);
 
+  const getBoatName = useCallback((record: CommissionRecord) => {
+    if (record.boat_id) {
+      return projectMap.get(record.boat_id)?.name || 'Unknown';
+    }
+    const extName = (record as any).bookings?.external_boat_name;
+    return extName || '-';
+  }, [projectMap]);
+
   const getUserName = useCallback((id: string | null) => {
     if (!id) return '-';
     // Check employees first (sales_owner_id), then auth profiles (legacy booking_owner)
@@ -198,7 +206,12 @@ export default function CommissionTable() {
         const dateStr = r.charter_date_from || '';
         if (!dateStr.startsWith(filterMonth)) return false;
       }
-      if (filterBoat !== 'all' && r.boat_id !== filterBoat) return false;
+      if (filterBoat !== 'all') {
+        if (filterBoat.startsWith('ext:')) {
+          const extName = (r as any).bookings?.external_boat_name;
+          if (extName !== filterBoat.slice(4)) return false;
+        } else if (r.boat_id !== filterBoat) return false;
+      }
       if (filterOwner !== 'all' && r.booking_owner_id !== filterOwner) return false;
       if (filterBookingType !== 'all' && r.booking_type !== filterBookingType) return false;
       if (filterSource !== 'all' && r.source !== filterSource) return false;
@@ -237,13 +250,18 @@ export default function CommissionTable() {
     return { totalNetIncome, totalCommission, earnedCommission, paidCommission, byOwner: Array.from(byOwner.values()) };
   }, [filteredRecords, getUserName, isEarned]);
 
-  // Unique boat options from records
+  // Unique boat options from records (including external boats)
   const boatOptions = useMemo(() => {
     const seen = new Map<string, string>();
     for (const r of records) {
       if (r.boat_id && !seen.has(r.boat_id)) {
         const p = projectMap.get(r.boat_id);
         seen.set(r.boat_id, p?.name || 'Unknown');
+      } else if (!r.boat_id) {
+        const extName = (r as any).bookings?.external_boat_name;
+        if (extName && !seen.has(`ext:${extName}`)) {
+          seen.set(`ext:${extName}`, extName);
+        }
       }
     }
     return Array.from(seen.entries()).sort((a, b) => a[1].localeCompare(b[1]));
@@ -453,7 +471,7 @@ export default function CommissionTable() {
       'Total Commission', 'Booking Owner', 'Status', 'Payment Status', 'Currency', 'Source', 'Notes',
     ];
     const rows = filteredRecords.map((r) => [
-      projectMap.get(r.boat_id || '')?.name || '',
+      getBoatName(r),
       r.charter_date_from || '',
       r.charter_date_to || '',
       formatCharterType(r.charter_type),
@@ -814,7 +832,12 @@ export default function CommissionTable() {
             return (
               <div key={r.id} className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
                 <div className="mb-2 flex items-center justify-between">
-                  <span className="text-sm font-semibold text-gray-900">{projectMap.get(r.boat_id || '')?.name || '-'}</span>
+                  <span className="text-sm font-semibold text-gray-900">
+                    {getBoatName(r)}
+                    {!r.boat_id && (r as any).bookings?.external_boat_name && (
+                      <span className="ml-1 text-xs font-normal text-gray-400">(Ext)</span>
+                    )}
+                  </span>
                   <div className="flex items-center gap-1.5">
                     {fromBooking ? (
                       <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-xs font-medium rounded-full bg-blue-100 text-blue-700">
@@ -930,7 +953,12 @@ export default function CommissionTable() {
                         )}
                       </td>
                       <td className="px-3 py-2.5">
-                        <div className="text-sm font-medium text-gray-900">{projectMap.get(r.boat_id || '')?.name || '-'}</div>
+                        <div className="text-sm font-medium text-gray-900">
+                          {getBoatName(r)}
+                          {!r.boat_id && (r as any).bookings?.external_boat_name && (
+                            <span className="ml-1 text-xs text-gray-400">(Ext)</span>
+                          )}
+                        </div>
                       </td>
                       <td className="px-3 py-2.5">
                         <div className="text-sm text-gray-600">{r.charter_date_from || '-'}</div>
