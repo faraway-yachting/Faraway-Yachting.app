@@ -16,6 +16,7 @@ import { createClient } from '@/lib/supabase/client';
 interface OperatorContact {
   id: string;
   name: string;
+  alternative_name?: string | null;
   type: string[];
   contact_person?: string | null;
   email?: string | null;
@@ -183,9 +184,12 @@ export default function BoatsPage() {
     setModalOpen(true);
   }
 
-  // Show all operators when search is empty, otherwise filter by search term
+  // Show all operators when search is empty, otherwise filter by name or alternative name
   const filteredOperatorContacts = operatorSearch.trim()
-    ? operatorContacts.filter((c) => c.name.toLowerCase().includes(operatorSearch.toLowerCase()))
+    ? operatorContacts.filter((c) => {
+        const q = operatorSearch.toLowerCase();
+        return c.name.toLowerCase().includes(q) || c.alternative_name?.toLowerCase().includes(q);
+      })
     : operatorContacts;
 
   function handleOperatorSelect(contact: OperatorContact) {
@@ -613,7 +617,12 @@ export default function BoatsPage() {
                         className="w-full px-3 py-2 text-left hover:bg-blue-50 transition-colors flex items-center gap-2"
                       >
                         <div className="flex-1">
-                          <p className="text-sm font-medium text-gray-900">{contact.name}</p>
+                          <p className="text-sm font-medium text-gray-900">
+                            {contact.name}
+                            {contact.alternative_name && (
+                              <span className="ml-1.5 text-xs font-normal text-gray-400">({contact.alternative_name})</span>
+                            )}
+                          </p>
                           {contact.email && (
                             <p className="text-xs text-gray-500">{contact.email}</p>
                           )}
