@@ -255,11 +255,15 @@ export function FinanceSection({
             <label className="block text-xs text-gray-500 mb-1">Extra Charges</label>
             <input
               type="number"
-              value={formData.extraCharges || ''}
-              onChange={(e) => onChange('extraCharges', e.target.value ? parseFloat(e.target.value) : undefined)}
-              disabled={!canEdit}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100"
+              value={extraCharges || ''}
+              readOnly
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-gray-100 text-gray-500"
             />
+            {(formData.extraItems || []).length > 0 && (
+              <span className="text-xs text-gray-400 mt-0.5 block">
+                From {(formData.extraItems || []).length} extra(s)
+              </span>
+            )}
           </div>
           <div>
             <label className="block text-xs text-gray-500 mb-1">Admin Fee</label>
@@ -693,6 +697,88 @@ export function FinanceSection({
                 </div>
               </div>
             )}
+
+            {/* Paid to Boat Operator */}
+            {(() => {
+              const operatorTotalPaid = (formData.operatorDepositAmount || 0) + (formData.operatorBalanceAmount || 0);
+              const charterCost = formData.charterCost || 0;
+              const opCurrency = formData.charterCostCurrency || formData.currency || 'THB';
+              const hasAnyPayment = (formData.operatorDepositAmount ?? 0) > 0 || (formData.operatorBalanceAmount ?? 0) > 0;
+              return (
+                <div className="bg-white rounded-lg p-3 border border-gray-200 space-y-3">
+                  <p className="text-xs font-medium text-gray-500">Paid to Boat Operator</p>
+                  <div className="grid grid-cols-[80px_1fr_1fr] gap-2 items-end">
+                    <span className="text-xs text-gray-500 py-1.5">Deposit</span>
+                    <div>
+                      <label className="block text-xs text-gray-400 mb-1">Amount</label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        value={formData.operatorDepositAmount ?? ''}
+                        onChange={(e) => onChange('operatorDepositAmount', e.target.value ? parseFloat(e.target.value) : undefined)}
+                        disabled={!canEdit}
+                        placeholder="0.00"
+                        className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100 disabled:text-gray-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-400 mb-1">Paid Date</label>
+                      <input
+                        type="date"
+                        value={formData.operatorDepositPaidDate || ''}
+                        onChange={(e) => onChange('operatorDepositPaidDate', e.target.value || undefined)}
+                        disabled={!canEdit}
+                        className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100 disabled:text-gray-500"
+                      />
+                    </div>
+                    <span className="text-xs text-gray-500 py-1.5">Balance</span>
+                    <div>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        value={formData.operatorBalanceAmount ?? ''}
+                        onChange={(e) => onChange('operatorBalanceAmount', e.target.value ? parseFloat(e.target.value) : undefined)}
+                        disabled={!canEdit}
+                        placeholder="0.00"
+                        className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100 disabled:text-gray-500"
+                      />
+                    </div>
+                    <div>
+                      <input
+                        type="date"
+                        value={formData.operatorBalancePaidDate || ''}
+                        onChange={(e) => onChange('operatorBalancePaidDate', e.target.value || undefined)}
+                        disabled={!canEdit}
+                        className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100 disabled:text-gray-500"
+                      />
+                    </div>
+                  </div>
+                  {hasAnyPayment && (
+                    <div className={`text-xs pt-2 border-t border-gray-100 font-medium ${
+                      operatorTotalPaid >= charterCost ? 'text-green-600' : 'text-amber-600'
+                    }`}>
+                      Total Paid: {operatorTotalPaid.toLocaleString('en-US', { minimumFractionDigits: 2 })} / {charterCost.toLocaleString('en-US', { minimumFractionDigits: 2 })} {opCurrency}
+                      {operatorTotalPaid >= charterCost
+                        ? <span className="ml-1">— Fully Paid</span>
+                        : <span className="ml-1 text-gray-500 font-normal">(Remaining: {(charterCost - operatorTotalPaid).toLocaleString('en-US', { minimumFractionDigits: 2 })} {opCurrency})</span>
+                      }
+                    </div>
+                  )}
+                  <div>
+                    <input
+                      type="text"
+                      value={formData.operatorPaymentNote || ''}
+                      onChange={(e) => onChange('operatorPaymentNote', e.target.value || undefined)}
+                      disabled={!canEdit}
+                      placeholder="Payment note (e.g., wire transfer, cash to captain...)"
+                      className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100 disabled:text-gray-500"
+                    />
+                  </div>
+                </div>
+              );
+            })()}
 
             {/* Accounting Status & Action */}
             {isEditing && booking?.id && (formData.charterCost ?? 0) > 0 && (

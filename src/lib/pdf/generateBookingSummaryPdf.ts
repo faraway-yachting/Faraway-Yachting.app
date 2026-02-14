@@ -27,22 +27,27 @@ export interface BookingSummaryData {
   dateFrom: string;
   dateTo: string;
   time?: string;
+  charterStartTime?: string;
+  charterEndTime?: string;
   customerName: string;
   customerEmail?: string;
   customerPhone?: string;
+  contactChannel?: string;
   numberOfGuests?: number;
+  contactPerson?: string;
   destination?: string;
   pickupLocation?: string;
   departureFrom?: string;
   arrivalTo?: string;
   extras?: string[];
+  extraItems?: { name: string; type: string; sellingPrice: number; cost?: number }[];
   currency: string;
   charterFee?: number;
   extraCharges?: number;
   adminFee?: number;
   totalPrice?: number;
-  depositAmount?: number;
-  balanceAmount?: number;
+  payments?: { type: string; amount: number; currency: string; dueDate?: string; paidDate?: string }[];
+  contractNote?: string;
   customerNotes?: string;
   boatName?: string;
   bookingOwnerName?: string;
@@ -122,11 +127,12 @@ export async function generateBookingSummaryPdf(data: BookingSummaryData): Promi
     y += 6;
   };
 
-  // ── Customer Info ──
-  sectionTitle('CUSTOMER');
+  // ── Guest Info ──
+  sectionTitle('GUEST');
   infoRow('Name', data.customerName);
   if (data.customerEmail) infoRow('Email', data.customerEmail);
   if (data.customerPhone) infoRow('Phone', data.customerPhone);
+  if (data.contactChannel) infoRow('Contact', data.contactChannel.charAt(0).toUpperCase() + data.contactChannel.slice(1));
   if (data.numberOfGuests) infoRow('Guests', String(data.numberOfGuests));
   y += 4;
 
@@ -137,15 +143,39 @@ export async function generateBookingSummaryPdf(data: BookingSummaryData): Promi
   infoRow('Date', data.dateFrom === data.dateTo
     ? fmtDate(data.dateFrom)
     : `${fmtDate(data.dateFrom)} — ${fmtDate(data.dateTo)}`);
-  if (data.time) infoRow('Time', data.time);
+  if (data.charterStartTime && data.charterEndTime) {
+    infoRow('Time', `${data.charterStartTime} — ${data.charterEndTime}`);
+  } else if (data.time) {
+    infoRow('Time', data.time);
+  }
   if (data.destination) infoRow('Destination', data.destination);
   if (data.pickupLocation) infoRow('Pickup', data.pickupLocation);
   if (data.departureFrom) infoRow('Departure', data.departureFrom);
   if (data.arrivalTo) infoRow('Arrival', data.arrivalTo);
+  if (data.contactPerson) infoRow('Contact Person', data.contactPerson);
   y += 4;
 
   // ── Extras ──
-  if (data.extras && data.extras.length > 0) {
+  if (data.extraItems && data.extraItems.length > 0) {
+    sectionTitle('EXTRAS');
+    const cur = data.currency || 'THB';
+    const extrasRows = data.extraItems.map(item => [
+      item.name,
+      item.type === 'external' ? 'External' : 'Internal',
+      fmtMoney(item.sellingPrice, cur),
+    ]);
+    autoTable(doc, {
+      startY: y,
+      head: [['Service', 'Type', 'Price']],
+      body: extrasRows,
+      theme: 'plain',
+      styles: { fontSize: 8.5, cellPadding: 2 },
+      headStyles: { textColor: BRAND, fontStyle: 'bold', fontSize: 7.5 },
+      columnStyles: { 2: { halign: 'right' } },
+      margin: { left: margin, right: margin },
+    });
+    y = (doc as any).lastAutoTable.finalY + 4;
+  } else if (data.extras && data.extras.length > 0) {
     sectionTitle('EXTRAS');
     doc.setTextColor(...DARK);
     doc.setFontSize(8.5);
@@ -153,6 +183,16 @@ export async function generateBookingSummaryPdf(data: BookingSummaryData): Promi
     const extrasText = data.extras.map(e => e.charAt(0).toUpperCase() + e.slice(1)).join('  •  ');
     doc.text(extrasText, margin + 4, y);
     y += 10;
+  }
+
+  // ── Charter Contract ──
+  if (data.contractNote) {
+    sectionTitle('CHARTER CONTRACT');
+    doc.setTextColor(...DARK);
+    doc.setFontSize(8.5);
+    const contractLines = doc.splitTextToSize(data.contractNote, contentW - 8);
+    doc.text(contractLines, margin + 4, y);
+    y += contractLines.length * 4.5 + 6;
   }
 
   // ── Pricing ──
@@ -195,26 +235,34 @@ export async function generateBookingSummaryPdf(data: BookingSummaryData): Promi
     y = (doc as any).lastAutoTable.finalY + 4;
   }
 
-  // Deposit / Balance
-  if (data.depositAmount || data.balanceAmount) {
+  // Payment Records
+  if (data.payments && data.payments.length > 0) {
     y += 2;
     doc.setDrawColor(...BRAND_LIGHT);
     doc.line(margin, y, pageW - margin, y);
     y += 6;
     doc.setFontSize(8.5);
-    if (data.depositAmount) {
+    for (const p of data.payments) {
+      const label = p.type.charAt(0).toUpperCase() + p.type.slice(1);
+      let dateInfo = '';
+      if (p.paidDate) {
+        dateInfo = ` (Paid ${fmtDate(p.paidDate)})`;
+      } else if (p.dueDate) {
+        dateInfo = ` (Due ${fmtDate(p.dueDate)})`;
+      }
       doc.setTextColor(...GRAY);
-      doc.text('Deposit', margin + 4, y);
+      doc.text(label + dateInfo, margin + 4, y);
       doc.setTextColor(...DARK);
-      doc.text(fmtMoney(data.depositAmount, cur), pageW - margin, y, { align: 'right' });
+      doc.text(fmtMoney(p.amount, p.currency), pageW - margin, y, { align: 'right' });
       y += 6;
     }
-    if (data.balanceAmount) {
+    const totalPaid = data.payments.reduce((s, p) => s + p.amount, 0);
+    if (data.totalPrice && totalPaid < data.totalPrice) {
       doc.setTextColor(...GRAY);
       doc.text('Balance Due', margin + 4, y);
       doc.setTextColor(...DARK);
       doc.setFont('helvetica', 'bold');
-      doc.text(fmtMoney(data.balanceAmount, cur), pageW - margin, y, { align: 'right' });
+      doc.text(fmtMoney(data.totalPrice - totalPaid, cur), pageW - margin, y, { align: 'right' });
       doc.setFont('helvetica', 'normal');
       y += 6;
     }
@@ -243,7 +291,7 @@ export async function generateBookingSummaryPdf(data: BookingSummaryData): Promi
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(7.5);
   doc.setTextColor(...GRAY);
-  doc.text('Faraway Yachting Co., Ltd.  |  Phuket, Thailand  |  info@farawayyachting.com', pageW / 2, footerY + 6, { align: 'center' });
+  doc.text('Faraway Yachting Co., Ltd.  |  Phuket, Thailand  |  booking@faraway-yachting.com', pageW / 2, footerY + 6, { align: 'center' });
 
   return doc;
 }

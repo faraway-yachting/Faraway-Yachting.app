@@ -101,23 +101,19 @@ function dbBookingToFrontend(db: DbBooking): Booking {
     adminFee: db.admin_fee ?? undefined,
     beamChargeId: db.beam_charge_id ?? undefined,
     paymentStatus: (db.payment_status as Booking['paymentStatus']) ?? undefined,
-    depositAmount: db.deposit_amount ?? undefined,
-    depositDueDate: db.deposit_due_date ?? undefined,
-    depositPaidDate: db.deposit_paid_date ?? undefined,
-    balanceAmount: db.balance_amount ?? undefined,
-    balanceDueDate: db.balance_due_date ?? undefined,
-    balancePaidDate: db.balance_paid_date ?? undefined,
     financeNote: db.finance_note ?? undefined,
     financeAttachments: (db.finance_attachments as BookingAttachment[] | null) ?? undefined,
     commissionRate: db.commission_rate ?? undefined,
     totalCommission: db.total_commission ?? undefined,
     commissionDeduction: db.commission_deduction ?? undefined,
     commissionReceived: db.commission_received ?? undefined,
+    commissionNote: (db as any).commission_note ?? undefined,
     depositReceiptId: db.deposit_receipt_id ?? undefined,
     finalReceiptId: db.final_receipt_id ?? undefined,
     invoiceId: db.invoice_id ?? undefined,
     expenseIds: db.expense_ids ?? undefined,
     extras: (db as any).extras ?? undefined,
+    extraItems: (db as any).extra_items ?? undefined,
     contractNote: (db as any).contract_note ?? undefined,
     contractAttachments: ((db as any).contract_attachments as BookingAttachment[] | null) ?? undefined,
     internalNotes: db.internal_notes ?? undefined,
@@ -132,6 +128,11 @@ function dbBookingToFrontend(db: DbBooking): Booking {
     charterCostCurrency: (db as any).charter_cost_currency ?? undefined,
     charterExpenseStatus: db.charter_expense_status ?? undefined,
     linkedExpenseId: db.linked_expense_id ?? undefined,
+    operatorDepositAmount: (db as any).operator_deposit_amount ?? undefined,
+    operatorDepositPaidDate: (db as any).operator_deposit_paid_date ?? undefined,
+    operatorBalanceAmount: (db as any).operator_balance_amount ?? undefined,
+    operatorBalancePaidDate: (db as any).operator_balance_paid_date ?? undefined,
+    operatorPaymentNote: (db as any).operator_payment_note ?? undefined,
     completedSections: (db as any).completed_sections ?? undefined,
   };
 }
@@ -171,23 +172,19 @@ function frontendToDb(booking: Partial<Booking>): Partial<DbBookingInsert> {
   if (booking.adminFee !== undefined) db.admin_fee = booking.adminFee ?? null;
   if (booking.beamChargeId !== undefined) db.beam_charge_id = booking.beamChargeId ?? null;
   if (booking.paymentStatus !== undefined) db.payment_status = booking.paymentStatus || null;
-  if (booking.depositAmount !== undefined) db.deposit_amount = booking.depositAmount ?? null;
-  if (booking.depositDueDate !== undefined) db.deposit_due_date = booking.depositDueDate || null;
-  if (booking.depositPaidDate !== undefined) db.deposit_paid_date = booking.depositPaidDate || null;
-  if (booking.balanceAmount !== undefined) db.balance_amount = booking.balanceAmount ?? null;
-  if (booking.balanceDueDate !== undefined) db.balance_due_date = booking.balanceDueDate || null;
-  if (booking.balancePaidDate !== undefined) db.balance_paid_date = booking.balancePaidDate || null;
   if (booking.financeNote !== undefined) db.finance_note = booking.financeNote || null;
   if (booking.financeAttachments !== undefined) db.finance_attachments = booking.financeAttachments as unknown;
   if (booking.commissionRate !== undefined) db.commission_rate = booking.commissionRate ?? null;
   if (booking.totalCommission !== undefined) db.total_commission = booking.totalCommission ?? null;
   if (booking.commissionDeduction !== undefined) db.commission_deduction = booking.commissionDeduction ?? null;
   if (booking.commissionReceived !== undefined) db.commission_received = booking.commissionReceived ?? null;
+  if (booking.commissionNote !== undefined) (db as any).commission_note = booking.commissionNote || null;
   if (booking.depositReceiptId !== undefined) db.deposit_receipt_id = booking.depositReceiptId || null;
   if (booking.finalReceiptId !== undefined) db.final_receipt_id = booking.finalReceiptId || null;
   if (booking.invoiceId !== undefined) db.invoice_id = booking.invoiceId || null;
   if (booking.expenseIds !== undefined) db.expense_ids = booking.expenseIds || null;
   if (booking.extras !== undefined && Array.isArray(booking.extras) && booking.extras.length > 0) (db as any).extras = booking.extras;
+  if (booking.extraItems !== undefined) (db as any).extra_items = booking.extraItems || [];
   if (booking.contractNote) (db as any).contract_note = booking.contractNote;
   if (booking.contractAttachments !== undefined && Array.isArray(booking.contractAttachments) && booking.contractAttachments.length > 0) (db as any).contract_attachments = booking.contractAttachments;
   if (booking.internalNotes !== undefined) db.internal_notes = booking.internalNotes || null;
@@ -197,6 +194,11 @@ function frontendToDb(booking: Partial<Booking>): Partial<DbBookingInsert> {
   if (booking.charterCostCurrency !== undefined) (db as any).charter_cost_currency = booking.charterCostCurrency;
   if (booking.charterExpenseStatus !== undefined) db.charter_expense_status = booking.charterExpenseStatus;
   if (booking.linkedExpenseId !== undefined) db.linked_expense_id = booking.linkedExpenseId;
+  if (booking.operatorDepositAmount !== undefined) (db as any).operator_deposit_amount = booking.operatorDepositAmount ?? null;
+  if (booking.operatorDepositPaidDate !== undefined) (db as any).operator_deposit_paid_date = booking.operatorDepositPaidDate || null;
+  if (booking.operatorBalanceAmount !== undefined) (db as any).operator_balance_amount = booking.operatorBalanceAmount ?? null;
+  if (booking.operatorBalancePaidDate !== undefined) (db as any).operator_balance_paid_date = booking.operatorBalancePaidDate || null;
+  if (booking.operatorPaymentNote !== undefined) (db as any).operator_payment_note = booking.operatorPaymentNote || null;
   if (booking.completedSections !== undefined) (db as any).completed_sections = booking.completedSections ?? {};
   return db;
 }

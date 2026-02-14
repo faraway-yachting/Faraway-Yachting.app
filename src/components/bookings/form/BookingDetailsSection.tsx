@@ -18,7 +18,7 @@ import {
   BookingAttachment,
 } from '@/data/booking/types';
 import { DynamicSelect } from './DynamicSelect';
-import { DynamicMultiSelect } from './DynamicMultiSelect';
+import { ExtraItemsEditor } from './ExtraItemsEditor';
 
 interface BookingDetailsSectionProps {
   formData: Partial<Booking>;
@@ -189,12 +189,11 @@ export function BookingDetailsSection({
               <Package className="h-4 w-4 text-amber-600" />
               <h3 className="text-sm font-semibold text-amber-800">Extras</h3>
             </div>
-            <DynamicMultiSelect
-              category="extras"
-              values={formData.extras || []}
-              onChange={(vals) => onChange('extras', vals)}
+            <ExtraItemsEditor
+              items={formData.extraItems || []}
+              onChange={(items) => onChange('extraItems', items)}
               disabled={!canEdit}
-              placeholder="Select extras (Taxi, BBQ, Diving...)"
+              currency={formData.currency || 'THB'}
             />
           </div>
 

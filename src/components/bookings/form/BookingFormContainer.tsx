@@ -153,10 +153,6 @@ export function BookingFormContainer({
     charterFee: getInitialValue(prefilled?.charterFee, booking?.charterFee, undefined),
     extraCharges: getInitialValue(prefilled?.extraCharges, booking?.extraCharges, undefined),
     paymentStatus: getInitialValue(prefilled?.paymentStatus, booking?.paymentStatus, 'unpaid'),
-    depositAmount: getInitialValue(prefilled?.depositAmount, booking?.depositAmount, undefined),
-    depositPaidDate: getInitialValue(prefilled?.depositPaidDate, booking?.depositPaidDate, undefined),
-    balanceAmount: getInitialValue(prefilled?.balanceAmount, booking?.balanceAmount, undefined),
-    balancePaidDate: getInitialValue(prefilled?.balancePaidDate, booking?.balancePaidDate, undefined),
     financeNote: getInitialValue(prefilled?.financeNote, booking?.financeNote, ''),
     financeAttachments: booking?.financeAttachments || [],
     commissionRate: getInitialValue(prefilled?.commissionRate, booking?.commissionRate, undefined),
@@ -164,6 +160,11 @@ export function BookingFormContainer({
     commissionDeduction: getInitialValue(prefilled?.commissionDeduction, booking?.commissionDeduction, undefined),
     commissionReceived: getInitialValue(prefilled?.commissionReceived, booking?.commissionReceived, undefined),
     extras: getInitialValue(prefilled?.extras, booking?.extras, []),
+    extraItems: booking?.extraItems ?? (
+      (booking?.extraCharges && booking.extraCharges > 0 && (!booking?.extraItems || booking.extraItems.length === 0))
+        ? [{ id: crypto.randomUUID(), name: 'Other', type: 'internal' as const, sellingPrice: booking.extraCharges }]
+        : []
+    ),
     contractNote: getInitialValue(prefilled?.contractNote, booking?.contractNote, ''),
     contractAttachments: booking?.contractAttachments || [],
     internalNotes: getInitialValue(prefilled?.internalNotes, booking?.internalNotes, ''),
@@ -430,6 +431,15 @@ export function BookingFormContainer({
     }
   };
 
+  // Auto-compute extraCharges from extra items
+  useEffect(() => {
+    const items = formData.extraItems || [];
+    const computed = items.reduce((sum, item) => sum + (item.sellingPrice || 0), 0);
+    if (computed !== (formData.extraCharges || 0)) {
+      setFormData(prev => ({ ...prev, extraCharges: computed }));
+    }
+  }, [formData.extraItems]);
+
   // Auto-calculate total cost
   useEffect(() => {
     const fee = formData.charterFee || 0;
@@ -603,8 +613,14 @@ export function BookingFormContainer({
       charterExpenseStatus = undefined;
     }
 
+    // Derive extras string array from extraItems for backward compatibility
+    const extras = (formData.extraItems || [])
+      .filter(item => item.name.trim())
+      .map(item => item.name);
+
     return {
       ...formData,
+      extras,
       projectId: useExternalBoat ? undefined : formData.projectId,
       externalBoatName: useExternalBoat ? formData.externalBoatName : undefined,
       pickupLocation: formData.departureFrom || formData.pickupLocation,
@@ -1047,6 +1063,9 @@ export function BookingFormContainer({
     const boatName = formData.projectId
       ? projects.find(p => p.id === formData.projectId)?.name
       : formData.externalBoatName || undefined;
+    const ownerName = formData.bookingOwner
+      ? users.find(u => u.id === formData.bookingOwner)?.full_name || undefined
+      : undefined;
     const doc = await generateBookingSummaryPdf({
       bookingNumber: formData.bookingNumber || '',
       type: formData.type || 'day_charter',
@@ -1058,19 +1077,24 @@ export function BookingFormContainer({
       customerName: formData.customerName || '',
       customerEmail: formData.customerEmail,
       customerPhone: formData.customerPhone,
+      contactChannel: formData.contactChannel,
       numberOfGuests: formData.numberOfGuests,
+      contactPerson: ownerName,
       destination: formData.destination,
       pickupLocation: formData.pickupLocation,
       departureFrom: formData.departureFrom,
       arrivalTo: formData.arrivalTo,
       extras: formData.extras,
+      extraItems: formData.extraItems,
       currency: formData.currency || 'THB',
       charterFee: formData.charterFee,
       extraCharges: formData.extraCharges,
       adminFee: formData.adminFee,
       totalPrice: formData.totalPrice,
-      depositAmount: formData.depositAmount,
-      balanceAmount: formData.balanceAmount,
+      payments: payments
+        .filter(p => p.amount > 0)
+        .map(p => ({ type: p.paymentType, amount: p.amount, currency: p.currency, dueDate: p.dueDate || undefined, paidDate: p.paidDate || undefined })),
+      contractNote: formData.contractNote,
       customerNotes: formData.customerNotes,
       boatName,
     });

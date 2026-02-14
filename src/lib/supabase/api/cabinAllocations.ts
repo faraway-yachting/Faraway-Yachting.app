@@ -19,12 +19,14 @@ interface CabinAllocationRow {
   contact_info: string | null;
   booking_owner: string | null;
   extras: string[] | null;
+  extra_items: any; // JSONB
   contract_note: string | null;
   contract_attachments: any; // JSONB
   commission_rate: number | null;
   total_commission: number | null;
   commission_deduction: number | null;
   commission_received: number | null;
+  commission_note: string | null;
   internal_notes: string | null;
   internal_note_attachments: any; // JSONB
   customer_notes: string | null;
@@ -66,12 +68,14 @@ function rowToAllocation(row: CabinAllocationRow): CabinAllocation {
     contactInfo: row.contact_info ?? undefined,
     bookingOwner: row.booking_owner ?? undefined,
     extras: row.extras ?? undefined,
+    extraItems: row.extra_items ?? undefined,
     contractNote: row.contract_note ?? undefined,
     contractAttachments: parseJsonbAttachments(row.contract_attachments),
     commissionRate: row.commission_rate ?? undefined,
     totalCommission: row.total_commission ?? undefined,
     commissionDeduction: row.commission_deduction ?? undefined,
     commissionReceived: row.commission_received ?? undefined,
+    commissionNote: row.commission_note ?? undefined,
     internalNotes: row.internal_notes ?? undefined,
     internalNoteAttachments: parseJsonbAttachments(row.internal_note_attachments),
     customerNotes: row.customer_notes ?? undefined,
@@ -103,12 +107,14 @@ function allocationToRow(a: Partial<CabinAllocation> & { bookingId: string }): R
   if (a.contactInfo !== undefined) row.contact_info = a.contactInfo || null;
   if (a.bookingOwner !== undefined) row.booking_owner = a.bookingOwner || null;
   if (a.extras !== undefined) row.extras = a.extras || [];
+  if (a.extraItems !== undefined) row.extra_items = a.extraItems || [];
   if (a.contractNote !== undefined) row.contract_note = a.contractNote || null;
   if (a.contractAttachments !== undefined) row.contract_attachments = a.contractAttachments || [];
   if (a.commissionRate !== undefined) row.commission_rate = a.commissionRate ?? null;
   if (a.totalCommission !== undefined) row.total_commission = a.totalCommission ?? null;
   if (a.commissionDeduction !== undefined) row.commission_deduction = a.commissionDeduction ?? null;
   if (a.commissionReceived !== undefined) row.commission_received = a.commissionReceived ?? null;
+  if (a.commissionNote !== undefined) row.commission_note = a.commissionNote || null;
   if (a.internalNotes !== undefined) row.internal_notes = a.internalNotes || null;
   if (a.internalNoteAttachments !== undefined) row.internal_note_attachments = a.internalNoteAttachments || [];
   if (a.customerNotes !== undefined) row.customer_notes = a.customerNotes || null;
@@ -162,12 +168,14 @@ export const cabinAllocationsApi = {
     if (updates.contactInfo !== undefined) dbUpdates.contact_info = updates.contactInfo || null;
     if (updates.bookingOwner !== undefined) dbUpdates.booking_owner = updates.bookingOwner || null;
     if (updates.extras !== undefined) dbUpdates.extras = updates.extras || [];
+    if (updates.extraItems !== undefined) dbUpdates.extra_items = updates.extraItems || [];
     if (updates.contractNote !== undefined) dbUpdates.contract_note = updates.contractNote || null;
     if (updates.contractAttachments !== undefined) dbUpdates.contract_attachments = updates.contractAttachments || [];
     if (updates.commissionRate !== undefined) dbUpdates.commission_rate = updates.commissionRate ?? null;
     if (updates.totalCommission !== undefined) dbUpdates.total_commission = updates.totalCommission ?? null;
     if (updates.commissionDeduction !== undefined) dbUpdates.commission_deduction = updates.commissionDeduction ?? null;
     if (updates.commissionReceived !== undefined) dbUpdates.commission_received = updates.commissionReceived ?? null;
+    if (updates.commissionNote !== undefined) dbUpdates.commission_note = updates.commissionNote || null;
     if (updates.internalNotes !== undefined) dbUpdates.internal_notes = updates.internalNotes || null;
     if (updates.internalNoteAttachments !== undefined) dbUpdates.internal_note_attachments = updates.internalNoteAttachments || [];
     if (updates.customerNotes !== undefined) dbUpdates.customer_notes = updates.customerNotes || null;

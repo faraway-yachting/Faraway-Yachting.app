@@ -12,7 +12,8 @@ import { Currency } from '@/data/company/types';
 export type BookingType =
   | 'day_charter'
   | 'overnight_charter'
-  | 'cabin_charter';
+  | 'cabin_charter'
+  | 'bareboat_charter';
 
 export type BookingStatus =
   | 'enquiry'    // Initial inquiry
@@ -26,6 +27,15 @@ export type ContactChannel = 'whatsapp' | 'email' | 'line' | 'phone' | 'other';
 
 // Payment status
 export type PaymentStatus = 'unpaid' | 'awaiting_payment' | 'partial' | 'paid';
+
+// Extra item for itemized extras with commission tracking
+export interface BookingExtraItem {
+  id: string;
+  name: string;
+  type: 'internal' | 'external'; // internal = commission on selling price, external = commission on profit
+  sellingPrice: number;
+  cost?: number; // only for external type (our cost to the provider)
+}
 
 // Main Booking entity
 export interface Booking {
@@ -77,12 +87,6 @@ export interface Booking {
   adminFee?: number;
   beamChargeId?: string;
   paymentStatus?: PaymentStatus;
-  depositAmount?: number;
-  depositDueDate?: string;
-  depositPaidDate?: string;
-  balanceAmount?: number;
-  balanceDueDate?: string;
-  balancePaidDate?: string;
   financeNote?: string;
   financeAttachments?: BookingAttachment[];
 
@@ -91,6 +95,7 @@ export interface Booking {
   totalCommission?: number;
   commissionDeduction?: number;
   commissionReceived?: number;
+  commissionNote?: string;
 
   // Links to Accounting
   depositReceiptId?: string;
@@ -99,7 +104,8 @@ export interface Booking {
   expenseIds?: string[];
 
   // Extras
-  extras?: string[]; // e.g., ['taxi', 'bbq', 'diving']
+  extras?: string[]; // e.g., ['taxi', 'bbq', 'diving'] — legacy, derived from extraItems
+  extraItems?: BookingExtraItem[];
 
   // Charter Contract
   contractNote?: string;
@@ -124,6 +130,12 @@ export interface Booking {
   charterCostCurrency?: string;
   charterExpenseStatus?: string;
   linkedExpenseId?: string;
+  // Operator payments (external boats)
+  operatorDepositAmount?: number;
+  operatorDepositPaidDate?: string;
+  operatorBalanceAmount?: number;
+  operatorBalancePaidDate?: string;
+  operatorPaymentNote?: string;
 }
 
 // Booking payment record (multiple deposits/balances in multiple currencies)
@@ -198,6 +210,7 @@ export const bookingTypeLabels: Record<BookingType, string> = {
   day_charter: 'Day Charter',
   overnight_charter: 'Overnight Charter',
   cabin_charter: 'Cabin Charter',
+  bareboat_charter: 'Bareboat Charter',
 };
 
 // Agent platforms for dropdown
@@ -268,6 +281,7 @@ export interface CabinAllocation {
   bookingOwner?: string;
   // Extras (same as Booking.extras)
   extras?: string[];
+  extraItems?: BookingExtraItem[];
   // Charter contract (same as Booking.contractNote/contractAttachments)
   contractNote?: string;
   contractAttachments?: BookingAttachment[];
@@ -276,6 +290,7 @@ export interface CabinAllocation {
   totalCommission?: number;
   commissionDeduction?: number;
   commissionReceived?: number;
+  commissionNote?: string;
   // Notes (same as Booking.internalNotes/customerNotes)
   internalNotes?: string;
   internalNoteAttachments?: BookingAttachment[];

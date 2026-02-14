@@ -129,6 +129,8 @@ export function bookingTypeToProductCharterTypes(
       return ['overnight_charter', 'bareboat_charter'];
     case 'cabin_charter':
       return ['cabin_charter'];
+    case 'bareboat_charter':
+      return ['bareboat_charter'];
   }
 }
 
