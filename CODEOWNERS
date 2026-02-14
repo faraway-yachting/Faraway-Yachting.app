@@ -1,0 +1,8 @@
+# Sensitive areas - require review from owner before merging
+/src/app/accounting/          @faraway-yachting
+/src/app/hr/                  @faraway-yachting
+/src/app/admin/               @faraway-yachting
+/src/app/api/admin/           @faraway-yachting
+/src/lib/supabase/api/        @faraway-yachting
+/supabase/migrations/         @faraway-yachting
+/supabase/functions/          @faraway-yachting
