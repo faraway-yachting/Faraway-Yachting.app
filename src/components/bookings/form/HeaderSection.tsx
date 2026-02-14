@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   Ship,
   Calendar,
@@ -14,6 +14,7 @@ import {
   ChevronDown,
   CheckCircle2,
   Circle,
+  Search,
 } from 'lucide-react';
 import {
   Booking,
@@ -71,6 +72,22 @@ export function HeaderSection({
   const [holdDays, setHoldDays] = useState<number>(3);
 
   // Meet & Greeter form state
+  // External boat search state
+  const [boatSearch, setBoatSearch] = useState('');
+  const [boatDropdownOpen, setBoatDropdownOpen] = useState(false);
+  const boatDropdownRef = useRef<HTMLDivElement>(null);
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (boatDropdownRef.current && !boatDropdownRef.current.contains(e.target as Node)) {
+        setBoatDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
   const [showNewGreeterForm, setShowNewGreeterForm] = useState(false);
   const [newGreeterName, setNewGreeterName] = useState('');
   const [newGreeterPhone, setNewGreeterPhone] = useState('');
@@ -187,21 +204,87 @@ export function HeaderSection({
                 ))}
               </select>
             ) : (
-              <select
-                value={formData.externalBoatName || ''}
-                onChange={(e) => onChange('externalBoatName', e.target.value)}
-                disabled={!canEdit}
-                className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100 ${
-                  errors.externalBoatName ? 'border-red-500' : 'border-gray-300'
-                }`}
-              >
-                <option value="">Select external boat...</option>
-                {externalBoats.map((boat) => (
-                  <option key={boat.id} value={boat.name}>
-                    {boat.displayName || boat.name}
-                  </option>
-                ))}
-              </select>
+              <div ref={boatDropdownRef} className="relative">
+                <div
+                  onClick={() => canEdit && setBoatDropdownOpen(!boatDropdownOpen)}
+                  className={`w-full px-3 py-2 border rounded-lg flex items-center justify-between cursor-pointer ${
+                    !canEdit ? 'bg-gray-100 cursor-not-allowed' : 'bg-white'
+                  } ${errors.externalBoatName ? 'border-red-500' : 'border-gray-300'} ${
+                    boatDropdownOpen ? 'ring-2 ring-blue-500 border-blue-500' : ''
+                  }`}
+                >
+                  {formData.externalBoatName ? (
+                    <span className="text-gray-900 truncate">
+                      {(() => {
+                        const selected = externalBoats.find(b => b.name === formData.externalBoatName);
+                        if (selected?.displayName && selected.displayName !== selected.name) {
+                          return <>{selected.displayName} <span className="text-gray-400 text-xs">({selected.name})</span></>;
+                        }
+                        return selected?.displayName || formData.externalBoatName;
+                      })()}
+                    </span>
+                  ) : (
+                    <span className="text-gray-400">Select external boat...</span>
+                  )}
+                  <ChevronDown className={`h-4 w-4 text-gray-400 flex-shrink-0 transition-transform ${boatDropdownOpen ? 'rotate-180' : ''}`} />
+                </div>
+                {boatDropdownOpen && (
+                  <div className="absolute z-50 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-72 flex flex-col">
+                    <div className="p-2 border-b border-gray-100">
+                      <div className="relative">
+                        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                        <input
+                          type="text"
+                          value={boatSearch}
+                          onChange={(e) => setBoatSearch(e.target.value)}
+                          placeholder="Search boats..."
+                          className="w-full pl-8 pr-3 py-1.5 text-sm border border-gray-200 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                          autoFocus
+                        />
+                      </div>
+                    </div>
+                    <div className="overflow-y-auto flex-1">
+                      <div
+                        onClick={() => {
+                          onChange('externalBoatName', '');
+                          setBoatDropdownOpen(false);
+                          setBoatSearch('');
+                        }}
+                        className="px-3 py-2 text-sm text-gray-400 hover:bg-gray-50 cursor-pointer"
+                      >
+                        Select external boat...
+                      </div>
+                      {externalBoats
+                        .filter(boat => {
+                          if (!boatSearch) return true;
+                          const q = boatSearch.toLowerCase();
+                          return (
+                            boat.name.toLowerCase().includes(q) ||
+                            (boat.displayName?.toLowerCase().includes(q))
+                          );
+                        })
+                        .map((boat) => (
+                          <div
+                            key={boat.id}
+                            onClick={() => {
+                              onChange('externalBoatName', boat.name);
+                              setBoatDropdownOpen(false);
+                              setBoatSearch('');
+                            }}
+                            className={`px-3 py-2 text-sm cursor-pointer hover:bg-blue-50 ${
+                              formData.externalBoatName === boat.name ? 'bg-blue-50 text-blue-700' : 'text-gray-900'
+                            }`}
+                          >
+                            <span className="font-medium">{boat.displayName || boat.name}</span>
+                            {boat.displayName && boat.displayName !== boat.name && (
+                              <span className="text-gray-400 text-xs ml-1.5">({boat.name})</span>
+                            )}
+                          </div>
+                        ))}
+                    </div>
+                  </div>
+                )}
+              </div>
             )}
             {(errors.projectId || errors.externalBoatName) && (
               <p className="text-sm text-red-500 mt-1">{errors.projectId || errors.externalBoatName}</p>
