@@ -159,6 +159,10 @@ export function BookingFormContainer({
     totalCommission: getInitialValue(prefilled?.totalCommission, booking?.totalCommission, undefined),
     commissionDeduction: getInitialValue(prefilled?.commissionDeduction, booking?.commissionDeduction, undefined),
     commissionReceived: getInitialValue(prefilled?.commissionReceived, booking?.commissionReceived, undefined),
+    charterCost: getInitialValue(prefilled?.charterCost, booking?.charterCost, undefined),
+    charterCostCurrency: getInitialValue(prefilled?.charterCostCurrency, booking?.charterCostCurrency, undefined),
+    fxRate: getInitialValue(prefilled?.fxRate, booking?.fxRate, undefined),
+    fxRateSource: getInitialValue(prefilled?.fxRateSource, booking?.fxRateSource, undefined),
     extras: getInitialValue(prefilled?.extras, booking?.extras, []),
     extraItems: booking?.extraItems ?? (
       (booking?.extraCharges && booking.extraCharges > 0 && (!booking?.extraItems || booking.extraItems.length === 0))
