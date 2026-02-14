@@ -139,17 +139,7 @@ export default function CommissionTable() {
       setUsers(allUsers as UserProfile[]);
       setSalesEmployees(allSalesEmployees);
 
-      // Sync from bookings (single RPC call — all logic runs server-side)
-      setSyncing(true);
-      try {
-        await commissionRecordsApi.syncFromBookings();
-      } catch (syncErr) {
-        console.error('Failed to sync from bookings:', syncErr);
-      } finally {
-        setSyncing(false);
-      }
-
-      // Load records after sync
+      // Load records (sync is now manual via button)
       let allRecords = await commissionRecordsApi.getAll();
 
       // Sales role: filter to only show own commissions
@@ -175,6 +165,19 @@ export default function CommissionTable() {
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  const handleSync = useCallback(async () => {
+    setSyncing(true);
+    try {
+      await commissionRecordsApi.syncFromBookings();
+      const allRecords = await commissionRecordsApi.getAll();
+      setRecords(allRecords);
+    } catch (err) {
+      console.error('Failed to sync from bookings:', err);
+    } finally {
+      setSyncing(false);
+    }
+  }, []);
 
   // Lookup maps
   const projectMap = useMemo(() => new Map(projects.map((p) => [p.id, p])), [projects]);
@@ -653,6 +656,12 @@ export default function CommissionTable() {
           className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">
           <Download className="h-4 w-4" />
           Export CSV
+        </button>
+
+        <button onClick={handleSync} disabled={syncing}
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-[#5A7A8F] bg-white border border-[#5A7A8F] rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50">
+          {syncing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Link2 className="h-4 w-4" />}
+          {syncing ? 'Syncing...' : 'Sync from Bookings'}
         </button>
 
         <button onClick={openAddForm}
