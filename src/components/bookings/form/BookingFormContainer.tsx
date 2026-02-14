@@ -580,7 +580,7 @@ export function BookingFormContainer({
     }
     if (!useExternalBoat && !formData.projectId) newErrors.projectId = 'Please select a boat';
     if (useExternalBoat && !formData.externalBoatName?.trim()) newErrors.externalBoatName = 'External boat name is required';
-    if (formData.type !== 'cabin_charter' && !formData.customerName?.trim()) newErrors.customerName = 'Customer name is required';
+    // customerName is optional — users may not know it at booking creation time
     setErrors(newErrors);
 
     // Auto-expand sections that contain validation errors

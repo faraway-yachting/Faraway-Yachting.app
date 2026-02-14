@@ -263,7 +263,7 @@ export function CustomerSection({
 
         {/* Customer Name with contact search */}
         <div className="pt-3 border-t border-gray-200">
-          <label className="block text-xs text-gray-500 mb-1">Customer / Agency Name *</label>
+          <label className="block text-xs text-gray-500 mb-1">Customer / Agency Name</label>
           <div className="relative" ref={contactDropdownRef}>
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
