@@ -81,6 +81,9 @@ export interface Booking {
 
   // Financial info
   currency: Currency;
+  fxRate?: number;
+  fxRateSource?: string;
+  thbTotalPrice?: number;
   totalPrice?: number;
   charterFee?: number;
   extraCharges?: number;

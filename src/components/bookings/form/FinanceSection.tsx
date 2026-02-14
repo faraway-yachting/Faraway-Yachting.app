@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useRef, useState, useEffect, useCallback } from 'react';
 import {
   DollarSign,
   Plus,
@@ -22,6 +22,9 @@ import {
   PaymentStatus,
 } from '@/data/booking/types';
 import { DynamicSelect } from './DynamicSelect';
+import { ExchangeRateField } from '@/components/shared/ExchangeRateField';
+import { useExchangeRate } from '@/hooks/useExchangeRate';
+import type { Currency } from '@/data/company/types';
 import type { CashCollection } from '@/lib/supabase/api/cashCollections';
 
 export interface PaymentRecord {
@@ -120,11 +123,68 @@ export function FinanceSection({
   onToggleCompleted,
 }: FinanceSectionProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const { state: fxState, fetchRate, setManualRate, clearRate } = useExchangeRate();
+
+  const currency = formData.currency || 'THB';
+  const isNonThb = currency !== 'THB';
+  const fxRate = fxState.rate ?? formData.fxRate ?? null;
+
+  // Auto-fetch exchange rate when currency changes
+  const prevCurrencyRef = useRef(currency);
+  useEffect(() => {
+    if (currency !== prevCurrencyRef.current) {
+      prevCurrencyRef.current = currency;
+      if (currency === 'THB') {
+        clearRate();
+        onChange('fxRate', undefined);
+        onChange('fxRateSource', undefined);
+        onChange('thbTotalPrice', undefined);
+      } else {
+        fetchRate(currency as Currency, formData.dateFrom || undefined);
+      }
+    }
+  }, [currency]);
+
+  // Initialize rate from saved data on mount
+  useEffect(() => {
+    if (isNonThb && formData.fxRate && !fxState.rate) {
+      setManualRate(formData.fxRate);
+    }
+  }, []);
+
+  // Sync rate to formData when it changes
+  const handleFetchRate = useCallback(() => {
+    fetchRate(currency as Currency, formData.dateFrom || undefined).then((rate) => {
+      if (rate) {
+        onChange('fxRate', rate);
+        onChange('fxRateSource', 'api');
+      }
+    });
+  }, [currency, formData.dateFrom, fetchRate]);
+
+  const handleManualRate = useCallback((rate: number) => {
+    setManualRate(rate);
+    onChange('fxRate', rate);
+    onChange('fxRateSource', 'manual');
+  }, [setManualRate, onChange]);
 
   const charterFee = formData.charterFee || 0;
   const extraCharges = formData.extraCharges || 0;
   const adminFee = formData.adminFee || 0;
   const totalCost = charterFee + extraCharges + adminFee;
+
+  // THB equivalents
+  const thbCharterFee = isNonThb && fxRate ? Math.round(charterFee * fxRate * 100) / 100 : null;
+  const thbExtraCharges = isNonThb && fxRate ? Math.round(extraCharges * fxRate * 100) / 100 : null;
+  const thbAdminFee = isNonThb && fxRate ? Math.round(adminFee * fxRate * 100) / 100 : null;
+  const thbTotal = isNonThb && fxRate ? Math.round(totalCost * fxRate * 100) / 100 : null;
+
+  // Sync THB total to formData
+  useEffect(() => {
+    if (thbTotal !== null) {
+      onChange('thbTotalPrice', thbTotal);
+    }
+  }, [thbTotal]);
 
   // Payment summary calculations
   const paidPayments = payments.filter(p => p.paidDate && p.amount > 0);
@@ -239,6 +299,36 @@ export function FinanceSection({
       </div>
 
       {!isCollapsed && <div className="space-y-4">
+        {/* Currency selector */}
+        <div className="flex items-end gap-4">
+          <div className="w-32">
+            <label className="block text-xs text-gray-500 mb-1">Currency</label>
+            <DynamicSelect
+              category="currency"
+              value={formData.currency || 'THB'}
+              onChange={(val) => onChange('currency', val)}
+              disabled={!canEdit}
+              placeholder="Currency..."
+            />
+          </div>
+          {isNonThb && (
+            <div className="flex-1 max-w-md">
+              <ExchangeRateField
+                currency={currency as Currency}
+                date={formData.dateFrom || new Date().toISOString().split('T')[0]}
+                rate={fxRate}
+                source={fxState.source ?? (formData.fxRateSource as any) ?? null}
+                isLoading={fxState.isLoading}
+                error={fxState.error}
+                isManualOverride={fxState.isManualOverride}
+                onFetchRate={handleFetchRate}
+                onManualRate={handleManualRate}
+                disabled={!canEdit}
+              />
+            </div>
+          )}
+        </div>
+
         {/* Charter Fee, Extra Charges, Admin Fee, Total Cost */}
         <div className="grid grid-cols-4 gap-4">
           <div>
@@ -286,6 +376,24 @@ export function FinanceSection({
             />
           </div>
         </div>
+
+        {/* THB equivalent row */}
+        {isNonThb && fxRate && (charterFee > 0 || extraCharges > 0 || adminFee > 0) && (
+          <div className="grid grid-cols-4 gap-4 -mt-2">
+            <div className="text-xs text-gray-400 text-right">
+              {thbCharterFee !== null && `THB ${thbCharterFee.toLocaleString('en-US', { minimumFractionDigits: 2 })}`}
+            </div>
+            <div className="text-xs text-gray-400 text-right">
+              {thbExtraCharges !== null && thbExtraCharges > 0 && `THB ${thbExtraCharges.toLocaleString('en-US', { minimumFractionDigits: 2 })}`}
+            </div>
+            <div className="text-xs text-gray-400 text-right">
+              {thbAdminFee !== null && thbAdminFee > 0 && `THB ${thbAdminFee.toLocaleString('en-US', { minimumFractionDigits: 2 })}`}
+            </div>
+            <div className="text-xs text-gray-500 font-medium text-right">
+              {thbTotal !== null && `THB ${thbTotal.toLocaleString('en-US', { minimumFractionDigits: 2 })}`}
+            </div>
+          </div>
+        )}
 
         {/* Payment Status */}
         <div>

@@ -95,6 +95,9 @@ function dbBookingToFrontend(db: DbBooking): Booking {
     arrivalTo: db.arrival_to ?? undefined,
     charterTime: db.charter_time ?? undefined,
     currency: db.currency as Booking['currency'],
+    fxRate: (db as any).fx_rate ?? undefined,
+    fxRateSource: (db as any).fx_rate_source ?? undefined,
+    thbTotalPrice: (db as any).thb_total_price ?? undefined,
     totalPrice: db.total_price ?? undefined,
     charterFee: db.charter_fee ?? undefined,
     extraCharges: db.extra_charges ?? undefined,
@@ -166,6 +169,9 @@ function frontendToDb(booking: Partial<Booking>): Partial<DbBookingInsert> {
   if (booking.arrivalTo !== undefined) db.arrival_to = booking.arrivalTo || null;
   if (booking.charterTime !== undefined) db.charter_time = booking.charterTime || null;
   if (booking.currency !== undefined) db.currency = booking.currency;
+  if (booking.fxRate !== undefined) (db as any).fx_rate = booking.fxRate ?? null;
+  if (booking.fxRateSource !== undefined) (db as any).fx_rate_source = booking.fxRateSource ?? null;
+  if (booking.thbTotalPrice !== undefined) (db as any).thb_total_price = booking.thbTotalPrice ?? null;
   if (booking.totalPrice !== undefined) db.total_price = booking.totalPrice ?? null;
   if (booking.charterFee !== undefined) db.charter_fee = booking.charterFee ?? null;
   if (booking.extraCharges !== undefined) db.extra_charges = booking.extraCharges ?? null;
