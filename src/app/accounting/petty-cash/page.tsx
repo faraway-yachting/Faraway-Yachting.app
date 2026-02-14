@@ -338,7 +338,8 @@ export default function PettyCashDashboard() {
         setRefreshKey((prev) => prev + 1);
       } catch (error) {
         console.error('Failed to create expense:', error);
-        // TODO: Show error toast to user
+        const msg = error instanceof Error ? error.message : 'Unknown error';
+        alert(`Failed to create expense: ${msg}`);
       }
     },
     [wallet, user?.id]
