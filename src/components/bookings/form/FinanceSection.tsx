@@ -777,34 +777,82 @@ export function FinanceSection({
             </div>
 
             {/* Profit Summary */}
-            {(formData.charterCost ?? 0) > 0 && (
-              <div className="bg-white rounded-lg p-3 border border-gray-200">
-                <p className="text-xs font-medium text-gray-500 mb-2">Profit Summary</p>
-                <div className="space-y-1 text-sm">
-                  <div className="flex justify-between">
-                    <span className="text-gray-600">Guest Paid (Charter + Extras)</span>
-                    <span className="font-medium">
-                      {((formData.charterFee || 0) + (formData.extraCharges || 0)).toLocaleString('en', { minimumFractionDigits: 2 })}
-                    </span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-gray-600">Boat Owner Cost</span>
-                    <span className="font-medium text-red-600">
-                      -{(formData.charterCost || 0).toLocaleString('en', { minimumFractionDigits: 2 })}
-                    </span>
-                  </div>
-                  <div className="flex justify-between border-t pt-1 mt-1">
-                    <span className="text-gray-800 font-medium">Gross Profit</span>
-                    <span className={`font-bold ${
-                      ((formData.charterFee || 0) + (formData.extraCharges || 0) - (formData.charterCost || 0)) >= 0
-                        ? 'text-green-600' : 'text-red-600'
-                    }`}>
-                      {((formData.charterFee || 0) + (formData.extraCharges || 0) - (formData.charterCost || 0)).toLocaleString('en', { minimumFractionDigits: 2 })}
-                    </span>
+            {(formData.charterCost ?? 0) > 0 && (() => {
+              const guestPaidRaw = (formData.charterFee || 0) + (formData.extraCharges || 0);
+              const costRaw = formData.charterCost || 0;
+              const bookingCur = formData.currency || 'THB';
+              const costCur = formData.charterCostCurrency || bookingCur;
+              const sameCurrency = bookingCur === costCur;
+
+              // Normalize to THB when currencies differ
+              let guestPaidNorm = guestPaidRaw;
+              let costNorm = costRaw;
+              let profitCur = bookingCur;
+              let canCompare = true;
+
+              if (!sameCurrency) {
+                profitCur = 'THB';
+                // Convert guest paid to THB
+                if (bookingCur === 'THB') {
+                  guestPaidNorm = guestPaidRaw;
+                } else if (fxRate) {
+                  guestPaidNorm = Math.round(guestPaidRaw * fxRate * 100) / 100;
+                } else {
+                  canCompare = false;
+                }
+                // Convert cost to THB
+                if (costCur === 'THB') {
+                  costNorm = costRaw;
+                } else {
+                  // Cost in foreign currency without its own FX rate — can't normalize
+                  canCompare = false;
+                }
+              }
+
+              const grossProfit = guestPaidNorm - costNorm;
+              const fmt = (n: number) => n.toLocaleString('en', { minimumFractionDigits: 2 });
+
+              return (
+                <div className="bg-white rounded-lg p-3 border border-gray-200">
+                  <p className="text-xs font-medium text-gray-500 mb-2">
+                    Profit Summary{!sameCurrency && canCompare ? ' (THB)' : ''}
+                  </p>
+                  <div className="space-y-1 text-sm">
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">
+                        Guest Paid (Charter + Extras)
+                        {!sameCurrency && canCompare && bookingCur !== 'THB' && (
+                          <span className="text-xs text-gray-400 ml-1">
+                            ({fmt(guestPaidRaw)} {bookingCur} × {fxRate})
+                          </span>
+                        )}
+                      </span>
+                      <span className="font-medium">
+                        {canCompare ? fmt(guestPaidNorm) : `${fmt(guestPaidRaw)} ${bookingCur}`}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">Boat Owner Cost</span>
+                      <span className="font-medium text-red-600">
+                        -{canCompare ? fmt(costNorm) : `${fmt(costRaw)} ${costCur}`}
+                      </span>
+                    </div>
+                    {canCompare ? (
+                      <div className="flex justify-between border-t pt-1 mt-1">
+                        <span className="text-gray-800 font-medium">Gross Profit</span>
+                        <span className={`font-bold ${grossProfit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                          {fmt(grossProfit)}
+                        </span>
+                      </div>
+                    ) : (
+                      <div className="border-t pt-1 mt-1 text-xs text-amber-600">
+                        Cannot compare — set exchange rate to see profit in THB
+                      </div>
+                    )}
                   </div>
                 </div>
-              </div>
-            )}
+              );
+            })()}
 
             {/* Paid to Boat Operator */}
             {(() => {
