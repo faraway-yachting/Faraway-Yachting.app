@@ -29,6 +29,7 @@ interface BookingDetailsSectionProps {
   onUploadContractAttachment?: (files: File[]) => Promise<void>;
   onRemoveContractAttachment?: (index: number) => void;
   cabinCharterMode?: boolean;
+  projects?: { id: string; name: string }[];
   isCollapsed?: boolean;
   onToggleCollapse?: () => void;
   isCompleted?: boolean;
@@ -44,6 +45,7 @@ export function BookingDetailsSection({
   onUploadContractAttachment,
   onRemoveContractAttachment,
   cabinCharterMode,
+  projects,
   isCollapsed,
   onToggleCollapse,
   isCompleted,
@@ -194,6 +196,8 @@ export function BookingDetailsSection({
               onChange={(items) => onChange('extraItems', items)}
               disabled={!canEdit}
               currency={formData.currency || 'THB'}
+              bookingFxRate={formData.fxRate}
+              projects={projects}
             />
           </div>
 

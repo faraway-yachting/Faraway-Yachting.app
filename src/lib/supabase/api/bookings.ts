@@ -189,7 +189,7 @@ function frontendToDb(booking: Partial<Booking>): Partial<DbBookingInsert> {
   if (booking.finalReceiptId !== undefined) db.final_receipt_id = booking.finalReceiptId || null;
   if (booking.invoiceId !== undefined) db.invoice_id = booking.invoiceId || null;
   if (booking.expenseIds !== undefined) db.expense_ids = booking.expenseIds || null;
-  if (booking.extras !== undefined && Array.isArray(booking.extras) && booking.extras.length > 0) (db as any).extras = booking.extras;
+  // Legacy: extras string array no longer written (extra_items is primary store)
   if (booking.extraItems !== undefined) (db as any).extra_items = booking.extraItems || [];
   if (booking.contractNote) (db as any).contract_note = booking.contractNote;
   if (booking.contractAttachments !== undefined && Array.isArray(booking.contractAttachments) && booking.contractAttachments.length > 0) (db as any).contract_attachments = booking.contractAttachments;

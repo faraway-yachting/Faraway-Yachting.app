@@ -45,14 +45,20 @@ export default function CommissionSection({ formData, onChange, canEdit, isColla
     charterCommissionBase = Math.round((feeThb - costThb) * 100) / 100;
   }
 
-  // Extras commission base (internal = selling price, external = profit)
+  // Extras commission base — only commissionable items, commission on profit in THB
   const extraItems = formData.extraItems || [];
-  const extrasCommissionBase = extraItems.reduce((sum, item) => {
-    if (item.type === 'external') {
-      return sum + (item.sellingPrice - (item.cost || 0));
-    }
-    return sum + item.sellingPrice;
-  }, 0);
+  const extrasCommissionBase = extraItems
+    .filter(item => item.commissionable !== false)
+    .reduce((sum, item) => {
+      const profit = (item.sellingPrice || 0) - (item.cost || 0);
+      const itemCur = item.currency || bookingCurrency;
+      // Convert profit to THB
+      if (itemCur === 'THB') return sum + profit;
+      if (item.fxRate) return sum + profit * item.fxRate;
+      // Fallback: same as booking currency → use booking fxRate
+      if (itemCur === bookingCurrency && fxRate) return sum + profit * fxRate;
+      return sum + profit; // last resort, no conversion
+    }, 0);
 
   // Combined commission base
   const commissionBase = charterCommissionBase + extrasCommissionBase;

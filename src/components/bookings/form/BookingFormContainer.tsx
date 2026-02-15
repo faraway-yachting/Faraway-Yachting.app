@@ -435,14 +435,23 @@ export function BookingFormContainer({
     }
   };
 
-  // Auto-compute extraCharges from extra items
+  // Auto-compute extraCharges from extra items (converted to booking currency)
   useEffect(() => {
     const items = formData.extraItems || [];
-    const computed = items.reduce((sum, item) => sum + (item.sellingPrice || 0), 0);
+    const bookingCur = formData.currency || 'THB';
+    const bookingRate = formData.fxRate || null;
+    const computed = items.reduce((sum, item) => {
+      const itemCur = item.currency || bookingCur;
+      if (itemCur === bookingCur) return sum + (item.sellingPrice || 0);
+      // Convert via THB: item.sellingPrice * item.fxRate / bookingRate
+      const itemThb = (item.sellingPrice || 0) * (item.fxRate || 1);
+      const inBookingCur = bookingRate ? itemThb / bookingRate : (item.sellingPrice || 0);
+      return sum + Math.round(inBookingCur * 100) / 100;
+    }, 0);
     if (computed !== (formData.extraCharges || 0)) {
       setFormData(prev => ({ ...prev, extraCharges: computed }));
     }
-  }, [formData.extraItems]);
+  }, [formData.extraItems, formData.currency, formData.fxRate]);
 
   // Auto-calculate total cost
   useEffect(() => {
@@ -617,14 +626,9 @@ export function BookingFormContainer({
       charterExpenseStatus = undefined;
     }
 
-    // Derive extras string array from extraItems for backward compatibility
-    const extras = (formData.extraItems || [])
-      .filter(item => item.name.trim())
-      .map(item => item.name);
-
     return {
       ...formData,
-      extras,
+      extras: undefined, // legacy field — no longer written
       projectId: useExternalBoat ? undefined : formData.projectId,
       externalBoatName: useExternalBoat ? formData.externalBoatName : undefined,
       pickupLocation: formData.departureFrom || formData.pickupLocation,
@@ -1222,6 +1226,7 @@ export function BookingFormContainer({
               onUploadContractAttachment={handleUploadContractAttachment}
               onRemoveContractAttachment={handleRemoveContractAttachment}
               cabinCharterMode={formData.type === 'cabin_charter'}
+              projects={projects.map(p => ({ id: p.id, name: p.name }))}
               isCollapsed={!!collapsedSections.bookingDetails}
               onToggleCollapse={() => toggleSection('bookingDetails')}
               isCompleted={!!(formData.completedSections || {}).bookingDetails}
@@ -1292,6 +1297,7 @@ export function BookingFormContainer({
                 onAllocationsChange={setCabinAllocations}
                 canEdit={canEdit}
                 currency={formData.currency || 'THB'}
+                dateFrom={formData.dateFrom}
                 bankAccounts={bankAccounts}
                 companies={companies}
                 users={users}

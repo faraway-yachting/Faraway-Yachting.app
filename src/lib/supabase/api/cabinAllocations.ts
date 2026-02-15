@@ -79,8 +79,13 @@ function rowToAllocation(row: CabinAllocationRow): CabinAllocation {
     internalNotes: row.internal_notes ?? undefined,
     internalNoteAttachments: parseJsonbAttachments(row.internal_note_attachments),
     customerNotes: row.customer_notes ?? undefined,
+    charterFee: (row as any).charter_fee ?? undefined,
+    adminFee: (row as any).admin_fee ?? undefined,
     price: row.price ?? undefined,
     currency: row.currency,
+    fxRate: (row as any).fx_rate ?? undefined,
+    fxRateSource: (row as any).fx_rate_source ?? undefined,
+    thbTotalPrice: (row as any).thb_total_price ?? undefined,
     paymentStatus: row.payment_status as CabinAllocation['paymentStatus'],
     invoiceId: row.invoice_id ?? undefined,
     receiptId: row.receipt_id ?? undefined,
@@ -118,8 +123,13 @@ function allocationToRow(a: Partial<CabinAllocation> & { bookingId: string }): R
   if (a.internalNotes !== undefined) row.internal_notes = a.internalNotes || null;
   if (a.internalNoteAttachments !== undefined) row.internal_note_attachments = a.internalNoteAttachments || [];
   if (a.customerNotes !== undefined) row.customer_notes = a.customerNotes || null;
+  if (a.charterFee !== undefined) row.charter_fee = a.charterFee ?? null;
+  if (a.adminFee !== undefined) row.admin_fee = a.adminFee ?? null;
   if (a.price !== undefined) row.price = a.price ?? null;
   if (a.currency !== undefined) row.currency = a.currency;
+  if (a.fxRate !== undefined) row.fx_rate = a.fxRate ?? null;
+  if (a.fxRateSource !== undefined) row.fx_rate_source = a.fxRateSource || null;
+  if (a.thbTotalPrice !== undefined) row.thb_total_price = a.thbTotalPrice ?? null;
   if (a.paymentStatus !== undefined) row.payment_status = a.paymentStatus;
   if (a.invoiceId !== undefined) row.invoice_id = a.invoiceId || null;
   if (a.receiptId !== undefined) row.receipt_id = a.receiptId || null;
@@ -179,8 +189,13 @@ export const cabinAllocationsApi = {
     if (updates.internalNotes !== undefined) dbUpdates.internal_notes = updates.internalNotes || null;
     if (updates.internalNoteAttachments !== undefined) dbUpdates.internal_note_attachments = updates.internalNoteAttachments || [];
     if (updates.customerNotes !== undefined) dbUpdates.customer_notes = updates.customerNotes || null;
+    if (updates.charterFee !== undefined) dbUpdates.charter_fee = updates.charterFee ?? null;
+    if (updates.adminFee !== undefined) dbUpdates.admin_fee = updates.adminFee ?? null;
     if (updates.price !== undefined) dbUpdates.price = updates.price ?? null;
     if (updates.currency !== undefined) dbUpdates.currency = updates.currency;
+    if (updates.fxRate !== undefined) dbUpdates.fx_rate = updates.fxRate ?? null;
+    if (updates.fxRateSource !== undefined) dbUpdates.fx_rate_source = updates.fxRateSource || null;
+    if (updates.thbTotalPrice !== undefined) dbUpdates.thb_total_price = updates.thbTotalPrice ?? null;
     if (updates.paymentStatus !== undefined) dbUpdates.payment_status = updates.paymentStatus;
     if (updates.invoiceId !== undefined) dbUpdates.invoice_id = updates.invoiceId || null;
     if (updates.receiptId !== undefined) dbUpdates.receipt_id = updates.receiptId || null;

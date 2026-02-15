@@ -32,9 +32,13 @@ export type PaymentStatus = 'unpaid' | 'awaiting_payment' | 'partial' | 'paid';
 export interface BookingExtraItem {
   id: string;
   name: string;
-  type: 'internal' | 'external'; // internal = commission on selling price, external = commission on profit
+  type: 'internal' | 'external'; // internal = in-house service, external = third-party provider
   sellingPrice: number;
-  cost?: number; // only for external type (our cost to the provider)
+  cost?: number; // cost to the provider (used for profit-based commission)
+  currency?: string; // defaults to booking currency
+  fxRate?: number; // rate to THB (for commission calc + extra charges conversion)
+  projectId?: string; // linked project
+  commissionable?: boolean; // defaults true for backward compat
 }
 
 // Main Booking entity
@@ -299,8 +303,13 @@ export interface CabinAllocation {
   internalNoteAttachments?: BookingAttachment[];
   customerNotes?: string;
   // Financial
+  charterFee?: number;
+  adminFee?: number;
   price?: number;
   currency: string;
+  fxRate?: number;
+  fxRateSource?: string;
+  thbTotalPrice?: number;
   paymentStatus: PaymentStatus;
   invoiceId?: string;
   receiptId?: string;

@@ -41,6 +41,10 @@ import { createClient } from '@/lib/supabase/client';
 import { DynamicMultiSelect } from './DynamicMultiSelect';
 import { DynamicSelect } from './DynamicSelect';
 import type { PaymentRecord, BankAccountOption, CompanyOption } from './FinanceSection';
+import { ExchangeRateField } from '@/components/shared/ExchangeRateField';
+import { Currency } from '@/data/company/types';
+import { FxRateSource } from '@/data/exchangeRate/types';
+import { getExchangeRate, getTodayISO } from '@/lib/exchangeRate/service';
 
 interface AgencyContact {
   id: string;
@@ -55,6 +59,7 @@ interface CabinSectionProps {
   onAllocationsChange: (allocations: CabinAllocation[]) => void;
   canEdit: boolean;
   currency: string;
+  dateFrom?: string;
   bankAccounts: BankAccountOption[];
   companies: CompanyOption[];
   users: { id: string; full_name: string }[];
@@ -73,12 +78,20 @@ const paymentMethods = [
   { value: 'promptpay', label: 'PromptPay' },
 ];
 
+// Commission base: THB charter fee (converted if non-THB)
+function getThbCharterFee(alloc: CabinAllocation, defaultCurrency: string): number {
+  const cabinCurrency = alloc.currency || defaultCurrency;
+  const charterFee = alloc.charterFee || 0;
+  return cabinCurrency !== 'THB' ? charterFee * (alloc.fxRate || 0) : charterFee;
+}
+
 export default function CabinSection({
   bookingId,
   cabinAllocations,
   onAllocationsChange,
   canEdit,
   currency,
+  dateFrom,
   bankAccounts,
   companies,
   users,
@@ -94,6 +107,8 @@ export default function CabinSection({
   // Per-cabin cash collections: Map<allocationId, CashCollection[]>
   const [cabinCash, setCabinCash] = useState<Map<string, CashCollection[]>>(new Map());
   const [loadingPayments, setLoadingPayments] = useState(false);
+  // Per-cabin FX rate loading/error state
+  const [fxState, setFxState] = useState<Map<string, { isLoading: boolean; error: string | null }>>(new Map());
   // Agencies for Direct/Agency dropdown
   const [agencies, setAgencies] = useState<AgencyContact[]>([]);
 
@@ -326,12 +341,12 @@ export default function CabinSection({
     updateAllocation(allocationId, 'paymentStatus', status);
   };
 
-  // Commission auto-calc helper
+  // Commission auto-calc helper — uses THB charter fee as base
   const handleCommissionRateChange = (allocationId: string, rateStr: string) => {
     const alloc = cabinAllocations.find(a => a.id === allocationId);
     if (!alloc) return;
     const rate = rateStr === '' ? undefined : parseFloat(rateStr);
-    const base = alloc.price || 0;
+    const base = getThbCharterFee(alloc, currency);
     const total = base * (rate || 0) / 100;
     const received = total - (alloc.commissionDeduction || 0);
     onAllocationsChange(
@@ -362,7 +377,7 @@ export default function CabinSection({
     const alloc = cabinAllocations.find(a => a.id === allocationId);
     if (!alloc) return;
     const deduction = deductStr === '' ? undefined : parseFloat(deductStr);
-    const autoTotal = (alloc.price || 0) * (alloc.commissionRate || 0) / 100;
+    const autoTotal = getThbCharterFee(alloc, currency) * (alloc.commissionRate || 0) / 100;
     const received = (alloc.totalCommission ?? autoTotal) - (deduction || 0);
     onAllocationsChange(
       cabinAllocations.map(a => a.id === allocationId ? {
@@ -370,6 +385,63 @@ export default function CabinSection({
         commissionDeduction: deduction,
         commissionReceived: received,
       } : a)
+    );
+  };
+
+  // Fetch FX rate for a specific cabin allocation
+  const handleFetchFxRate = async (allocationId: string) => {
+    const alloc = cabinAllocations.find(a => a.id === allocationId);
+    if (!alloc) return;
+    const cabinCurrency = alloc.currency || currency;
+    if (cabinCurrency === 'THB') return;
+
+    setFxState(prev => new Map(prev).set(allocationId, { isLoading: true, error: null }));
+    const rateDate = dateFrom || getTodayISO();
+    const result = await getExchangeRate(cabinCurrency as Currency, rateDate);
+
+    if (result.success && result.rate) {
+      setFxState(prev => new Map(prev).set(allocationId, { isLoading: false, error: null }));
+      updateCabinFinance(allocationId, {
+        fxRate: result.rate!,
+        fxRateSource: (result.source || 'api') as string,
+      });
+    } else {
+      setFxState(prev => new Map(prev).set(allocationId, {
+        isLoading: false,
+        error: result.error || 'Failed to fetch rate',
+      }));
+    }
+  };
+
+  const handleManualFxRate = (allocationId: string, rate: number) => {
+    setFxState(prev => new Map(prev).set(allocationId, { isLoading: false, error: null }));
+    updateCabinFinance(allocationId, { fxRate: rate, fxRateSource: 'manual' });
+  };
+
+  // Update finance fields with auto-calculation of price and thbTotalPrice
+  const updateCabinFinance = (allocationId: string, updates: Partial<CabinAllocation>) => {
+    onAllocationsChange(
+      cabinAllocations.map(a => {
+        if (a.id !== allocationId) return a;
+        const merged = { ...a, ...updates };
+        const charterFee = merged.charterFee || 0;
+        const adminFee = merged.adminFee || 0;
+        const totalPrice = charterFee + adminFee;
+        const cabinCurrency = merged.currency || currency;
+        const fxRate = merged.fxRate || 0;
+        const thbTotalPrice = cabinCurrency !== 'THB' && fxRate > 0 ? totalPrice * fxRate : (cabinCurrency === 'THB' ? totalPrice : undefined);
+        // Recalculate commission if rate is set
+        const thbCharterFee = cabinCurrency !== 'THB' ? charterFee * fxRate : charterFee;
+        const totalCommission = thbCharterFee * (merged.commissionRate || 0) / 100;
+        const commissionReceived = totalCommission - (merged.commissionDeduction || 0);
+        return {
+          ...merged,
+          price: totalPrice,
+          thbTotalPrice: thbTotalPrice,
+          totalCommission,
+          commissionReceived,
+        };
+      })
     );
   };
 
@@ -424,12 +496,18 @@ export default function CabinSection({
             cash={cabinCash.get(allocation.id) || []}
             canEdit={canEdit}
             currency={currency}
+            dateFrom={dateFrom}
             bankAccounts={bankAccounts}
             users={users}
             agencies={agencies}
             customers={customers}
             bookingId={bookingId}
             updateAllocation={updateAllocation}
+            updateCabinFinance={updateCabinFinance}
+            handleFetchFxRate={handleFetchFxRate}
+            handleManualFxRate={handleManualFxRate}
+            fxLoading={fxState.get(allocation.id)?.isLoading || false}
+            fxError={fxState.get(allocation.id)?.error || null}
             addCabinPayment={addCabinPayment}
             updateCabinPayment={updateCabinPayment}
             deleteCabinPayment={deleteCabinPayment}
@@ -506,12 +584,18 @@ interface CabinAllocationCardProps {
   cash: CashCollection[];
   canEdit: boolean;
   currency: string;
+  dateFrom?: string;
   bankAccounts: BankAccountOption[];
   users: { id: string; full_name: string }[];
   agencies: AgencyContact[];
   customers: AgencyContact[];
   bookingId?: string;
   updateAllocation: (id: string, field: keyof CabinAllocation, value: any) => void;
+  updateCabinFinance: (allocationId: string, updates: Partial<CabinAllocation>) => void;
+  handleFetchFxRate: (allocationId: string) => void;
+  handleManualFxRate: (allocationId: string, rate: number) => void;
+  fxLoading: boolean;
+  fxError: string | null;
   addCabinPayment: (allocationId: string, paymentType: 'deposit' | 'balance') => void;
   updateCabinPayment: (allocationId: string, paymentIndex: number, updates: Partial<PaymentRecord>) => void;
   deleteCabinPayment: (allocationId: string, paymentIndex: number) => void;
@@ -535,12 +619,18 @@ function CabinAllocationCard({
   cash,
   canEdit,
   currency,
+  dateFrom,
   bankAccounts,
   users,
   agencies,
   customers,
   bookingId,
   updateAllocation,
+  updateCabinFinance,
+  handleFetchFxRate,
+  handleManualFxRate,
+  fxLoading,
+  fxError,
   addCabinPayment,
   updateCabinPayment,
   deleteCabinPayment,
@@ -631,7 +721,8 @@ function CabinAllocationCard({
   };
 
   // Commission auto-calc values
-  const autoTotal = (allocation.price || 0) * (allocation.commissionRate || 0) / 100;
+  const thbCharterFeeBase = getThbCharterFee(allocation, currency);
+  const autoTotal = thbCharterFeeBase * (allocation.commissionRate || 0) / 100;
   const autoReceived = (allocation.totalCommission ?? autoTotal) - (allocation.commissionDeduction || 0);
 
   return (
@@ -1040,24 +1131,20 @@ function CabinAllocationCard({
               Finance
             </h4>
 
-            {/* Price */}
+            {/* Currency + FX Rate */}
             <div className="grid grid-cols-2 gap-3 mb-3">
-              <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Cabin Price</label>
-                <input
-                  type="number"
-                  value={allocation.price ?? ''}
-                  onChange={e => updateAllocation(allocation.id, 'price', e.target.value ? parseFloat(e.target.value) : undefined)}
-                  disabled={!canEdit}
-                  placeholder="0.00"
-                  className="w-full px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 disabled:bg-gray-100"
-                />
-              </div>
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">Currency</label>
                 <select
                   value={allocation.currency || currency}
-                  onChange={e => updateAllocation(allocation.id, 'currency', e.target.value)}
+                  onChange={e => {
+                    const newCurr = e.target.value;
+                    updateCabinFinance(allocation.id, {
+                      currency: newCurr,
+                      fxRate: newCurr === 'THB' ? undefined : allocation.fxRate,
+                      fxRateSource: newCurr === 'THB' ? undefined : allocation.fxRateSource,
+                    });
+                  }}
                   disabled={!canEdit}
                   className="w-full px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 disabled:bg-gray-100"
                 >
@@ -1069,6 +1156,84 @@ function CabinAllocationCard({
                 </select>
               </div>
             </div>
+
+            {/* FX Rate (non-THB only) */}
+            {(allocation.currency || currency) !== 'THB' && (
+              <div className="mb-3">
+                <ExchangeRateField
+                  currency={(allocation.currency || currency) as Currency}
+                  date={dateFrom || getTodayISO()}
+                  rate={allocation.fxRate ?? null}
+                  source={(allocation.fxRateSource as FxRateSource) ?? null}
+                  isLoading={fxLoading}
+                  error={fxError}
+                  isManualOverride={allocation.fxRateSource === 'manual'}
+                  onFetchRate={() => handleFetchFxRate(allocation.id)}
+                  onManualRate={(rate) => handleManualFxRate(allocation.id, rate)}
+                  disabled={!canEdit}
+                />
+              </div>
+            )}
+
+            {/* Charter Fee + Admin Fee + Total Cost */}
+            <div className="grid grid-cols-3 gap-3 mb-3">
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Charter Fee</label>
+                <input
+                  type="number"
+                  value={allocation.charterFee ?? ''}
+                  onChange={e => updateCabinFinance(allocation.id, { charterFee: e.target.value ? parseFloat(e.target.value) : undefined })}
+                  disabled={!canEdit}
+                  placeholder="0.00"
+                  className="w-full px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 disabled:bg-gray-100"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Admin Fee</label>
+                <input
+                  type="number"
+                  value={allocation.adminFee ?? ''}
+                  onChange={e => updateCabinFinance(allocation.id, { adminFee: e.target.value ? parseFloat(e.target.value) : undefined })}
+                  disabled={!canEdit}
+                  placeholder="CC fee"
+                  className="w-full px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 disabled:bg-gray-100"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Total Cost</label>
+                <input
+                  type="number"
+                  value={allocation.price ?? ''}
+                  disabled
+                  placeholder="0.00"
+                  className="w-full px-3 py-1.5 text-sm border border-gray-300 rounded-lg bg-gray-100 text-gray-700 font-medium"
+                />
+              </div>
+            </div>
+
+            {/* THB Equivalents (non-THB only, when FX rate is set) */}
+            {(allocation.currency || currency) !== 'THB' && allocation.fxRate && allocation.fxRate > 0 && (
+              <div className="grid grid-cols-3 gap-3 mb-3 bg-blue-50 rounded-lg p-2">
+                <div>
+                  <label className="block text-xs font-medium text-blue-600 mb-0.5">THB Charter Fee</label>
+                  <span className="text-sm font-medium text-blue-800">
+                    {((allocation.charterFee || 0) * allocation.fxRate).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </span>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-blue-600 mb-0.5">THB Admin Fee</label>
+                  <span className="text-sm font-medium text-blue-800">
+                    {((allocation.adminFee || 0) * allocation.fxRate).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </span>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-blue-600 mb-0.5">THB Total</label>
+                  <span className="text-sm font-medium text-blue-800">
+                    {(allocation.thbTotalPrice || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </span>
+                </div>
+              </div>
+            )}
 
             {/* Payment Summary */}
             {payments.length > 0 && (
