@@ -23,7 +23,8 @@ export const expensesApi = {
     const { data, error } = await supabase
       .from('expenses')
       .select('*')
-      .order('expense_date', { ascending: false });
+      .order('expense_date', { ascending: false })
+      .limit(500);
     if (error) throw error;
     return data ?? [];
   },

@@ -63,6 +63,17 @@ export const bankAccountsApi = {
     if (error) throw error;
   },
 
+  async getByIds(ids: string[]): Promise<BankAccount[]> {
+    if (ids.length === 0) return [];
+    const supabase = createClient();
+    const { data, error } = await supabase
+      .from('bank_accounts')
+      .select('*')
+      .in('id', ids);
+    if (error) throw error;
+    return data ?? [];
+  },
+
   async getByCompany(companyId: string): Promise<BankAccount[]> {
     const supabase = createClient();
     const { data, error } = await supabase

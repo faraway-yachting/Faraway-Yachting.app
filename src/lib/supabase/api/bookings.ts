@@ -238,7 +238,7 @@ export const bookingsApi = {
   async getAll(projectIds?: string[]): Promise<Booking[]> {
     if (projectIds && projectIds.length === 0) return [];
     const supabase = createClient();
-    let query = supabase.from('bookings').select('*').order('date_from', { ascending: false });
+    let query = supabase.from('bookings').select('*').order('date_from', { ascending: false }).limit(500);
     if (projectIds) query = query.in('project_id', projectIds);
     const { data, error } = await query;
     if (error) throw error;

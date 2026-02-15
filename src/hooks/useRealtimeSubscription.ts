@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useId } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { createClient } from '@/lib/supabase/client';
 
@@ -18,13 +18,16 @@ interface RealtimeConfig {
  */
 export function useRealtimeSubscription(configs: RealtimeConfig[]) {
   const queryClient = useQueryClient();
-  // Serialize configs for stable dependency
+  // Stable unique ID per hook instance — avoids channel name collisions
+  // between multiple hook usages while preventing leaks from re-renders
+  const rawId = useId();
+  const channelId = rawId.replace(/:/g, '');
   const configsRef = useRef(configs);
   configsRef.current = configs;
 
   useEffect(() => {
     const supabase = createClient();
-    const channel = supabase.channel('app-realtime-' + Math.random().toString(36).slice(2, 8));
+    const channel = supabase.channel('app-realtime-' + channelId);
 
     configsRef.current.forEach(({ table, event = '*', filter, queryKeys }) => {
       const params: any = { event, schema: 'public', table };
@@ -42,5 +45,5 @@ export function useRealtimeSubscription(configs: RealtimeConfig[]) {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [queryClient]);
+  }, [queryClient, channelId]);
 }

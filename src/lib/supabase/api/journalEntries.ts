@@ -24,7 +24,8 @@ export const journalEntriesApi = {
       .from('journal_entries')
       .select('*')
       .neq('status', 'deleted')
-      .order('entry_date', { ascending: false });
+      .order('entry_date', { ascending: false })
+      .limit(500);
     if (error) throw error;
     return data ?? [];
   },
@@ -38,7 +39,8 @@ export const journalEntriesApi = {
         lines:journal_entry_lines(*)
       `)
       .neq('status', 'deleted')
-      .order('entry_date', { ascending: false });
+      .order('entry_date', { ascending: false })
+      .limit(500);
     if (error) throw error;
     return (data ?? []) as JournalEntryWithLines[];
   },

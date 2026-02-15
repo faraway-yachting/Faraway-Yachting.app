@@ -23,7 +23,8 @@ export const receiptsApi = {
     const { data, error } = await supabase
       .from('receipts')
       .select('*')
-      .order('receipt_date', { ascending: false });
+      .order('receipt_date', { ascending: false })
+      .limit(500);
     if (error) throw error;
     return data ?? [];
   },
@@ -602,27 +603,29 @@ export const receiptsApi = {
         console.log(`Created intercompany receipt: ${receipt.receipt_number} - received by ${bankCompanyName} for ${receiptCompanyName}`);
       } else {
         // Standard single-company receipt
-        // Build payment data with GL codes
-        const paymentsWithGlCodes = await Promise.all(
-          createdPayments.map(async (p) => {
-            let bankGlCode: string | null = null;
-            const paymentBankAccountId = p.received_at !== 'cash' ? p.received_at : null;
-            if (paymentBankAccountId) {
-              try {
-                const bankAccount = await bankAccountsApi.getById(paymentBankAccountId);
-                bankGlCode = bankAccount?.gl_account_code || null;
-              } catch {
-                console.warn('Could not fetch bank account GL code');
-              }
-            }
-            return {
-              amount: p.amount,
-              bankAccountId: paymentBankAccountId,
-              bankAccountGlCode: bankGlCode,
-              paymentMethod: p.received_at === 'cash' ? 'cash' : 'bank_transfer',
-            };
-          })
-        );
+        // Batch-fetch all bank accounts for GL codes (avoids N+1 queries)
+        const bankAccountIds = createdPayments
+          .map(p => p.received_at !== 'cash' ? p.received_at : null)
+          .filter((id): id is string => !!id);
+        const uniqueBankIds = [...new Set(bankAccountIds)];
+        let bankAccountMap = new Map<string, string | null>();
+        if (uniqueBankIds.length > 0) {
+          try {
+            const bankAccounts = await bankAccountsApi.getByIds(uniqueBankIds);
+            bankAccounts.forEach(ba => bankAccountMap.set(ba.id, ba.gl_account_code || null));
+          } catch {
+            console.warn('Could not fetch bank account GL codes');
+          }
+        }
+        const paymentsWithGlCodes = createdPayments.map(p => {
+          const paymentBankAccountId = p.received_at !== 'cash' ? p.received_at : null;
+          return {
+            amount: p.amount,
+            bankAccountId: paymentBankAccountId,
+            bankAccountGlCode: paymentBankAccountId ? (bankAccountMap.get(paymentBankAccountId) || null) : null,
+            paymentMethod: p.received_at === 'cash' ? 'cash' : 'bank_transfer',
+          };
+        });
 
         // Build event data
         const eventData: ReceiptReceivedEventData = {
@@ -686,27 +689,30 @@ export const receiptsApi = {
     // Update status
     const updatedReceipt = await this.update(receiptId, { status: 'paid' });
 
-    // Build payment data with GL codes
-    const paymentsWithGlCodes = await Promise.all(
-      (receipt.payment_records || []).map(async (p) => {
-        let bankGlCode: string | null = null;
-        const bankAccountId = p.received_at !== 'cash' ? p.received_at : null;
-        if (bankAccountId) {
-          try {
-            const bankAccount = await bankAccountsApi.getById(bankAccountId);
-            bankGlCode = bankAccount?.gl_account_code || null;
-          } catch {
-            console.warn('Could not fetch bank account GL code');
-          }
-        }
-        return {
-          amount: p.amount,
-          bankAccountId,
-          bankAccountGlCode: bankGlCode,
-          paymentMethod: p.received_at === 'cash' ? 'cash' : 'bank_transfer',
-        };
-      })
-    );
+    // Batch-fetch all bank accounts for GL codes (avoids N+1 queries)
+    const paymentRecords = receipt.payment_records || [];
+    const bankIds2 = paymentRecords
+      .map(p => p.received_at !== 'cash' ? p.received_at : null)
+      .filter((id): id is string => !!id);
+    const uniqueBankIds2 = [...new Set(bankIds2)];
+    let bankMap2 = new Map<string, string | null>();
+    if (uniqueBankIds2.length > 0) {
+      try {
+        const bankAccounts = await bankAccountsApi.getByIds(uniqueBankIds2);
+        bankAccounts.forEach(ba => bankMap2.set(ba.id, ba.gl_account_code || null));
+      } catch {
+        console.warn('Could not fetch bank account GL codes');
+      }
+    }
+    const paymentsWithGlCodes = paymentRecords.map(p => {
+      const bankAccountId = p.received_at !== 'cash' ? p.received_at : null;
+      return {
+        amount: p.amount,
+        bankAccountId,
+        bankAccountGlCode: bankAccountId ? (bankMap2.get(bankAccountId) || null) : null,
+        paymentMethod: p.received_at === 'cash' ? 'cash' : 'bank_transfer',
+      };
+    });
 
     // Build event data
     const eventData: ReceiptReceivedEventData = {
