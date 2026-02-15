@@ -31,7 +31,9 @@ export function ExtraItemsEditor({ items, onChange, disabled, currency = 'THB', 
     }).catch(() => {});
   }, []);
 
-  const projects = projectsProp && projectsProp.length > 0 ? projectsProp : allProjects;
+  // Always use internally loaded allProjects (all types), since extras can belong to any project.
+  // projectsProp may be yacht-filtered from the calendar page, so prefer allProjects when loaded.
+  const projects = allProjects.length > 0 ? allProjects : (projectsProp || []);
 
   const addItem = () => {
     const newItem: BookingExtraItem = {
