@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { Plus, X } from 'lucide-react';
 import type { BookingExtraItem } from '@/data/booking/types';
 import { bookingLookupsApi } from '@/lib/supabase/api/bookingLookups';
+import { projectsApi } from '@/lib/supabase/api/projects';
 
 interface ExtraItemsEditorProps {
   items: BookingExtraItem[];
@@ -16,14 +17,21 @@ interface ExtraItemsEditorProps {
 
 const CURRENCIES = ['THB', 'USD', 'EUR', 'GBP', 'AUD'];
 
-export function ExtraItemsEditor({ items, onChange, disabled, currency = 'THB', bookingFxRate, projects }: ExtraItemsEditorProps) {
+export function ExtraItemsEditor({ items, onChange, disabled, currency = 'THB', bookingFxRate, projects: projectsProp }: ExtraItemsEditorProps) {
   const [suggestions, setSuggestions] = useState<string[]>([]);
+  const [allProjects, setAllProjects] = useState<{ id: string; name: string }[]>([]);
 
   useEffect(() => {
     bookingLookupsApi.getByCategory('extras').then(lookups => {
       setSuggestions(lookups.map(l => l.label));
     }).catch(() => {});
+    // Load all active projects (not just yachts)
+    projectsApi.getActive().then(data => {
+      setAllProjects(data.map(p => ({ id: p.id, name: p.name })));
+    }).catch(() => {});
   }, []);
+
+  const projects = projectsProp && projectsProp.length > 0 ? projectsProp : allProjects;
 
   const addItem = () => {
     const newItem: BookingExtraItem = {
