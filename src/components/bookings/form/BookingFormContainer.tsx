@@ -1177,7 +1177,14 @@ export function BookingFormContainer({
               projects={projects}
               externalBoats={externalBoats}
               useExternalBoat={useExternalBoat}
-              onUseExternalBoatChange={setUseExternalBoat}
+              onUseExternalBoatChange={(val) => {
+                setUseExternalBoat(val);
+                if (val) {
+                  setFormData(prev => ({ ...prev, projectId: undefined }));
+                } else {
+                  setFormData(prev => ({ ...prev, externalBoatName: '', charterCost: undefined, charterCostCurrency: undefined }));
+                }
+              }}
               selectedProduct={selectedProduct}
               onClearProduct={() => { setSelectedProduct(null); setAutoFilledFields(new Set()); }}
               autoFilledFields={autoFilledFields}
