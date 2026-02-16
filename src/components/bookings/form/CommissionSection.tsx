@@ -95,9 +95,10 @@ export default function CommissionSection({ formData, onChange, canEdit, isColla
   }, [formData.type, formData.agentPlatform]);
 
   // Recalculate commission when base amounts change (charter fee, cost, fx rate, extras)
+  // Also recalculate on initial mount to fix stale values from old calculations
   const prevBaseRef = useRef<number | null>(null);
   useEffect(() => {
-    if (prevBaseRef.current !== null && prevBaseRef.current !== commissionBase && rate > 0) {
+    if (rate > 0 && (prevBaseRef.current === null || prevBaseRef.current !== commissionBase)) {
       const newTotal = Math.round(commissionBase * rate) / 100;
       onChange('totalCommission', newTotal);
       onChange('commissionReceived', newTotal - (formData.commissionDeduction || 0));
