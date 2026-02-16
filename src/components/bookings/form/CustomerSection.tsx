@@ -15,6 +15,7 @@ import {
   ContactChannel,
 } from '@/data/booking/types';
 import { contactsApi } from '@/lib/supabase/api/contacts';
+import { bookingAgenciesApi } from '@/lib/supabase/api/bookingAgencies';
 import { DynamicSelect } from './DynamicSelect';
 
 type BookingSourceType = 'direct' | 'agency';
@@ -71,6 +72,14 @@ export function CustomerSection({
 
   // Agency state for booking source dropdown
   const [agencies, setAgencies] = useState<Contact[]>([]);
+  const [agencySearch, setAgencySearch] = useState(formData.agentPlatform && formData.agentPlatform !== 'Direct' ? formData.agentPlatform : '');
+  const [showAgencyDropdown, setShowAgencyDropdown] = useState(false);
+  const [showNewAgencyForm, setShowNewAgencyForm] = useState(false);
+  const [newAgencyName, setNewAgencyName] = useState('');
+  const [newAgencyEmail, setNewAgencyEmail] = useState('');
+  const [newAgencyPhone, setNewAgencyPhone] = useState('');
+  const [isCreatingAgency, setIsCreatingAgency] = useState(false);
+  const agencyDropdownRef = useRef<HTMLDivElement>(null);
 
   // Load contacts and agencies on mount
   useEffect(() => {
@@ -111,6 +120,26 @@ export function CustomerSection({
     };
   }, [showContactDropdown]);
 
+  // Close agency dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (agencyDropdownRef.current && !agencyDropdownRef.current.contains(event.target as Node)) {
+        setShowAgencyDropdown(false);
+      }
+    };
+    if (showAgencyDropdown) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [showAgencyDropdown]);
+
+  const filteredAgencies = agencies.filter(
+    (agency) =>
+      agency.name.toLowerCase().includes(agencySearch.toLowerCase())
+  );
+
   const filteredContacts = contacts.filter(
     (contact) =>
       contact.name.toLowerCase().includes(contactSearch.toLowerCase()) ||
@@ -148,6 +177,53 @@ export function CustomerSection({
       alert('Failed to create contact');
     } finally {
       setIsCreatingContact(false);
+    }
+  };
+
+  const handleAgencySelect = (agency: Contact) => {
+    onChange('agentPlatform', agency.name);
+    setAgencySearch(agency.name);
+    setShowAgencyDropdown(false);
+    // Auto-fill customer fields from agency
+    onChange('customerName', agency.name);
+    setContactSearch(agency.name);
+    setSelectedContactId(agency.id);
+    if (agency.email) onChange('customerEmail', agency.email);
+    if (agency.phone) onChange('customerPhone', agency.phone);
+  };
+
+  const handleCreateAgency = async () => {
+    if (!newAgencyName.trim()) return;
+    setIsCreatingAgency(true);
+    try {
+      // 1. Create contact with type 'agency'
+      const newContact = await contactsApi.create({
+        name: newAgencyName.trim(),
+        type: ['agency'],
+        email: newAgencyEmail.trim() || null,
+        phone: newAgencyPhone.trim() || null,
+        is_active: true,
+      });
+      // 2. Create booking_agencies record linked to this contact
+      await bookingAgenciesApi.create({
+        contact_id: newContact.id,
+        is_active: true,
+        default_currency: 'THB',
+      });
+      // 3. Add to local agencies list and auto-select
+      const agencyContact = newContact as Contact;
+      setAgencies((prev) => [...prev, agencyContact]);
+      handleAgencySelect(agencyContact);
+      // 4. Reset form
+      setNewAgencyName('');
+      setNewAgencyEmail('');
+      setNewAgencyPhone('');
+      setShowNewAgencyForm(false);
+    } catch (error) {
+      console.error('Error creating agency:', error);
+      alert('Failed to create agency');
+    } finally {
+      setIsCreatingAgency(false);
     }
   };
 
@@ -221,41 +297,173 @@ export function CustomerSection({
           {bookingSourceType === 'agency' && (
             <div className="mt-3">
               <label className="block text-xs text-gray-500 mb-1">Agency</label>
-              <select
-                value={formData.agentPlatform || ''}
-                onChange={(e) => {
-                  const agencyName = e.target.value;
-                  onChange('agentPlatform', agencyName);
+              <div className="relative" ref={agencyDropdownRef}>
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                  <input
+                    type="text"
+                    value={agencySearch}
+                    onChange={(e) => {
+                      setAgencySearch(e.target.value);
+                      setShowAgencyDropdown(true);
+                      if (!e.target.value) {
+                        onChange('agentPlatform', '');
+                        onChange('customerName', '');
+                        setContactSearch('');
+                        setSelectedContactId(null);
+                        onChange('customerEmail', '');
+                        onChange('customerPhone', '');
+                      }
+                    }}
+                    onFocus={() => setShowAgencyDropdown(true)}
+                    placeholder="Search agency..."
+                    disabled={!canEdit}
+                    className="w-full pl-10 pr-10 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100"
+                  />
+                  {canEdit && (
+                    <button
+                      type="button"
+                      onClick={() => setShowNewAgencyForm(true)}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-[#5A7A8F] hover:bg-blue-50 rounded transition-colors"
+                      title="Add new agency"
+                    >
+                      <Plus className="h-4 w-4" />
+                    </button>
+                  )}
+                </div>
 
-                  // Auto-fill contact details from selected agency
-                  const selectedAgency = agencies.find(a => a.name === agencyName);
-                  if (selectedAgency) {
-                    onChange('customerName', selectedAgency.name);
-                    setContactSearch(selectedAgency.name);
-                    setSelectedContactId(selectedAgency.id);
-                    if (selectedAgency.email) onChange('customerEmail', selectedAgency.email);
-                    if (selectedAgency.phone) onChange('customerPhone', selectedAgency.phone);
-                  } else {
-                    // Clear fields if no agency selected
-                    onChange('customerName', '');
-                    setContactSearch('');
-                    setSelectedContactId(null);
-                    onChange('customerEmail', '');
-                    onChange('customerPhone', '');
-                  }
-                }}
-                disabled={!canEdit}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100"
-              >
-                <option value="">Select agency...</option>
-                {agencies.map((agency) => (
-                  <option key={agency.id} value={agency.name}>
-                    {agency.name}
-                  </option>
-                ))}
-              </select>
-              {agencies.length === 0 && (
-                <p className="text-xs text-gray-400 mt-1">No agencies found. Add agencies in Contacts.</p>
+                {/* Agency search dropdown */}
+                {showAgencyDropdown && filteredAgencies.length > 0 && (
+                  <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg overflow-hidden max-h-48 overflow-y-auto">
+                    {filteredAgencies.map((agency) => (
+                      <button
+                        key={agency.id}
+                        type="button"
+                        onClick={() => handleAgencySelect(agency)}
+                        className="w-full px-3 py-2 text-left hover:bg-blue-50 transition-colors flex items-center gap-2"
+                      >
+                        <div className="flex-1">
+                          <p className="text-sm font-medium text-gray-900">{agency.name}</p>
+                          {agency.email && (
+                            <p className="text-xs text-gray-500">{agency.email}</p>
+                          )}
+                        </div>
+                      </button>
+                    ))}
+                    {canEdit && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowNewAgencyForm(true);
+                          setShowAgencyDropdown(false);
+                          setNewAgencyName(agencySearch);
+                        }}
+                        className="w-full px-3 py-2 text-left hover:bg-purple-50 transition-colors border-t border-gray-200 flex items-center gap-2 text-[#5A7A8F]"
+                      >
+                        <Plus className="h-4 w-4" />
+                        <span className="text-sm font-medium">Add New Agency</span>
+                      </button>
+                    )}
+                  </div>
+                )}
+
+                {/* No results */}
+                {showAgencyDropdown && agencySearch && filteredAgencies.length === 0 && (
+                  <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg p-3">
+                    <p className="text-sm text-gray-500">No agencies found.</p>
+                    {canEdit && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowNewAgencyForm(true);
+                          setShowAgencyDropdown(false);
+                          setNewAgencyName(agencySearch);
+                        }}
+                        className="mt-2 flex items-center gap-1 text-sm text-[#5A7A8F] hover:text-[#4a6a7f]"
+                      >
+                        <Plus className="h-4 w-4" />
+                        Add &quot;{agencySearch}&quot; as new agency
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Inline New Agency Form */}
+              {showNewAgencyForm && (
+                <div className="mt-2 p-4 border border-purple-200 bg-purple-50 rounded-lg">
+                  <h4 className="text-sm font-medium text-gray-700 mb-3 flex items-center gap-2">
+                    <Plus className="h-4 w-4" />
+                    Add New Agency
+                  </h4>
+                  <div className="grid grid-cols-3 gap-3">
+                    <div>
+                      <label className="block text-xs text-gray-500 mb-1">Agency Name *</label>
+                      <input
+                        type="text"
+                        value={newAgencyName}
+                        onChange={(e) => setNewAgencyName(e.target.value)}
+                        placeholder="Agency name"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-500 mb-1">Email</label>
+                      <input
+                        type="email"
+                        value={newAgencyEmail}
+                        onChange={(e) => setNewAgencyEmail(e.target.value)}
+                        placeholder="Email"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-500 mb-1">Phone</label>
+                      <input
+                        type="tel"
+                        value={newAgencyPhone}
+                        onChange={(e) => setNewAgencyPhone(e.target.value)}
+                        placeholder="Phone"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      />
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 mt-3">
+                    <button
+                      type="button"
+                      onClick={handleCreateAgency}
+                      disabled={!newAgencyName.trim() || isCreatingAgency}
+                      className="px-3 py-1.5 bg-[#5A7A8F] text-white text-sm rounded-lg hover:bg-[#4a6a7f] disabled:opacity-50 flex items-center gap-1"
+                    >
+                      {isCreatingAgency ? (
+                        <>
+                          <div className="animate-spin rounded-full h-3 w-3 border-2 border-white border-t-transparent" />
+                          Creating...
+                        </>
+                      ) : (
+                        <>
+                          <Plus className="h-3 w-3" />
+                          Create & Select
+                        </>
+                      )}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowNewAgencyForm(false);
+                        setNewAgencyName('');
+                        setNewAgencyEmail('');
+                        setNewAgencyPhone('');
+                      }}
+                      className="px-3 py-1.5 text-gray-600 text-sm hover:bg-gray-200 rounded-lg transition-colors"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                  <p className="text-xs text-gray-500 mt-2">
+                    This agency will be saved as a Contact (Agency type) in Accounting and linked to Booking Agencies.
+                  </p>
+                </div>
               )}
             </div>
           )}

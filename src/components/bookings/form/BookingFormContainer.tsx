@@ -1293,6 +1293,7 @@ export function BookingFormContainer({
             {formData.type === 'cabin_charter' && (
               <CabinSection
                 bookingId={booking?.id}
+                projectId={formData.projectId}
                 cabinAllocations={cabinAllocations}
                 onAllocationsChange={setCabinAllocations}
                 canEdit={canEdit}

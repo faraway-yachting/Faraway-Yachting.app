@@ -33,13 +33,16 @@ import {
   PaymentStatus,
   paymentStatusLabels,
   BookingAttachment,
+  ProjectCabin,
 } from '@/data/booking/types';
 import { bookingPaymentsApi, BookingPaymentExtended } from '@/lib/supabase/api/bookingPayments';
 import { cashCollectionsApi, CashCollection } from '@/lib/supabase/api/cashCollections';
 import { contactsApi } from '@/lib/supabase/api/contacts';
+import { bookingAgenciesApi } from '@/lib/supabase/api/bookingAgencies';
+import { projectCabinsApi } from '@/lib/supabase/api/projectCabins';
 import { createClient } from '@/lib/supabase/client';
-import { DynamicMultiSelect } from './DynamicMultiSelect';
 import { DynamicSelect } from './DynamicSelect';
+import { ExtraItemsEditor } from './ExtraItemsEditor';
 import type { PaymentRecord, BankAccountOption, CompanyOption } from './FinanceSection';
 import { ExchangeRateField } from '@/components/shared/ExchangeRateField';
 import { Currency } from '@/data/company/types';
@@ -55,6 +58,7 @@ interface AgencyContact {
 
 interface CabinSectionProps {
   bookingId?: string;
+  projectId?: string;
   cabinAllocations: CabinAllocation[];
   onAllocationsChange: (allocations: CabinAllocation[]) => void;
   canEdit: boolean;
@@ -78,15 +82,38 @@ const paymentMethods = [
   { value: 'promptpay', label: 'PromptPay' },
 ];
 
-// Commission base: THB charter fee (converted if non-THB)
-function getThbCharterFee(alloc: CabinAllocation, defaultCurrency: string): number {
+// Commission base: THB charter fee + commissionable extras profit (converted if non-THB)
+function getThbCommissionBase(alloc: CabinAllocation, defaultCurrency: string): { charterBase: number; extrasBase: number; total: number } {
   const cabinCurrency = alloc.currency || defaultCurrency;
   const charterFee = alloc.charterFee || 0;
-  return cabinCurrency !== 'THB' ? charterFee * (alloc.fxRate || 0) : charterFee;
+  const fxRate = alloc.fxRate || 0;
+  const charterBase = cabinCurrency !== 'THB' ? charterFee * fxRate : charterFee;
+
+  // Extras: commissionable items profit in THB
+  const extraItems = alloc.extraItems || [];
+  const extrasBase = extraItems
+    .filter(item => item.commissionable !== false)
+    .reduce((sum, item) => {
+      const profit = (item.sellingPrice || 0) - (item.cost || 0);
+      const itemCur = item.currency || cabinCurrency;
+      if (itemCur === 'THB') return sum + profit;
+      if (item.fxRate) return sum + profit * item.fxRate;
+      if (itemCur === cabinCurrency && fxRate) return sum + profit * fxRate;
+      return sum + profit;
+    }, 0);
+
+  return { charterBase, extrasBase, total: charterBase + extrasBase };
+}
+
+// Default commission rate based on booking source type
+function getDefaultCommissionRate(bookingSourceType?: string): number {
+  if (!bookingSourceType || bookingSourceType === 'direct') return 2;
+  return 1; // agency
 }
 
 export default function CabinSection({
   bookingId,
+  projectId,
   cabinAllocations,
   onAllocationsChange,
   canEdit,
@@ -111,6 +138,23 @@ export default function CabinSection({
   const [fxState, setFxState] = useState<Map<string, { isLoading: boolean; error: string | null }>>(new Map());
   // Agencies for Direct/Agency dropdown
   const [agencies, setAgencies] = useState<AgencyContact[]>([]);
+
+  // Yacht register cabins — for the "+ Add Cabin" picker
+  const [projectCabins, setProjectCabins] = useState<ProjectCabin[]>([]);
+  const [showCabinPicker, setShowCabinPicker] = useState(false);
+
+  // Load yacht cabins from register when projectId changes
+  useEffect(() => {
+    if (!projectId) {
+      setProjectCabins([]);
+      return;
+    }
+    projectCabinsApi.getByProjectId(projectId).then(setProjectCabins).catch(console.error);
+  }, [projectId]);
+
+  // Compute unallocated yacht cabins (not yet in current allocations)
+  const allocatedCabinIds = new Set(cabinAllocations.map(a => a.projectCabinId).filter(Boolean));
+  const unallocatedCabins = projectCabins.filter(pc => !allocatedCabinIds.has(pc.id));
 
   // Load payments and cash for all cabin allocations
   useEffect(() => {
@@ -346,7 +390,7 @@ export default function CabinSection({
     const alloc = cabinAllocations.find(a => a.id === allocationId);
     if (!alloc) return;
     const rate = rateStr === '' ? undefined : parseFloat(rateStr);
-    const base = getThbCharterFee(alloc, currency);
+    const { total: base } = getThbCommissionBase(alloc, currency);
     const total = base * (rate || 0) / 100;
     const received = total - (alloc.commissionDeduction || 0);
     onAllocationsChange(
@@ -377,7 +421,8 @@ export default function CabinSection({
     const alloc = cabinAllocations.find(a => a.id === allocationId);
     if (!alloc) return;
     const deduction = deductStr === '' ? undefined : parseFloat(deductStr);
-    const autoTotal = getThbCharterFee(alloc, currency) * (alloc.commissionRate || 0) / 100;
+    const { total: base } = getThbCommissionBase(alloc, currency);
+    const autoTotal = base * (alloc.commissionRate || 0) / 100;
     const received = (alloc.totalCommission ?? autoTotal) - (deduction || 0);
     onAllocationsChange(
       cabinAllocations.map(a => a.id === allocationId ? {
@@ -430,9 +475,9 @@ export default function CabinSection({
         const cabinCurrency = merged.currency || currency;
         const fxRate = merged.fxRate || 0;
         const thbTotalPrice = cabinCurrency !== 'THB' && fxRate > 0 ? totalPrice * fxRate : (cabinCurrency === 'THB' ? totalPrice : undefined);
-        // Recalculate commission if rate is set
-        const thbCharterFee = cabinCurrency !== 'THB' ? charterFee * fxRate : charterFee;
-        const totalCommission = thbCharterFee * (merged.commissionRate || 0) / 100;
+        // Recalculate commission if rate is set (uses charter fee + extras profit)
+        const { total: commissionBase } = getThbCommissionBase(merged, currency);
+        const totalCommission = commissionBase * (merged.commissionRate || 0) / 100;
         const commissionReceived = totalCommission - (merged.commissionDeduction || 0);
         return {
           ...merged,
@@ -520,6 +565,7 @@ export default function CabinSection({
             onRecordCash={onRecordCash}
             onCreateInvoice={onCreateInvoice}
             onCreateReceipt={onCreateReceipt}
+            onAddAgency={(agency) => setAgencies(prev => [...prev, agency])}
             onDelete={() => {
               onAllocationsChange(cabinAllocations.filter(a => a.id !== allocation.id));
               if (expandedCabinId === allocation.id) setExpandedCabinId(null);
@@ -537,35 +583,129 @@ export default function CabinSection({
         </div>
       )}
 
-      {/* Add Cabin Button */}
+      {/* Add Cabin */}
       {canEdit && (
-        <button
-          type="button"
-          onClick={() => {
-            const nextNumber = cabinAllocations.length > 0
-              ? Math.max(...cabinAllocations.map(a => a.cabinNumber)) + 1
-              : 1;
-            const newCabin: CabinAllocation = {
-              id: `temp-${Date.now()}`,
-              bookingId: bookingId || '',
-              cabinLabel: `Cabin ${nextNumber}`,
-              cabinNumber: nextNumber,
-              status: 'available' as CabinAllocationStatus,
-              numberOfGuests: 0,
-              currency: currency,
-              paymentStatus: 'unpaid' as PaymentStatus,
-              sortOrder: nextNumber,
-              createdAt: new Date().toISOString(),
-              updatedAt: new Date().toISOString(),
-            };
-            onAllocationsChange([...cabinAllocations, newCabin]);
-            setExpandedCabinId(newCabin.id);
-          }}
-          className="w-full flex items-center justify-center gap-2 mt-3 px-4 py-2.5 rounded-lg border-2 border-dashed border-indigo-300 text-sm font-medium text-indigo-600 hover:bg-indigo-100 hover:border-indigo-400 transition-colors"
-        >
-          <Plus className="h-4 w-4" />
-          Add Cabin
-        </button>
+        <div className="relative mt-3">
+          {unallocatedCabins.length > 0 ? (
+            <>
+              <button
+                type="button"
+                onClick={() => setShowCabinPicker(!showCabinPicker)}
+                className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg border-2 border-dashed border-indigo-300 text-sm font-medium text-indigo-600 hover:bg-indigo-100 hover:border-indigo-400 transition-colors"
+              >
+                <Plus className="h-4 w-4" />
+                Add Cabin
+                <ChevronDown className={`h-4 w-4 transition-transform ${showCabinPicker ? 'rotate-180' : ''}`} />
+              </button>
+              {showCabinPicker && (
+                <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg overflow-hidden">
+                  {unallocatedCabins.map((pc) => (
+                    <button
+                      key={pc.id}
+                      type="button"
+                      onClick={() => {
+                        const newCabin: CabinAllocation = {
+                          id: `temp-${Date.now()}`,
+                          bookingId: bookingId || '',
+                          projectCabinId: pc.id,
+                          cabinLabel: pc.cabinName,
+                          cabinNumber: pc.cabinNumber,
+                          status: 'available' as CabinAllocationStatus,
+                          numberOfGuests: 0,
+                          currency: currency,
+                          paymentStatus: 'unpaid' as PaymentStatus,
+                          sortOrder: pc.sortOrder,
+                          createdAt: new Date().toISOString(),
+                          updatedAt: new Date().toISOString(),
+                        };
+                        onAllocationsChange([...cabinAllocations, newCabin]);
+                        setExpandedCabinId(newCabin.id);
+                        setShowCabinPicker(false);
+                      }}
+                      className="w-full px-4 py-2.5 text-left hover:bg-indigo-50 transition-colors flex items-center gap-3"
+                    >
+                      <BedDouble className="h-4 w-4 text-indigo-400 flex-shrink-0" />
+                      <div className="flex-1">
+                        <span className="text-sm font-medium text-gray-900">{pc.cabinName}</span>
+                        <div className="flex items-center gap-2 mt-0.5">
+                          <span className="px-1.5 py-0 bg-indigo-100 text-indigo-700 text-xs rounded">
+                            Cabin {pc.cabinNumber}
+                          </span>
+                          {pc.isEnsuite && (
+                            <span className="px-1.5 py-0 bg-teal-100 text-teal-700 text-xs rounded">
+                              Ensuite
+                            </span>
+                          )}
+                          {pc.position && (
+                            <span className="text-xs text-gray-400">{pc.position}</span>
+                          )}
+                        </div>
+                      </div>
+                      <span className="text-xs text-gray-400">Max {pc.maxGuests}</span>
+                    </button>
+                  ))}
+                  {/* Custom cabin option */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const nextNumber = cabinAllocations.length > 0
+                        ? Math.max(...cabinAllocations.map(a => a.cabinNumber)) + 1
+                        : 1;
+                      const newCabin: CabinAllocation = {
+                        id: `temp-${Date.now()}`,
+                        bookingId: bookingId || '',
+                        cabinLabel: `Cabin ${nextNumber}`,
+                        cabinNumber: nextNumber,
+                        status: 'available' as CabinAllocationStatus,
+                        numberOfGuests: 0,
+                        currency: currency,
+                        paymentStatus: 'unpaid' as PaymentStatus,
+                        sortOrder: nextNumber,
+                        createdAt: new Date().toISOString(),
+                        updatedAt: new Date().toISOString(),
+                      };
+                      onAllocationsChange([...cabinAllocations, newCabin]);
+                      setExpandedCabinId(newCabin.id);
+                      setShowCabinPicker(false);
+                    }}
+                    className="w-full px-4 py-2.5 text-left hover:bg-gray-50 transition-colors flex items-center gap-3 border-t border-gray-200 text-gray-500"
+                  >
+                    <Plus className="h-4 w-4" />
+                    <span className="text-sm">Add Custom Cabin</span>
+                  </button>
+                </div>
+              )}
+            </>
+          ) : (
+            <button
+              type="button"
+              onClick={() => {
+                const nextNumber = cabinAllocations.length > 0
+                  ? Math.max(...cabinAllocations.map(a => a.cabinNumber)) + 1
+                  : 1;
+                const newCabin: CabinAllocation = {
+                  id: `temp-${Date.now()}`,
+                  bookingId: bookingId || '',
+                  cabinLabel: `Cabin ${nextNumber}`,
+                  cabinNumber: nextNumber,
+                  status: 'available' as CabinAllocationStatus,
+                  numberOfGuests: 0,
+                  currency: currency,
+                  paymentStatus: 'unpaid' as PaymentStatus,
+                  sortOrder: nextNumber,
+                  createdAt: new Date().toISOString(),
+                  updatedAt: new Date().toISOString(),
+                };
+                onAllocationsChange([...cabinAllocations, newCabin]);
+                setExpandedCabinId(newCabin.id);
+              }}
+              className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg border-2 border-dashed border-indigo-300 text-sm font-medium text-indigo-600 hover:bg-indigo-100 hover:border-indigo-400 transition-colors"
+            >
+              <Plus className="h-4 w-4" />
+              Add Cabin
+            </button>
+          )}
+        </div>
       )}
       </>}
     </div>
@@ -609,6 +749,7 @@ interface CabinAllocationCardProps {
   onCreateInvoice?: (allocation: CabinAllocation) => void;
   onCreateReceipt?: (allocation: CabinAllocation) => void;
   onDelete?: () => void;
+  onAddAgency?: (agency: AgencyContact) => void;
 }
 
 function CabinAllocationCard({
@@ -644,16 +785,29 @@ function CabinAllocationCard({
   onCreateInvoice,
   onCreateReceipt,
   onDelete,
+  onAddAgency,
 }: CabinAllocationCardProps) {
   const contractFileRef = useRef<HTMLInputElement>(null);
   const internalFileRef = useRef<HTMLInputElement>(null);
   const guestSearchRef = useRef<HTMLDivElement>(null);
+  const agencySearchRef = useRef<HTMLDivElement>(null);
 
   // Guest contact search state (Direct mode) — stored in agentName field
   const [guestSearch, setGuestSearch] = useState(
     (allocation.bookingSourceType || 'direct') === 'direct' ? (allocation.agentName || '') : ''
   );
   const [showGuestDropdown, setShowGuestDropdown] = useState(false);
+
+  // Agency search state
+  const [agencySearch, setAgencySearch] = useState(
+    allocation.bookingSourceType === 'agency' ? (allocation.agentName || '') : ''
+  );
+  const [showAgencyDropdown, setShowAgencyDropdown] = useState(false);
+  const [showNewAgencyForm, setShowNewAgencyForm] = useState(false);
+  const [newAgencyName, setNewAgencyName] = useState('');
+  const [newAgencyEmail, setNewAgencyEmail] = useState('');
+  const [newAgencyPhone, setNewAgencyPhone] = useState('');
+  const [isCreatingAgency, setIsCreatingAgency] = useState(false);
 
   // Sync guestSearch when allocation.agentName changes externally
   useEffect(() => {
@@ -674,6 +828,67 @@ function CabinAllocationCard({
     }
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [showGuestDropdown]);
+
+  // Sync agencySearch when allocation.agentName changes externally (agency mode)
+  useEffect(() => {
+    if (allocation.bookingSourceType === 'agency' && allocation.agentName !== undefined && allocation.agentName !== agencySearch) {
+      setAgencySearch(allocation.agentName || '');
+    }
+  }, [allocation.agentName, allocation.bookingSourceType]);
+
+  // Close agency dropdown on outside click
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (agencySearchRef.current && !agencySearchRef.current.contains(event.target as Node)) {
+        setShowAgencyDropdown(false);
+      }
+    };
+    if (showAgencyDropdown) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [showAgencyDropdown]);
+
+  const filteredAgencies = agencies.filter(a =>
+    a.name.toLowerCase().includes((agencySearch || '').toLowerCase())
+  );
+
+  const handleAgencySelect = (agency: AgencyContact) => {
+    updateAllocation(allocation.id, 'agentName', agency.name);
+    setAgencySearch(agency.name);
+    setShowAgencyDropdown(false);
+  };
+
+  const handleCreateAgency = async () => {
+    if (!newAgencyName.trim()) return;
+    setIsCreatingAgency(true);
+    try {
+      const newContact = await contactsApi.create({
+        name: newAgencyName.trim(),
+        type: ['agency'],
+        email: newAgencyEmail.trim() || null,
+        phone: newAgencyPhone.trim() || null,
+        is_active: true,
+      });
+      await bookingAgenciesApi.create({
+        contact_id: newContact.id,
+        is_active: true,
+        default_currency: 'THB',
+      });
+      const agencyContact: AgencyContact = { id: newContact.id, name: newContact.name, email: newContact.email || undefined, phone: newContact.phone || undefined };
+      onAddAgency?.(agencyContact);
+      handleAgencySelect(agencyContact);
+      setNewAgencyName('');
+      setNewAgencyEmail('');
+      setNewAgencyPhone('');
+      setShowNewAgencyForm(false);
+    } catch (error) {
+      console.error('Error creating agency:', error);
+      alert('Failed to create agency');
+    } finally {
+      setIsCreatingAgency(false);
+    }
+  };
 
   const filteredCustomers = customers.filter(c =>
     c.name.toLowerCase().includes((guestSearch || '').toLowerCase()) ||
@@ -721,8 +936,9 @@ function CabinAllocationCard({
   };
 
   // Commission auto-calc values
-  const thbCharterFeeBase = getThbCharterFee(allocation, currency);
-  const autoTotal = thbCharterFeeBase * (allocation.commissionRate || 0) / 100;
+  const { charterBase: commCharterBase, extrasBase: commExtrasBase, total: commBase } = getThbCommissionBase(allocation, currency);
+  const defaultRate = getDefaultCommissionRate(allocation.bookingSourceType);
+  const autoTotal = commBase * (allocation.commissionRate || 0) / 100;
   const autoReceived = (allocation.totalCommission ?? autoTotal) - (allocation.commissionDeduction || 0);
 
   return (
@@ -948,19 +1164,164 @@ function CabinAllocationCard({
               {allocation.bookingSourceType === 'agency' && (
                 <div className="col-span-2">
                   <label className="block text-xs font-medium text-gray-600 mb-1">Agency</label>
-                  <select
-                    value={allocation.agentName || ''}
-                    onChange={e => updateAllocation(allocation.id, 'agentName', e.target.value)}
-                    disabled={!canEdit}
-                    className="w-full px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 disabled:bg-gray-100"
-                  >
-                    <option value="">Select agency...</option>
-                    {agencies.map(a => (
-                      <option key={a.id} value={a.name}>{a.name}</option>
-                    ))}
-                  </select>
-                  {agencies.length === 0 && (
-                    <p className="text-xs text-gray-400 mt-1">No agencies found. Add agencies in Contacts.</p>
+                  <div className="relative" ref={agencySearchRef}>
+                    <div className="relative">
+                      <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400" />
+                      <input
+                        type="text"
+                        value={agencySearch}
+                        onChange={(e) => {
+                          setAgencySearch(e.target.value);
+                          setShowAgencyDropdown(true);
+                          if (!e.target.value) {
+                            updateAllocation(allocation.id, 'agentName', '');
+                          }
+                        }}
+                        onFocus={() => setShowAgencyDropdown(true)}
+                        placeholder="Search agency..."
+                        disabled={!canEdit}
+                        className="w-full pl-8 pr-8 py-1.5 text-sm border border-gray-300 rounded-lg focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 disabled:bg-gray-100"
+                      />
+                      {canEdit && (
+                        <button
+                          type="button"
+                          onClick={() => setShowNewAgencyForm(true)}
+                          className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 text-indigo-600 hover:bg-indigo-50 rounded transition-colors"
+                          title="Add new agency"
+                        >
+                          <Plus className="h-3.5 w-3.5" />
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Agency search dropdown */}
+                    {showAgencyDropdown && filteredAgencies.length > 0 && (
+                      <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg overflow-hidden max-h-40 overflow-y-auto">
+                        {filteredAgencies.map((agency) => (
+                          <button
+                            key={agency.id}
+                            type="button"
+                            onClick={() => handleAgencySelect(agency)}
+                            className="w-full px-3 py-1.5 text-left hover:bg-indigo-50 transition-colors"
+                          >
+                            <p className="text-sm font-medium text-gray-900">{agency.name}</p>
+                            {agency.email && <p className="text-xs text-gray-500">{agency.email}</p>}
+                          </button>
+                        ))}
+                        {canEdit && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setShowNewAgencyForm(true);
+                              setShowAgencyDropdown(false);
+                              setNewAgencyName(agencySearch);
+                            }}
+                            className="w-full px-3 py-1.5 text-left hover:bg-purple-50 transition-colors border-t border-gray-200 flex items-center gap-1.5 text-indigo-600"
+                          >
+                            <Plus className="h-3.5 w-3.5" />
+                            <span className="text-sm font-medium">Add New Agency</span>
+                          </button>
+                        )}
+                      </div>
+                    )}
+
+                    {/* No results */}
+                    {showAgencyDropdown && agencySearch && filteredAgencies.length === 0 && (
+                      <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg p-3">
+                        <p className="text-sm text-gray-500">No agencies found.</p>
+                        {canEdit && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setShowNewAgencyForm(true);
+                              setShowAgencyDropdown(false);
+                              setNewAgencyName(agencySearch);
+                            }}
+                            className="mt-1 flex items-center gap-1 text-sm text-indigo-600 hover:text-indigo-800"
+                          >
+                            <Plus className="h-3.5 w-3.5" />
+                            Add &quot;{agencySearch}&quot; as new agency
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Inline New Agency Form */}
+                  {showNewAgencyForm && (
+                    <div className="mt-2 p-3 border border-indigo-200 bg-indigo-50 rounded-lg">
+                      <h4 className="text-xs font-medium text-gray-700 mb-2 flex items-center gap-1.5">
+                        <Plus className="h-3.5 w-3.5" />
+                        Add New Agency
+                      </h4>
+                      <div className="grid grid-cols-3 gap-2">
+                        <div>
+                          <label className="block text-xs text-gray-500 mb-0.5">Name *</label>
+                          <input
+                            type="text"
+                            value={newAgencyName}
+                            onChange={(e) => setNewAgencyName(e.target.value)}
+                            placeholder="Agency name"
+                            className="w-full px-2 py-1 text-sm border border-gray-300 rounded-lg focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-gray-500 mb-0.5">Email</label>
+                          <input
+                            type="email"
+                            value={newAgencyEmail}
+                            onChange={(e) => setNewAgencyEmail(e.target.value)}
+                            placeholder="Email"
+                            className="w-full px-2 py-1 text-sm border border-gray-300 rounded-lg focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-gray-500 mb-0.5">Phone</label>
+                          <input
+                            type="tel"
+                            value={newAgencyPhone}
+                            onChange={(e) => setNewAgencyPhone(e.target.value)}
+                            placeholder="Phone"
+                            className="w-full px-2 py-1 text-sm border border-gray-300 rounded-lg focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500"
+                          />
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 mt-2">
+                        <button
+                          type="button"
+                          onClick={handleCreateAgency}
+                          disabled={!newAgencyName.trim() || isCreatingAgency}
+                          className="px-2.5 py-1 bg-indigo-600 text-white text-xs rounded-lg hover:bg-indigo-700 disabled:opacity-50 flex items-center gap-1"
+                        >
+                          {isCreatingAgency ? (
+                            <>
+                              <div className="animate-spin rounded-full h-3 w-3 border-2 border-white border-t-transparent" />
+                              Creating...
+                            </>
+                          ) : (
+                            <>
+                              <Plus className="h-3 w-3" />
+                              Create & Select
+                            </>
+                          )}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowNewAgencyForm(false);
+                            setNewAgencyName('');
+                            setNewAgencyEmail('');
+                            setNewAgencyPhone('');
+                          }}
+                          className="px-2.5 py-1 text-gray-600 text-xs hover:bg-gray-200 rounded-lg transition-colors"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                      <p className="text-xs text-gray-500 mt-1.5">
+                        Saved as Contact (Agency) in Accounting + Booking Agencies.
+                      </p>
+                    </div>
                   )}
                 </div>
               )}
@@ -1049,12 +1410,26 @@ function CabinAllocationCard({
                 <Package className="h-4 w-4 text-amber-600" />
                 <h4 className="text-sm font-semibold text-amber-800">Extras</h4>
               </div>
-              <DynamicMultiSelect
-                category="extras"
-                values={allocation.extras || []}
-                onChange={(vals) => updateAllocation(allocation.id, 'extras', vals)}
+              <ExtraItemsEditor
+                items={allocation.extraItems || []}
+                onChange={(items) => {
+                  // Update extraItems and recalculate commission
+                  const updated = { ...allocation, extraItems: items };
+                  const { total: commBase } = getThbCommissionBase(updated, currency);
+                  const totalCommission = commBase * (updated.commissionRate || 0) / 100;
+                  const commissionReceived = totalCommission - (updated.commissionDeduction || 0);
+                  onAllocationsChange(
+                    allAllocations.map(a => a.id === allocation.id ? {
+                      ...a,
+                      extraItems: items,
+                      totalCommission,
+                      commissionReceived,
+                    } : a)
+                  );
+                }}
                 disabled={!canEdit}
-                placeholder="Select extras (Taxi, BBQ, Diving...)"
+                currency={allocation.currency || currency}
+                bookingFxRate={allocation.fxRate}
               />
             </div>
           </div>
@@ -1366,18 +1741,43 @@ function CabinAllocationCard({
                 <DollarSign className="h-4 w-4 text-teal-600" />
                 <h4 className="text-sm font-semibold text-teal-800">Booking Owner Commission</h4>
               </div>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">Rate (%)</label>
-                  <input
-                    type="number" step="0.01" min="0" max="100"
-                    value={allocation.commissionRate ?? ''}
-                    onChange={e => handleCommissionRateChange(allocation.id, e.target.value)}
-                    disabled={!canEdit}
-                    placeholder="0.00"
-                    className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded-lg focus:ring-1 focus:ring-teal-500 disabled:bg-gray-100"
-                  />
+
+              {/* Commission Rate */}
+              <div className="mb-3 max-w-xs">
+                <label className="block text-xs font-medium text-gray-600 mb-1">
+                  Rate (%)
+                  <span className="text-xs text-gray-400 font-normal ml-1">Default: {defaultRate}%</span>
+                </label>
+                <input
+                  type="number" step="0.01" min="0" max="100"
+                  value={allocation.commissionRate ?? ''}
+                  onChange={e => handleCommissionRateChange(allocation.id, e.target.value)}
+                  disabled={!canEdit}
+                  placeholder="0.00"
+                  className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded-lg focus:ring-1 focus:ring-teal-500 disabled:bg-gray-100"
+                />
+              </div>
+
+              {/* Commission Breakdown */}
+              {(commCharterBase > 0 || commExtrasBase > 0) && (allocation.commissionRate || 0) > 0 && (
+                <div className="text-sm bg-white/50 rounded-md p-2.5 mb-3 space-y-1">
+                  {(allocation.currency || currency) !== 'THB' && (
+                    <p className="text-xs text-teal-600 mb-1">Commission calculated in THB</p>
+                  )}
+                  <div className="flex justify-between text-gray-600 text-xs">
+                    <span>Charter fee ({commCharterBase.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})</span>
+                    <span>{(commCharterBase * (allocation.commissionRate || 0) / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                  </div>
+                  {commExtrasBase > 0 && (
+                    <div className="flex justify-between text-gray-600 text-xs">
+                      <span>Extras ({commExtrasBase.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})</span>
+                      <span>{(commExtrasBase * (allocation.commissionRate || 0) / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                    </div>
+                  )}
                 </div>
+              )}
+
+              <div className="grid grid-cols-3 gap-3">
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">Total</label>
                   <input
@@ -1411,6 +1811,18 @@ function CabinAllocationCard({
                     className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded-lg focus:ring-1 focus:ring-teal-500 disabled:bg-gray-100"
                   />
                 </div>
+              </div>
+
+              {/* Commission Note */}
+              <div className="mt-2">
+                <input
+                  type="text"
+                  value={allocation.commissionNote ?? ''}
+                  onChange={e => updateAllocation(allocation.id, 'commissionNote', e.target.value)}
+                  disabled={!canEdit}
+                  placeholder="Commission note..."
+                  className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded-lg focus:ring-1 focus:ring-teal-500 disabled:bg-gray-100"
+                />
               </div>
             </div>
           </div>
