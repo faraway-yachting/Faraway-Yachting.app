@@ -358,6 +358,7 @@ export function BookingFormContainer({
   // Initialize form with booking data
   useEffect(() => {
     if (booking) {
+      console.log('[BookingLoad] charterFee:', booking.charterFee, '| totalPrice:', booking.totalPrice, '| id:', booking.id);
       setFormData(booking);
       setUseExternalBoat(!!booking.externalBoatName && !booking.projectId);
     }
@@ -626,7 +627,7 @@ export function BookingFormContainer({
       charterExpenseStatus = undefined;
     }
 
-    return {
+    const data = {
       ...formData,
       extras: undefined, // legacy field — no longer written
       projectId: useExternalBoat ? undefined : formData.projectId,
@@ -634,6 +635,11 @@ export function BookingFormContainer({
       pickupLocation: formData.departureFrom || formData.pickupLocation,
       charterExpenseStatus,
     };
+
+    // Debug: log financial fields to track charter fee persistence
+    console.log('[BookingSave] charterFee:', data.charterFee, '| totalPrice:', data.totalPrice, '| extraCharges:', data.extraCharges);
+
+    return data;
   };
 
   const executeSave = async (dataToSave: Partial<Booking>) => {
