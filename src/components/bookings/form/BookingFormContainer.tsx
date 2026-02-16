@@ -846,6 +846,15 @@ export function BookingFormContainer({
                 currency: allocation.currency,
                 paymentStatus: allocation.paymentStatus,
                 sortOrder: allocation.sortOrder,
+                bookingSourceType: allocation.bookingSourceType,
+                extraItems: allocation.extraItems,
+                commissionNote: allocation.commissionNote,
+                charterFee: allocation.charterFee,
+                adminFee: allocation.adminFee,
+                fxRate: allocation.fxRate,
+                fxRateSource: allocation.fxRateSource,
+                thbTotalPrice: allocation.thbTotalPrice,
+                isCompleted: allocation.isCompleted,
               };
 
               if (allocation.id.startsWith('temp-')) {
