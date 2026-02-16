@@ -683,10 +683,86 @@ export function BookingFormContainer({
   const executeSave = async (dataToSave: Partial<Booking>) => {
     setIsSaving(true);
     try {
-      await onSave(dataToSave);
-
-      // Persist crew assignments after booking save
+      // For existing bookings, persist related data BEFORE onSave.
+      // onSave closes the modal (unmounting this component), so saving
+      // cabin allocations after onSave is unreliable.
       const bookingId = booking?.id || (dataToSave as any).id;
+
+      // Persist cabin allocations for cabin charter bookings (BEFORE modal closes)
+      if (bookingId && dataToSave.type === 'cabin_charter' && cabinAllocations.length > 0) {
+        try {
+          const existingAllocations = await cabinAllocationsApi.getByBookingId(bookingId);
+          const existingIds = new Set(existingAllocations.map(a => a.id));
+          const currentIds = new Set(cabinAllocations.filter(a => !a.id.startsWith('temp-')).map(a => a.id));
+
+          // Delete removed allocations
+          for (const existing of existingAllocations) {
+            if (!currentIds.has(existing.id)) {
+              await cabinAllocationsApi.delete(existing.id);
+            }
+          }
+
+          // Create/update allocations
+          const updatedAllocations: CabinAllocation[] = [];
+          for (const allocation of cabinAllocations) {
+            const allocationFields = {
+              status: allocation.status,
+              guestNames: allocation.guestNames,
+              numberOfGuests: allocation.numberOfGuests,
+              nationality: allocation.nationality,
+              guestNotes: allocation.guestNotes,
+              agentName: allocation.agentName,
+              contactPlatform: allocation.contactPlatform,
+              contactInfo: allocation.contactInfo,
+              bookingOwner: allocation.bookingOwner,
+              extras: allocation.extras,
+              contractNote: allocation.contractNote,
+              contractAttachments: allocation.contractAttachments,
+              commissionRate: allocation.commissionRate,
+              totalCommission: allocation.totalCommission,
+              commissionDeduction: allocation.commissionDeduction,
+              commissionReceived: allocation.commissionReceived,
+              internalNotes: allocation.internalNotes,
+              internalNoteAttachments: allocation.internalNoteAttachments,
+              customerNotes: allocation.customerNotes,
+              price: allocation.price,
+              currency: allocation.currency,
+              paymentStatus: allocation.paymentStatus,
+              sortOrder: allocation.sortOrder,
+              bookingSourceType: allocation.bookingSourceType,
+              extraItems: allocation.extraItems,
+              commissionNote: allocation.commissionNote,
+              charterFee: allocation.charterFee,
+              adminFee: allocation.adminFee,
+              fxRate: allocation.fxRate,
+              fxRateSource: allocation.fxRateSource,
+              thbTotalPrice: allocation.thbTotalPrice,
+              isCompleted: allocation.isCompleted,
+            };
+
+            if (allocation.id.startsWith('temp-')) {
+              // Create new
+              const created = await cabinAllocationsApi.create({
+                bookingId,
+                projectCabinId: allocation.projectCabinId,
+                cabinLabel: allocation.cabinLabel,
+                cabinNumber: allocation.cabinNumber,
+                ...allocationFields,
+              });
+              updatedAllocations.push(created);
+            } else if (existingIds.has(allocation.id)) {
+              // Update existing
+              const updated = await cabinAllocationsApi.update(allocation.id, allocationFields);
+              updatedAllocations.push(updated);
+            }
+          }
+          setCabinAllocations(updatedAllocations);
+        } catch (cabinErr) {
+          console.error('Error persisting cabin allocations:', cabinErr);
+        }
+      }
+
+      await onSave(dataToSave);
       if (bookingId && selectedCrewIds.length > 0) {
         try {
           const { bookingCrewApi } = await import('@/lib/supabase/api/bookingCrew');
@@ -803,80 +879,6 @@ export function BookingFormContainer({
           }
         } catch (paymentErr) {
           console.error('Error persisting payments:', paymentErr);
-        }
-
-        // Persist cabin allocations for cabin charter bookings
-        if (dataToSave.type === 'cabin_charter' && cabinAllocations.length > 0) {
-          try {
-            const existingAllocations = await cabinAllocationsApi.getByBookingId(bookingId);
-            const existingIds = new Set(existingAllocations.map(a => a.id));
-            const currentIds = new Set(cabinAllocations.filter(a => !a.id.startsWith('temp-')).map(a => a.id));
-
-            // Delete removed allocations
-            for (const existing of existingAllocations) {
-              if (!currentIds.has(existing.id)) {
-                await cabinAllocationsApi.delete(existing.id);
-              }
-            }
-
-            // Create/update allocations
-            const updatedAllocations: CabinAllocation[] = [];
-            for (const allocation of cabinAllocations) {
-              const allocationFields = {
-                status: allocation.status,
-                guestNames: allocation.guestNames,
-                numberOfGuests: allocation.numberOfGuests,
-                nationality: allocation.nationality,
-                guestNotes: allocation.guestNotes,
-                agentName: allocation.agentName,
-                contactPlatform: allocation.contactPlatform,
-                contactInfo: allocation.contactInfo,
-                bookingOwner: allocation.bookingOwner,
-                extras: allocation.extras,
-                contractNote: allocation.contractNote,
-                contractAttachments: allocation.contractAttachments,
-                commissionRate: allocation.commissionRate,
-                totalCommission: allocation.totalCommission,
-                commissionDeduction: allocation.commissionDeduction,
-                commissionReceived: allocation.commissionReceived,
-                internalNotes: allocation.internalNotes,
-                internalNoteAttachments: allocation.internalNoteAttachments,
-                customerNotes: allocation.customerNotes,
-                price: allocation.price,
-                currency: allocation.currency,
-                paymentStatus: allocation.paymentStatus,
-                sortOrder: allocation.sortOrder,
-                bookingSourceType: allocation.bookingSourceType,
-                extraItems: allocation.extraItems,
-                commissionNote: allocation.commissionNote,
-                charterFee: allocation.charterFee,
-                adminFee: allocation.adminFee,
-                fxRate: allocation.fxRate,
-                fxRateSource: allocation.fxRateSource,
-                thbTotalPrice: allocation.thbTotalPrice,
-                isCompleted: allocation.isCompleted,
-              };
-
-              if (allocation.id.startsWith('temp-')) {
-                // Create new
-                const created = await cabinAllocationsApi.create({
-                  bookingId,
-                  projectCabinId: allocation.projectCabinId,
-                  cabinLabel: allocation.cabinLabel,
-                  cabinNumber: allocation.cabinNumber,
-                  ...allocationFields,
-                });
-                updatedAllocations.push(created);
-              } else if (existingIds.has(allocation.id)) {
-                // Update existing
-                const updated = await cabinAllocationsApi.update(allocation.id, allocationFields);
-                updatedAllocations.push(updated);
-              }
-            }
-            setCabinAllocations(updatedAllocations);
-          } catch (cabinErr) {
-            console.error('Error persisting cabin allocations:', cabinErr);
-          }
         }
       }
     } catch (error: any) {
