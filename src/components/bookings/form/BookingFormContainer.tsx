@@ -358,7 +358,6 @@ export function BookingFormContainer({
   // Initialize form with booking data
   useEffect(() => {
     if (booking) {
-      console.log('[BookingLoad] charterFee:', booking.charterFee, '| totalPrice:', booking.totalPrice, '| id:', booking.id);
       setFormData(booking);
       setUseExternalBoat(!!booking.externalBoatName && !booking.projectId);
     }
@@ -454,12 +453,54 @@ export function BookingFormContainer({
     }
   }, [formData.extraItems, formData.currency, formData.fxRate]);
 
-  // Auto-calculate total cost
+  // Auto-sync cabin charter financials to main booking
   useEffect(() => {
+    if (formData.type === 'cabin_charter' && cabinAllocations.length > 0) {
+      const bookingCurrency = formData.currency || 'THB';
+      const bookingFxRate = formData.fxRate || 0;
+      // Sum cabin charter fees converted to booking currency
+      let totalCharterFee = 0;
+      let totalExtraCharges = 0;
+      for (const alloc of cabinAllocations) {
+        const cabinCurrency = alloc.currency || bookingCurrency;
+        const cabinFx = alloc.fxRate || 0;
+        const fee = alloc.charterFee || 0;
+        // Convert to booking currency
+        if (cabinCurrency === bookingCurrency) {
+          totalCharterFee += fee;
+        } else if (cabinCurrency === 'THB' && bookingFxRate) {
+          totalCharterFee += fee / bookingFxRate;
+        } else if (bookingCurrency === 'THB' && cabinFx) {
+          totalCharterFee += fee * cabinFx;
+        } else {
+          totalCharterFee += fee; // fallback: no conversion available
+        }
+        // Sum cabin extras (selling prices)
+        const cabinExtras = (alloc.extraItems || []).reduce((sum, item) => {
+          const itemCur = item.currency || cabinCurrency;
+          if (itemCur === bookingCurrency) return sum + (item.sellingPrice || 0);
+          return sum + (item.sellingPrice || 0); // fallback
+        }, 0);
+        totalExtraCharges += cabinExtras;
+      }
+      totalCharterFee = Math.round(totalCharterFee * 100) / 100;
+      totalExtraCharges = Math.round(totalExtraCharges * 100) / 100;
+      setFormData(prev => ({
+        ...prev,
+        charterFee: totalCharterFee,
+        extraCharges: totalExtraCharges,
+        totalPrice: totalCharterFee + totalExtraCharges,
+      }));
+    }
+  }, [cabinAllocations, formData.type, formData.currency, formData.fxRate]);
+
+  // Auto-calculate total cost (regular bookings)
+  useEffect(() => {
+    if (formData.type === 'cabin_charter') return; // handled above
     const fee = formData.charterFee || 0;
     const extra = formData.extraCharges || 0;
     setFormData(prev => ({ ...prev, totalPrice: fee + extra }));
-  }, [formData.charterFee, formData.extraCharges]);
+  }, [formData.charterFee, formData.extraCharges, formData.type]);
 
   const generateTitle = (data: Partial<Booking>): string => {
     const parts: string[] = [];
@@ -635,9 +676,6 @@ export function BookingFormContainer({
       pickupLocation: formData.departureFrom || formData.pickupLocation,
       charterExpenseStatus,
     };
-
-    // Debug: log financial fields to track charter fee persistence
-    console.log('[BookingSave] charterFee:', data.charterFee, '| totalPrice:', data.totalPrice, '| extraCharges:', data.extraCharges);
 
     return data;
   };

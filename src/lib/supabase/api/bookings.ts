@@ -363,7 +363,6 @@ export const bookingsApi = {
     const dbData = frontendToDb(updates);
     (dbData as any).updated_by = user?.id || null;
     (dbData as any).updated_by_name = userName;
-    console.log('[BookingAPI.update]', id, 'charter_fee:', dbData.charter_fee, 'total_price:', dbData.total_price, 'in updates:', updates.charterFee);
     const { data, error } = await supabase
       .from('bookings')
       .update(dbData)

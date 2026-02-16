@@ -281,9 +281,9 @@ export function CustomerSection({
                 checked={bookingSourceType === 'agency'}
                 onChange={() => {
                   setBookingSourceType('agency');
-                  // Clear the platform value when switching to agency mode
-                  if (formData.agentPlatform === 'Direct') {
-                    onChange('agentPlatform', '');
+                  // Set to 'Agency' so it persists (empty string saves as null and reverts to Direct)
+                  if (formData.agentPlatform === 'Direct' || !formData.agentPlatform) {
+                    onChange('agentPlatform', 'Agency');
                   }
                 }}
                 disabled={!canEdit}

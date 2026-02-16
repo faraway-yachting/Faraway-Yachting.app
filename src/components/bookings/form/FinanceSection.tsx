@@ -337,9 +337,13 @@ export function FinanceSection({
               type="number"
               value={formData.charterFee || ''}
               onChange={(e) => onChange('charterFee', e.target.value ? parseFloat(e.target.value) : undefined)}
-              disabled={!canEdit}
+              disabled={!canEdit || formData.type === 'cabin_charter'}
+              readOnly={formData.type === 'cabin_charter'}
               className={`w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100 transition-all ${getAutoFillClass('charterFee')}`}
             />
+            {formData.type === 'cabin_charter' && (
+              <span className="text-xs text-gray-400 mt-0.5 block">Sum from cabin allocations</span>
+            )}
           </div>
           <div>
             <label className="block text-xs text-gray-500 mb-1">Extra Charges</label>
