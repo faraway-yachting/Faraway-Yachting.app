@@ -85,6 +85,7 @@ function dbBookingToFrontend(db: DbBooking): Booking {
     contactChannel: (db.contact_channel as Booking['contactChannel']) ?? undefined,
     numberOfGuests: db.number_of_guests ?? undefined,
     bookingOwner: (db as any).sales_owner_id ?? undefined,
+    bookingOwnerName: (db as any).sales_owner?.nickname || (db as any).sales_owner?.full_name_en || undefined,
     agentName: db.agent_name ?? undefined,
     agentPlatform: db.agent_platform ?? undefined,
     meetAndGreeter: db.meet_and_greeter ?? undefined,
@@ -238,7 +239,7 @@ export const bookingsApi = {
   async getAll(projectIds?: string[]): Promise<Booking[]> {
     if (projectIds && projectIds.length === 0) return [];
     const supabase = createClient();
-    let query = supabase.from('bookings').select('*').order('date_from', { ascending: false }).limit(500);
+    let query = supabase.from('bookings').select('*, sales_owner:employees!sales_owner_id(full_name_en, nickname)').order('date_from', { ascending: false }).limit(500);
     if (projectIds) query = query.in('project_id', projectIds);
     const { data, error } = await query;
     if (error) throw error;
@@ -286,7 +287,7 @@ export const bookingsApi = {
   async getByDateRange(from: string, to: string, projectIds?: string[]): Promise<Booking[]> {
     if (projectIds && projectIds.length === 0) return [];
     const supabase = createClient();
-    let query = supabase.from('bookings').select('*')
+    let query = supabase.from('bookings').select('*, sales_owner:employees!sales_owner_id(full_name_en, nickname)')
       .lte('date_from', to)
       .gte('date_to', from)
       .order('date_from', { ascending: true });

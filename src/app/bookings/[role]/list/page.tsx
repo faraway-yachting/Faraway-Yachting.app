@@ -260,7 +260,7 @@ export default function BookingsListPage() {
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Title</th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Boat</th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Customer</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Booking Owner</th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date From</th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date To</th>
                 <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Guests</th>
@@ -268,7 +268,6 @@ export default function BookingsListPage() {
                   <>
                     <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Total Price</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Payment</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Owner</th>
                   </>
                 )}
               </tr>
@@ -276,7 +275,7 @@ export default function BookingsListPage() {
             <tbody className="bg-white divide-y divide-gray-200">
               {filteredBookings.length === 0 ? (
                 <tr>
-                  <td colSpan={isAgencyView ? 9 : 12} className="px-4 py-12 text-center text-gray-500">
+                  <td colSpan={isAgencyView ? 9 : 11} className="px-4 py-12 text-center text-gray-500">
                     No bookings found
                   </td>
                 </tr>
@@ -298,7 +297,7 @@ export default function BookingsListPage() {
                       <td className="px-4 py-3 text-sm font-medium text-gray-900 max-w-[200px] truncate">{booking.title}</td>
                       <td className="px-4 py-3 text-sm text-gray-600">{getBoatName(booking)}</td>
                       <td className="px-4 py-3 text-sm text-gray-600">{bookingTypeLabels[booking.type] || booking.type}</td>
-                      <td className="px-4 py-3 text-sm text-gray-600">{booking.customerName}</td>
+                      <td className="px-4 py-3 text-sm text-gray-600">{booking.bookingOwnerName || '-'}</td>
                       <td className="px-4 py-3 text-sm text-gray-600 whitespace-nowrap">{formatDate(booking.dateFrom)}</td>
                       <td className="px-4 py-3 text-sm text-gray-600 whitespace-nowrap">{formatDate(booking.dateTo)}</td>
                       <td className="px-4 py-3 text-sm text-gray-600 text-center">{booking.numberOfGuests || '-'}</td>
@@ -318,7 +317,6 @@ export default function BookingsListPage() {
                               <span className="text-xs text-gray-400">-</span>
                             )}
                           </td>
-                          <td className="px-4 py-3 text-sm text-gray-600">{booking.bookingOwnerName || '-'}</td>
                         </>
                       )}
                     </tr>
