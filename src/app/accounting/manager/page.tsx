@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AppShell } from "@/components/accounting/AppShell";
 import { KPICard } from "@/components/accounting/KPICard";
 import { DataTable } from "@/components/accounting/DataTable";
@@ -70,6 +70,12 @@ export default function ManagerDashboard() {
 
   // Data scoping — restricted roles only see their assigned projects
   const { projectIds } = useDataScope();
+  const queryClient = useQueryClient();
+
+  const handleIgnoreExpense = async (bookingId: string) => {
+    await bookingsApi.update(bookingId, { charterExpenseStatus: 'not_recorded' } as any);
+    queryClient.invalidateQueries({ queryKey: ['bookings', 'pendingCharterExpenses'] });
+  };
 
   // All data via React Query (cached, parallel fetch, scoped by user access)
   const { data: monthBookings = [], isLoading: l1 } = useQuery({
@@ -373,6 +379,12 @@ export default function ManagerDashboard() {
                       <span className="text-sm font-medium text-gray-900">
                         {formatMoney(b.charterCost || 0, b.currency || "THB")}
                       </span>
+                      <button
+                        onClick={() => handleIgnoreExpense(b.id)}
+                        className="inline-flex items-center rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50 transition-colors"
+                      >
+                        Ignore
+                      </button>
                       <Link
                         href={`/accounting/manager/expenses/expense-records/new?booking_id=${b.id}&amount=${b.charterCost || 0}&account_code=5530&vendor_name=${encodeURIComponent(b.externalBoatName || "")}`}
                         className="inline-flex items-center gap-1 rounded-md bg-amber-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-700 transition-colors"
