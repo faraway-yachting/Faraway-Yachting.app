@@ -493,7 +493,7 @@ export default function CabinSection({
   // Summary stats
   const totalCabins = cabinAllocations.length;
   const bookedCabins = cabinAllocations.filter(a => a.status === 'booked').length;
-  const totalRevenue = cabinAllocations.reduce((sum, a) => sum + (a.price || 0), 0);
+  const totalRevenue = cabinAllocations.reduce((sum, a) => sum + (a.thbTotalPrice || a.price || 0), 0);
 
   const toggleCabin = (id: string) => {
     setExpandedCabinId(prev => prev === id ? null : id);
@@ -514,7 +514,7 @@ export default function CabinSection({
           <span>{bookedCabins}/{totalCabins} cabins booked</span>
           {totalRevenue > 0 && (
             <span className="font-medium">
-              Total: {currency} {totalRevenue.toLocaleString()}
+              Total: THB {totalRevenue.toLocaleString()}
             </span>
           )}
           {onToggleCollapse && (
