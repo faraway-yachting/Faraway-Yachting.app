@@ -199,12 +199,12 @@ export function CabinCharterOverview({
             </div>
           </div>
           <div className="bg-white rounded-lg p-2.5 border border-emerald-200">
-            <div className="text-xs text-gray-500">Total Commission</div>
-            <div className="text-sm font-semibold text-gray-900">{fmtAmt(totalCommission, currency)}</div>
+            <div className="text-xs text-gray-500">Total Commission (THB)</div>
+            <div className="text-sm font-semibold text-gray-900">{fmtAmt(totalCommission, 'THB')}</div>
           </div>
           <div className="bg-white rounded-lg p-2.5 border border-emerald-200">
-            <div className="text-xs text-gray-500">Commission Received</div>
-            <div className="text-sm font-semibold text-gray-900">{fmtAmt(totalCommissionReceived, currency)}</div>
+            <div className="text-xs text-gray-500">Commission Received (THB)</div>
+            <div className="text-sm font-semibold text-gray-900">{fmtAmt(totalCommissionReceived, 'THB')}</div>
           </div>
         </div>
 

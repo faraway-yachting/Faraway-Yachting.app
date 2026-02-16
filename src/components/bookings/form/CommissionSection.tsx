@@ -28,22 +28,27 @@ export default function CommissionSection({ formData, onChange, canEdit, isColla
   const costCurrency = formData.charterCostCurrency || bookingCurrency;
   const fxRate = formData.fxRate || null;
 
+  // ALWAYS calculate commission base in THB
   let charterCommissionBase: number;
   if (!isExternalBoat) {
-    charterCommissionBase = formData.charterFee || 0;
+    // Regular booking: charter fee → THB
+    const fee = formData.charterFee || 0;
+    charterCommissionBase = bookingCurrency === 'THB' ? fee : fxRate ? fee * fxRate : 0;
   } else if (bookingCurrency === costCurrency) {
-    // Same currency — subtract directly
-    charterCommissionBase = (formData.charterFee || 0) - (formData.charterCost || 0);
+    // External, same currency: (fee - cost) → THB
+    const profit = (formData.charterFee || 0) - (formData.charterCost || 0);
+    charterCommissionBase = bookingCurrency === 'THB' ? profit : fxRate ? profit * fxRate : 0;
   } else {
-    // Different currencies — normalize to THB
+    // External, different currencies: normalize each to THB then subtract
     const feeThb = bookingCurrency === 'THB'
       ? (formData.charterFee || 0)
       : fxRate ? (formData.charterFee || 0) * fxRate : 0;
     const costThb = costCurrency === 'THB'
       ? (formData.charterCost || 0)
-      : 0; // no rate for cost foreign currency
-    charterCommissionBase = Math.round((feeThb - costThb) * 100) / 100;
+      : 0; // no FX rate for cost currency
+    charterCommissionBase = feeThb - costThb;
   }
+  charterCommissionBase = Math.round(charterCommissionBase * 100) / 100;
 
   // Extras commission base — only commissionable items, commission on profit in THB
   const extraItems = formData.extraItems || [];
@@ -176,23 +181,25 @@ export default function CommissionSection({ formData, onChange, canEdit, isColla
         />
       </div>
 
-      {/* Commission Breakdown */}
+      {/* Commission Breakdown — all values in THB */}
       {(charterCommissionBase > 0 || extrasCommissionBase > 0) && (
         <div className="text-sm bg-white/50 rounded-md p-3 mb-3 space-y-1.5">
+          {bookingCurrency !== 'THB' && (
+            <p className="text-xs text-teal-600 mb-1">Commission calculated in THB</p>
+          )}
           <div className="flex justify-between text-gray-600">
-            <span>Charter fee ({fmtAmt(charterCommissionBase)})</span>
+            <span>Charter fee ({fmtAmt(charterCommissionBase)}{bookingCurrency !== 'THB' ? ' THB' : ''})</span>
             <span>{fmtAmt(charterCommission)}</span>
           </div>
           {extrasCommissionBase > 0 && (
             <div className="flex justify-between text-gray-600">
-              <span>Extras ({fmtAmt(extrasCommissionBase)})</span>
+              <span>Extras ({fmtAmt(extrasCommissionBase)}{bookingCurrency !== 'THB' ? ' THB' : ''})</span>
               <span>{fmtAmt(extrasCommission)}</span>
             </div>
           )}
           {isExternalBoat && (
             <p className="text-xs text-teal-600 pt-1">
-              Charter base = Fee - Boat Owner Cost
-              {bookingCurrency !== costCurrency && fxRate ? ' (THB)' : ''}
+              Charter base = Fee - Boat Owner Cost (THB)
             </p>
           )}
         </div>
@@ -203,7 +210,7 @@ export default function CommissionSection({ formData, onChange, canEdit, isColla
         {/* Total Commission */}
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">
-            Total Commission
+            Total Commission{bookingCurrency !== 'THB' ? ' (THB)' : ''}
           </label>
           <input
             type="number"
@@ -220,7 +227,7 @@ export default function CommissionSection({ formData, onChange, canEdit, isColla
         {/* Deduction */}
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">
-            Deduction
+            Deduction{bookingCurrency !== 'THB' ? ' (THB)' : ''}
           </label>
           <input
             type="number"
@@ -237,7 +244,7 @@ export default function CommissionSection({ formData, onChange, canEdit, isColla
         {/* Commission Received */}
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">
-            Commission Received
+            Commission Received{bookingCurrency !== 'THB' ? ' (THB)' : ''}
           </label>
           <input
             type="number"
