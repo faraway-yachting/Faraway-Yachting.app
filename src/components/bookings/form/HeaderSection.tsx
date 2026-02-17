@@ -46,6 +46,7 @@ interface HeaderSectionProps {
   onToggleCollapse?: () => void;
   isCompleted?: boolean;
   onToggleCompleted?: () => void;
+  cabinCounts?: { total: number; booked: number; held: number };
 }
 
 export function HeaderSection({
@@ -67,6 +68,7 @@ export function HeaderSection({
   onToggleCollapse,
   isCompleted,
   onToggleCompleted,
+  cabinCounts,
 }: HeaderSectionProps) {
   const [holdUntilMode, setHoldUntilMode] = useState<'days' | 'manual'>('days');
   const [holdDays, setHoldDays] = useState<number>(3);
@@ -379,6 +381,12 @@ export function HeaderSection({
             disabled={!canEdit}
             placeholder="Select status..."
           />
+          {cabinCounts && cabinCounts.total > 0 && (
+            <p className="text-xs text-gray-500 mt-1.5">
+              {cabinCounts.booked}/{cabinCounts.total} cabins booked
+              {cabinCounts.held > 0 && `, ${cabinCounts.held} held`}
+            </p>
+          )}
         </div>
 
         {/* Booking Owner + Meet & Greeter */}

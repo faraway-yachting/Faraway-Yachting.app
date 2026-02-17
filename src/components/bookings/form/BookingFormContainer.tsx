@@ -494,6 +494,29 @@ export function BookingFormContainer({
     }
   }, [cabinAllocations, formData.type, formData.currency, formData.fxRate]);
 
+  // Auto-calculate booking status from cabin allocation states (cabin charter only)
+  useEffect(() => {
+    if (formData.type !== 'cabin_charter' || cabinAllocations.length === 0) return;
+    // Don't override terminal statuses
+    if (formData.status === 'completed' || formData.status === 'cancelled') return;
+
+    const booked = cabinAllocations.filter(a => a.status === 'booked').length;
+    const held = cabinAllocations.filter(a => a.status === 'held').length;
+
+    let newStatus: BookingStatus;
+    if (booked > 0) {
+      newStatus = 'booked';
+    } else if (held > 0) {
+      newStatus = 'hold';
+    } else {
+      newStatus = 'enquiry';
+    }
+
+    if (newStatus !== formData.status) {
+      setFormData(prev => ({ ...prev, status: newStatus }));
+    }
+  }, [cabinAllocations, formData.type]);
+
   // Auto-calculate total cost (regular bookings)
   useEffect(() => {
     if (formData.type === 'cabin_charter') return; // handled above
@@ -1254,6 +1277,11 @@ export function BookingFormContainer({
               onToggleCollapse={() => toggleSection('header')}
               isCompleted={!!(formData.completedSections || {}).header}
               onToggleCompleted={canEdit ? () => toggleSectionCompleted('header') : undefined}
+              cabinCounts={formData.type === 'cabin_charter' && cabinAllocations.length > 0 ? {
+                total: cabinAllocations.length,
+                booked: cabinAllocations.filter(a => a.status === 'booked').length,
+                held: cabinAllocations.filter(a => a.status === 'held').length,
+              } : undefined}
             />
 
             {/* Section 2: Customer Information (hidden for cabin charter) */}
