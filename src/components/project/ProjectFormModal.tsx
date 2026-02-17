@@ -184,10 +184,19 @@ export function ProjectFormModal({
   const updateParticipantField = (
     id: string,
     field: keyof ProjectParticipant,
-    value: string | number | undefined
+    value: string | number | boolean | undefined
   ) => {
     setParticipants(
       participants.map((p) => (p.id === id ? { ...p, [field]: value } : p))
+    );
+  };
+
+  const setManagementCompany = (participantId: string) => {
+    setParticipants(
+      participants.map((p) => ({
+        ...p,
+        isManagementCompany: p.id === participantId,
+      }))
     );
   };
 
@@ -227,6 +236,12 @@ export function ProjectFormModal({
   const handleSave = async () => {
     if (!validate()) return;
 
+    // Auto-derive management ownership % from flagged participant
+    const mgmtParticipant = participants.find((p) => p.isManagementCompany);
+    const managementOwnershipPercentage = mgmtParticipant
+      ? mgmtParticipant.ownershipPercentage
+      : 100; // Default: 100% if no participant is flagged
+
     const projectData: Partial<Project> = {
       name: name.trim(),
       code: code.trim().toUpperCase(),
@@ -238,6 +253,7 @@ export function ProjectFormModal({
       status,
       notes: notes.trim() || undefined,
       managementFeePercentage: managementFeePercentage,
+      managementOwnershipPercentage,
       participants: participants.map((p) => ({
         ...p,
         name: p.name.trim(),
@@ -474,6 +490,9 @@ export function ProjectFormModal({
                 <table className="min-w-full divide-y divide-gray-200">
                   <thead className="bg-gray-50">
                     <tr>
+                      <th className="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase w-12" title="Management company — their ownership % is used for commission calculations">
+                        Mgmt
+                      </th>
                       <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">
                         Name <span className="text-red-500">*</span>
                       </th>
@@ -497,6 +516,16 @@ export function ProjectFormModal({
                   <tbody className="bg-white divide-y divide-gray-200">
                     {participants.map((participant, index) => (
                       <tr key={participant.id}>
+                        <td className="px-2 py-2 text-center">
+                          <input
+                            type="radio"
+                            name="mgmt-company"
+                            checked={!!participant.isManagementCompany}
+                            onChange={() => setManagementCompany(participant.id)}
+                            title="Mark as management company"
+                            className="h-4 w-4 text-[#5A7A8F] border-gray-300 focus:ring-[#5A7A8F] cursor-pointer"
+                          />
+                        </td>
                         <td className="px-3 py-2">
                           <input
                             type="text"

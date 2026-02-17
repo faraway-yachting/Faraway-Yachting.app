@@ -29,6 +29,7 @@ export interface ProjectParticipant {
   notes?: string;
   capitalInvested?: number; // Amount invested by this participant
   capitalCurrency?: Currency; // Currency for the capital invested
+  isManagementCompany?: boolean; // True if this participant is the management company (Faraway)
 }
 
 /**
@@ -55,6 +56,9 @@ export interface Project {
 
   // Management fee for Faraway Yachting (optional)
   managementFeePercentage?: number; // 0-100, used in P&L calculations
+
+  // Ownership % of the management company (auto-populated from flagged participant)
+  managementOwnershipPercentage?: number; // 0-100, used in commission calculations
 
   // Intercompany charter fee configuration (for money distribution between entities)
   intercompanyOwnerCompanyId?: string; // Company that owns the boat (if different from companyId)

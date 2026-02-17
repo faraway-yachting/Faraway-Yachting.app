@@ -1360,6 +1360,8 @@ export function BookingFormContainer({
                 formData={formData}
                 onChange={handleChange}
                 canEdit={canEdit}
+                managementFeePercentage={projects.find(p => p.id === formData.projectId)?.managementFeePercentage}
+                ownershipPercentage={projects.find(p => p.id === formData.projectId)?.managementOwnershipPercentage}
                 isCollapsed={!!collapsedSections.commission}
                 onToggleCollapse={() => toggleSection('commission')}
                 isCompleted={!!(formData.completedSections || {}).commission}
@@ -1388,6 +1390,8 @@ export function BookingFormContainer({
                 canEdit={canEdit}
                 currency={formData.currency || 'THB'}
                 dateFrom={formData.dateFrom}
+                managementFeePercentage={projects.find(p => p.id === formData.projectId)?.managementFeePercentage}
+                ownershipPercentage={projects.find(p => p.id === formData.projectId)?.managementOwnershipPercentage}
                 bankAccounts={bankAccounts}
                 companies={companies}
                 users={users}

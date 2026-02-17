@@ -41,6 +41,8 @@ interface EditingRecord {
   charter_fee: number;
   management_fee: number;
   net_income: number;
+  commission_base: number;
+  ownership_percentage: number;
   commission_rate: number;
   total_commission: number;
   booking_owner_id: string;
@@ -57,6 +59,8 @@ const emptyRecord: EditingRecord = {
   charter_fee: 0,
   management_fee: 0,
   net_income: 0,
+  commission_base: 0,
+  ownership_percentage: 100,
   commission_rate: 0,
   total_commission: 0,
   booking_owner_id: '',
@@ -102,7 +106,7 @@ export default function CommissionTable() {
   // Filters
   const [filterBoat, setFilterBoat] = useState<string>('all');
   const [filterOwner, setFilterOwner] = useState<string>('all');
-  const [filterBookingType, setFilterBookingType] = useState<string>('all');
+
   const [filterSource, setFilterSource] = useState<string>('all');
   const [filterDateFrom, setFilterDateFrom] = useState<string>('');
   const [filterDateTo, setFilterDateTo] = useState<string>('');
@@ -133,7 +137,7 @@ export default function CommissionTable() {
       const [allProjects, allUsers, allSalesEmployees] = await Promise.all([
         projectsApi.getAll(),
         authApi.getAllProfiles(),
-        employeesApi.getByDepartment('Sales'),
+        employeesApi.getAll(),
       ]);
       setProjects(allProjects);
       setUsers(allUsers as UserProfile[]);
@@ -185,11 +189,19 @@ export default function CommissionTable() {
   const employeeMap = useMemo(() => new Map(salesEmployees.map((e) => [e.id, e.full_name_en])), [salesEmployees]);
 
   const getBoatName = useCallback((record: CommissionRecord) => {
+    let name: string;
     if (record.boat_id) {
-      return projectMap.get(record.boat_id)?.name || 'Unknown';
+      name = projectMap.get(record.boat_id)?.name || 'Unknown';
+    } else {
+      const extName = (record as any).bookings?.external_boat_name;
+      name = extName || '-';
     }
-    const extName = (record as any).bookings?.external_boat_name;
-    return extName || '-';
+    // Append cabin label for cabin charter records
+    const cabinInfo = (record as any).cabin_allocations;
+    if (cabinInfo?.cabin_label) {
+      name += ` - ${cabinInfo.cabin_label}`;
+    }
+    return name;
   }, [projectMap]);
 
   const getUserName = useCallback((id: string | null) => {
@@ -216,17 +228,17 @@ export default function CommissionTable() {
         } else if (r.boat_id !== filterBoat) return false;
       }
       if (filterOwner !== 'all' && r.booking_owner_id !== filterOwner) return false;
-      if (filterBookingType !== 'all' && r.booking_type !== filterBookingType) return false;
+
       if (filterSource !== 'all' && r.source !== filterSource) return false;
       if (filterDateFrom && (r.charter_date_from || '') < filterDateFrom) return false;
       if (filterDateTo && (r.charter_date_to || r.charter_date_from || '') > filterDateTo) return false;
       return true;
     });
-  }, [records, filterMonth, filterBoat, filterOwner, filterBookingType, filterSource, filterDateFrom, filterDateTo]);
+  }, [records, filterMonth, filterBoat, filterOwner, filterSource, filterDateFrom, filterDateTo]);
 
   // Summary
   const summary = useMemo(() => {
-    const byOwner = new Map<string, { name: string; totalCommission: number; totalNetIncome: number; count: number }>();
+    const byOwner = new Map<string, { id: string; name: string; totalCommission: number; totalNetIncome: number; count: number }>();
     let totalNetIncome = 0;
     let totalCommission = 0;
     let earnedCommission = 0;
@@ -241,7 +253,7 @@ export default function CommissionTable() {
       if (r.booking_owner_id) {
         const name = getUserName(r.booking_owner_id);
         if (!byOwner.has(r.booking_owner_id)) {
-          byOwner.set(r.booking_owner_id, { name, totalCommission: 0, totalNetIncome: 0, count: 0 });
+          byOwner.set(r.booking_owner_id, { id: r.booking_owner_id, name, totalCommission: 0, totalNetIncome: 0, count: 0 });
         }
         const entry = byOwner.get(r.booking_owner_id)!;
         entry.totalCommission += r.total_commission;
@@ -281,12 +293,6 @@ export default function CommissionTable() {
     return Array.from(seen.entries()).sort((a, b) => a[1].localeCompare(b[1]));
   }, [records, getUserName]);
 
-  // Unique booking types from records
-  const bookingTypeOptions = useMemo(() => {
-    const types = new Set<string>();
-    for (const r of records) types.add(r.booking_type);
-    return Array.from(types).sort();
-  }, [records]);
 
   // Form handlers
   const updateForm = (field: keyof EditingRecord, value: string | number) => {
@@ -298,9 +304,13 @@ export default function CommissionTable() {
         const mf = field === 'management_fee' ? (value as number) : prev.management_fee;
         next.net_income = cf - mf;
       }
-      // Auto-calc total_commission when net_income or commission_rate changes
-      if (field === 'net_income' || field === 'commission_rate' || field === 'charter_fee' || field === 'management_fee') {
-        next.total_commission = Math.round(next.net_income * next.commission_rate) / 100;
+      // Auto-calc commission_base = mgmt_fee + net_income * ownership / 100
+      if (field === 'net_income' || field === 'charter_fee' || field === 'management_fee' || field === 'ownership_percentage') {
+        next.commission_base = Math.round((next.management_fee + next.net_income * next.ownership_percentage / 100) * 100) / 100;
+      }
+      // Auto-calc total_commission from commission_base * rate
+      if (field === 'net_income' || field === 'commission_rate' || field === 'charter_fee' || field === 'management_fee' || field === 'ownership_percentage') {
+        next.total_commission = Math.round(next.commission_base * next.commission_rate) / 100;
       }
       return next;
     });
@@ -323,6 +333,8 @@ export default function CommissionTable() {
       charter_fee: record.charter_fee,
       management_fee: record.management_fee,
       net_income: record.net_income,
+      commission_base: record.commission_base,
+      ownership_percentage: record.ownership_percentage,
       commission_rate: record.commission_rate,
       total_commission: record.total_commission,
       booking_owner_id: record.booking_owner_id || '',
@@ -348,11 +360,14 @@ export default function CommissionTable() {
 
       if (isFromBooking) {
         // Only allow updating management_fee, commission_rate, notes for booking-sourced records
+        const ni = form.charter_fee - form.management_fee;
+        const cb = Math.round((form.management_fee + ni * form.ownership_percentage / 100) * 100) / 100;
         await commissionRecordsApi.update(editingId!, {
           management_fee: form.management_fee,
-          net_income: form.charter_fee - form.management_fee,
+          net_income: ni,
+          commission_base: cb,
           commission_rate: form.commission_rate,
-          total_commission: Math.round((form.charter_fee - form.management_fee) * form.commission_rate) / 100,
+          total_commission: Math.round(cb * form.commission_rate) / 100,
           notes: form.notes || null,
           management_fee_overridden: editingRecord.management_fee !== form.management_fee ? true : editingRecord.management_fee_overridden,
         });
@@ -366,6 +381,8 @@ export default function CommissionTable() {
           charter_fee: form.charter_fee,
           management_fee: form.management_fee,
           net_income: form.net_income,
+          commission_base: form.commission_base,
+          ownership_percentage: form.ownership_percentage,
           commission_rate: form.commission_rate,
           total_commission: form.total_commission,
           booking_owner_id: form.booking_owner_id || null,
@@ -470,7 +487,7 @@ export default function CommissionTable() {
   const handleExportCSV = () => {
     const headers = [
       'Boat', 'Charter Date From', 'Charter Date To', 'Charter Type', 'Booking Type',
-      'Charter Fee', 'Management Fee', 'Net Income to FA', 'Commission Rate (%)',
+      'Charter Fee', 'Management Fee', 'Net Income', 'Ownership %', 'FA Share', 'Commission Rate (%)',
       'Total Commission', 'Booking Owner', 'Status', 'Payment Status', 'Currency', 'Source', 'Notes',
     ];
     const rows = filteredRecords.map((r) => [
@@ -482,6 +499,8 @@ export default function CommissionTable() {
       r.charter_fee.toFixed(2),
       r.management_fee.toFixed(2),
       r.net_income.toFixed(2),
+      r.ownership_percentage.toFixed(2),
+      r.commission_base.toFixed(2),
       r.commission_rate.toFixed(2),
       r.total_commission.toFixed(2),
       getUserName(r.booking_owner_id),
@@ -604,7 +623,7 @@ export default function CommissionTable() {
           <div className="mt-1 space-y-1">
             {summary.byOwner.length === 0 && <div className="text-xs text-gray-400">No data</div>}
             {summary.byOwner.map((o) => (
-              <div key={o.name} className="flex items-center justify-between text-xs">
+              <div key={o.id} className="flex items-center justify-between text-xs">
                 <span className="text-gray-700 font-medium truncate mr-2">{o.name}</span>
                 <span className="text-[#5A7A8F] font-semibold whitespace-nowrap">{formatCurrency(o.totalCommission)}</span>
               </div>
@@ -629,11 +648,6 @@ export default function CommissionTable() {
           </select>
         )}
 
-        <select value={filterBookingType} onChange={(e) => setFilterBookingType(e.target.value)}
-          className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#5A7A8F]/20 focus:border-[#5A7A8F]">
-          <option value="all">All Booking Types</option>
-          {bookingTypeOptions.map((t) => <option key={t} value={t}>{t.charAt(0).toUpperCase() + t.slice(1)}</option>)}
-        </select>
 
         <select value={filterSource} onChange={(e) => setFilterSource(e.target.value)}
           className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#5A7A8F]/20 focus:border-[#5A7A8F]">
@@ -769,11 +783,20 @@ export default function CommissionTable() {
 
             {/* Net Income */}
             <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">Net Income to FA</label>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Net Income (Boat)</label>
               <input type="number" value={form.net_income || ''} onChange={(e) => updateForm('net_income', parseFloat(e.target.value) || 0)}
                 step="0.01" placeholder="Auto-calculated"
                 className="w-full px-2 py-1.5 text-sm text-right border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-[#5A7A8F]/20 focus:border-[#5A7A8F] bg-gray-50" />
               <div className="text-xs text-gray-400 mt-0.5">Charter Fee - Management Fee</div>
+            </div>
+
+            {/* FA Share (commission base) */}
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">FA Share (Ownership: {form.ownership_percentage}%)</label>
+              <div className="w-full px-2 py-1.5 text-sm text-right border border-gray-200 rounded bg-teal-50 text-teal-700 font-medium">
+                {formatCurrency(form.commission_base, form.currency)}
+              </div>
+              <div className="text-xs text-gray-400 mt-0.5">Mgmt Fee + Net Income x Ownership %</div>
             </div>
 
             {/* Commission Rate */}
@@ -790,7 +813,7 @@ export default function CommissionTable() {
               <div className="w-full px-2 py-1.5 text-sm text-right border border-gray-200 rounded bg-gray-100 text-gray-700 font-medium">
                 {formatCurrency(form.total_commission, form.currency)}
               </div>
-              <div className="text-xs text-gray-400 mt-0.5">Net Income x Rate / 100</div>
+              <div className="text-xs text-gray-400 mt-0.5">FA Share x Rate / 100</div>
             </div>
 
             {/* Booking Owner */}
@@ -881,6 +904,10 @@ export default function CommissionTable() {
                     <dd className="text-right text-sm text-gray-900">{formatCurrency(r.net_income, r.currency)}</dd>
                   </div>
                   <div className="flex items-start justify-between gap-2">
+                    <dt className="shrink-0 text-xs font-medium text-gray-500">FA Share ({r.ownership_percentage}%)</dt>
+                    <dd className="text-right text-sm font-medium text-teal-700">{formatCurrency(r.commission_base, r.currency)}</dd>
+                  </div>
+                  <div className="flex items-start justify-between gap-2">
                     <dt className="shrink-0 text-xs font-medium text-gray-500">Commission ({r.commission_rate}%)</dt>
                     <dd className="text-right text-sm font-semibold text-[#5A7A8F]">{formatCurrency(r.total_commission, r.currency)}</dd>
                   </div>
@@ -931,10 +958,11 @@ export default function CommissionTable() {
                   <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase">Boat</th>
                   <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase">Charter Date</th>
                   <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
-                  <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase">Booking</th>
+
                   <th className="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase">Charter Fee</th>
                   <th className="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase">Mgmt Fee</th>
                   <th className="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase">Net Income</th>
+                  <th className="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase" title="Management Fee + Net Income x Ownership %">FA Share</th>
                   <th className="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase">Rate</th>
                   <th className="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase">Commission</th>
                   <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase">Owner</th>
@@ -976,16 +1004,17 @@ export default function CommissionTable() {
                         )}
                       </td>
                       <td className="px-3 py-2.5 text-sm text-gray-600">{formatCharterType(r.charter_type)}</td>
-                      <td className="px-3 py-2.5">
-                        <span className={`inline-flex px-2 py-0.5 text-xs font-medium rounded-full ${
-                          r.booking_type === 'direct' ? 'bg-green-100 text-green-800' :
-                          r.booking_type === 'agency' ? 'bg-blue-100 text-blue-800' :
-                          'bg-gray-100 text-gray-600'
-                        }`}>
-                          {r.booking_type.charAt(0).toUpperCase() + r.booking_type.slice(1)}
-                        </span>
+
+                      <td className="px-3 py-2.5 text-sm text-right text-gray-700">
+                        <div className="flex items-center justify-end gap-1">
+                          {r.charter_fee === 0 && r.source === 'booking' && r.boat_id && (
+                            <span title="Charter fee missing in booking — edit the booking to add it, then re-sync" className="text-amber-500">
+                              <AlertCircle className="h-3.5 w-3.5" />
+                            </span>
+                          )}
+                          {formatCurrency(r.charter_fee, r.currency)}
+                        </div>
                       </td>
-                      <td className="px-3 py-2.5 text-sm text-right text-gray-700">{formatCurrency(r.charter_fee, r.currency)}</td>
                       <td className="px-3 py-2.5 text-sm text-right text-gray-700">
                         <div className="flex items-center justify-end gap-1">
                           {formatCurrency(r.management_fee, r.currency)}
@@ -997,6 +1026,7 @@ export default function CommissionTable() {
                         </div>
                       </td>
                       <td className="px-3 py-2.5 text-sm text-right font-medium text-gray-900">{formatCurrency(r.net_income, r.currency)}</td>
+                      <td className="px-3 py-2.5 text-sm text-right font-medium text-teal-700" title={`Ownership: ${r.ownership_percentage}%`}>{formatCurrency(r.commission_base, r.currency)}</td>
                       <td className="px-3 py-2.5 text-sm text-right text-gray-600">{r.commission_rate}%</td>
                       <td className="px-3 py-2.5 text-sm text-right font-semibold text-[#5A7A8F]">{formatCurrency(r.total_commission, r.currency)}</td>
                       <td className="px-3 py-2.5 text-sm text-gray-700">{getUserName(r.booking_owner_id)}</td>

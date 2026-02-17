@@ -173,6 +173,7 @@ export function dbProjectToFrontend(db: DbProject): Project {
     participants,
     status: (db.status || 'active') as ProjectStatus,
     managementFeePercentage: db.management_fee_percentage ?? 15,
+    managementOwnershipPercentage: db.management_ownership_percentage ?? 100,
     createdBy: db.created_by ?? undefined,
     createdAt: db.created_at,
     updatedAt: db.updated_at,
@@ -189,6 +190,7 @@ export function frontendProjectToDb(project: Partial<Project>): DbProjectInsert 
     participants: project.participants ? (project.participants as unknown as Json) : [],
     status: project.status || 'active',
     management_fee_percentage: project.managementFeePercentage ?? 15,
+    management_ownership_percentage: project.managementOwnershipPercentage ?? 100,
     created_by: project.createdBy ?? null,
   };
 }

@@ -344,6 +344,9 @@ export function FinanceSection({
             {formData.type === 'cabin_charter' && (
               <span className="text-xs text-gray-400 mt-0.5 block">Sum from cabin allocations</span>
             )}
+            {!formData.charterFee && formData.projectId && formData.type !== 'cabin_charter' && (
+              <span className="text-xs text-amber-600 mt-0.5 block">Required for commission calculation</span>
+            )}
           </div>
           <div>
             <label className="block text-xs text-gray-500 mb-1">Extra Charges</label>

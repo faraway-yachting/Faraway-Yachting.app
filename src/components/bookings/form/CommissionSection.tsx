@@ -1,13 +1,15 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
-import { DollarSign, ChevronDown, CheckCircle2, Circle } from 'lucide-react';
+import { DollarSign, ChevronDown, CheckCircle2, Circle, Info } from 'lucide-react';
 import type { Booking } from '@/data/booking/types';
 
 interface CommissionSectionProps {
   formData: Partial<Booking>;
   onChange: (field: keyof Booking, value: any) => void;
   canEdit: boolean;
+  managementFeePercentage?: number;
+  ownershipPercentage?: number;
   isCollapsed?: boolean;
   onToggleCollapse?: () => void;
   isCompleted?: boolean;
@@ -20,7 +22,7 @@ function getDefaultRate(type?: string, agentPlatform?: string): number {
   return 1; // Agency
 }
 
-export default function CommissionSection({ formData, onChange, canEdit, isCollapsed, onToggleCollapse, isCompleted, onToggleCompleted }: CommissionSectionProps) {
+export default function CommissionSection({ formData, onChange, canEdit, managementFeePercentage, ownershipPercentage, isCollapsed, onToggleCollapse, isCompleted, onToggleCompleted }: CommissionSectionProps) {
   const isExternalBoat = !!formData.externalBoatName && !formData.projectId;
   const isAgencyBooking = !!formData.agentPlatform && formData.agentPlatform !== 'Direct';
 
@@ -82,10 +84,24 @@ export default function CommissionSection({ formData, onChange, canEdit, isColla
   const commissionBase = calcCommissionBase(agencyAmount, agencyCommThb);
   const charterCommissionBase = commissionBase - extrasCommissionBase;
 
+  // Apply management fee + ownership to charter portion (matches sync RPC formula)
+  const applyMfOwnership = (charterBase: number): number => {
+    if (isExternalBoat || (!managementFeePercentage && !ownershipPercentage)) return charterBase;
+    const ownPct = ownershipPercentage ?? 100;
+    if (ownPct === 100) return charterBase;
+    const mfPct = managementFeePercentage || 0;
+    const mf = Math.round(charterBase * mfPct) / 100;
+    const ni = charterBase - mf;
+    return Math.round((mf + ni * ownPct / 100) * 100) / 100;
+  };
+
+  const adjustedCharterBase = applyMfOwnership(charterCommissionBase);
+  const adjustedCommissionBase = adjustedCharterBase + extrasCommissionBase;
+
   const rate = formData.commissionRate || 0;
-  const charterCommission = charterCommissionBase * rate / 100;
+  const charterCommission = adjustedCharterBase * rate / 100;
   const extrasCommission = extrasCommissionBase * rate / 100;
-  const autoTotalCommission = Math.round(commissionBase * rate) / 100;
+  const autoTotalCommission = Math.round(adjustedCommissionBase * rate) / 100;
   const autoCommissionReceived = Math.round(((formData.totalCommission ?? autoTotalCommission) - (formData.commissionDeduction || 0)) * 100) / 100;
 
   const defaultRate = getDefaultRate(formData.type, formData.agentPlatform);
@@ -125,13 +141,13 @@ export default function CommissionSection({ formData, onChange, canEdit, isColla
   // Also recalculate on initial mount to fix stale values from old calculations
   const prevBaseRef = useRef<number | null>(null);
   useEffect(() => {
-    if (rate > 0 && (prevBaseRef.current === null || prevBaseRef.current !== commissionBase)) {
-      const newTotal = Math.round(commissionBase * rate) / 100;
+    if (rate > 0 && (prevBaseRef.current === null || prevBaseRef.current !== adjustedCommissionBase)) {
+      const newTotal = Math.round(adjustedCommissionBase * rate) / 100;
       onChange('totalCommission', Math.round(newTotal * 100) / 100);
       onChange('commissionReceived', Math.round((newTotal - (formData.commissionDeduction || 0)) * 100) / 100);
     }
-    prevBaseRef.current = commissionBase;
-  }, [commissionBase]);
+    prevBaseRef.current = adjustedCommissionBase;
+  }, [adjustedCommissionBase]);
 
   // Auto-sync agency commission THB when fxRate or currency changes
   // (amount changes are handled directly in the agency handlers above)
@@ -146,7 +162,7 @@ export default function CommissionSection({ formData, onChange, canEdit, isColla
   const handleRateChange = (value: string) => {
     const newRate = value === '' ? undefined : parseFloat(value);
     onChange('commissionRate', newRate);
-    const newTotal = Math.round(commissionBase * (newRate || 0)) / 100;
+    const newTotal = Math.round(adjustedCommissionBase * (newRate || 0)) / 100;
     onChange('totalCommission', newTotal);
     onChange('commissionReceived', Math.round((newTotal - (formData.commissionDeduction || 0)) * 100) / 100);
   };
@@ -187,12 +203,14 @@ export default function CommissionSection({ formData, onChange, canEdit, isColla
       : undefined;
     onChange('agencyCommissionThb', newThb);
     const newBase = calcCommissionBase(newAmount || 0, newThb || 0);
+    const newCharterBase = newBase - extrasCommissionBase;
+    const adjustedBase = applyMfOwnership(newCharterBase) + extrasCommissionBase;
     if (rate > 0) {
-      const newTotal = Math.round(newBase * rate) / 100;
+      const newTotal = Math.round(adjustedBase * rate) / 100;
       onChange('totalCommission', Math.round(newTotal * 100) / 100);
       onChange('commissionReceived', Math.round((newTotal - (formData.commissionDeduction || 0)) * 100) / 100);
     }
-    prevBaseRef.current = newBase;
+    prevBaseRef.current = adjustedBase;
   };
 
   // Amount handler — flush on blur to avoid React 19 typing issues
@@ -213,12 +231,14 @@ export default function CommissionSection({ formData, onChange, canEdit, isColla
       : undefined;
     onChange('agencyCommissionThb', newThb);
     const newBase = calcCommissionBase(newAmount || 0, newThb || 0);
+    const newCharterBase = newBase - extrasCommissionBase;
+    const adjustedBase = applyMfOwnership(newCharterBase) + extrasCommissionBase;
     if (rate > 0) {
-      const newTotal = Math.round(newBase * rate) / 100;
+      const newTotal = Math.round(adjustedBase * rate) / 100;
       onChange('totalCommission', Math.round(newTotal * 100) / 100);
       onChange('commissionReceived', Math.round((newTotal - (formData.commissionDeduction || 0)) * 100) / 100);
     }
-    prevBaseRef.current = newBase;
+    prevBaseRef.current = adjustedBase;
   };
 
   const fmtAmt = (n: number) =>
@@ -410,6 +430,25 @@ export default function CommissionSection({ formData, onChange, canEdit, isColla
               Charter base = Fee - Boat Owner Cost (THB)
             </p>
           )}
+          {!isExternalBoat && (managementFeePercentage || ownershipPercentage) && (ownershipPercentage ?? 100) < 100 && charterCommissionBase > 0 && (() => {
+            const mfPct = managementFeePercentage || 0;
+            const ownPct = ownershipPercentage ?? 100;
+            const mf = Math.round(charterCommissionBase * mfPct) / 100;
+            return (
+              <div className="border-t border-gray-200 mt-1.5 pt-1.5 space-y-1">
+                {mfPct > 0 && (
+                  <div className="flex justify-between text-gray-500">
+                    <span className="text-xs">Management Fee ({mfPct}%)</span>
+                    <span className="text-xs">{fmtAmt(mf)} THB</span>
+                  </div>
+                )}
+                <div className="flex justify-between text-gray-500">
+                  <span className="text-xs">FA Share ({ownPct}%)</span>
+                  <span className="text-xs">{fmtAmt(adjustedCharterBase)} THB</span>
+                </div>
+              </div>
+            );
+          })()}
         </div>
       )}
 
@@ -466,6 +505,16 @@ export default function CommissionSection({ formData, onChange, canEdit, isColla
           />
         </div>
       </div>
+
+      {/* Info note about commission sync */}
+      {!isExternalBoat && (
+        <div className="flex items-start gap-2 mt-3 p-2 bg-blue-50 border border-blue-200 rounded-md">
+          <Info className="h-4 w-4 text-blue-500 mt-0.5 flex-shrink-0" />
+          <p className="text-xs text-blue-700">
+            Final commission on the Commissions page is calculated using management fee and ownership % from project settings.
+          </p>
+        </div>
+      )}
 
       {/* Commission Note */}
       <div className="mt-3">

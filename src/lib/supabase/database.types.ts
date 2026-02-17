@@ -200,6 +200,7 @@ export type Database = {
           participants: Json
           status: 'active' | 'inactive' | 'completed'
           management_fee_percentage: number
+          management_ownership_percentage: number
           intercompany_owner_company_id: string | null
           intercompany_fee_day_charter: number | null
           intercompany_fee_overnight: number | null
@@ -219,6 +220,7 @@ export type Database = {
           participants?: Json
           status?: 'active' | 'inactive' | 'completed'
           management_fee_percentage?: number
+          management_ownership_percentage?: number
           intercompany_owner_company_id?: string | null
           intercompany_fee_day_charter?: number | null
           intercompany_fee_overnight?: number | null
@@ -238,6 +240,7 @@ export type Database = {
           participants?: Json
           status?: 'active' | 'inactive' | 'completed'
           management_fee_percentage?: number
+          management_ownership_percentage?: number
           intercompany_owner_company_id?: string | null
           intercompany_fee_day_charter?: number | null
           intercompany_fee_overnight?: number | null
@@ -543,6 +546,9 @@ export type Database = {
           booking_id: string | null
           source: string
           management_fee_overridden: boolean
+          cabin_allocation_id: string | null
+          commission_base: number
+          ownership_percentage: number
           created_at: string
           updated_at: string
         }
@@ -565,6 +571,9 @@ export type Database = {
           booking_id?: string | null
           source?: string
           management_fee_overridden?: boolean
+          cabin_allocation_id?: string | null
+          commission_base?: number
+          ownership_percentage?: number
           created_at?: string
           updated_at?: string
         }
@@ -587,6 +596,9 @@ export type Database = {
           booking_id?: string | null
           source?: string
           management_fee_overridden?: boolean
+          cabin_allocation_id?: string | null
+          commission_base?: number
+          ownership_percentage?: number
           created_at?: string
           updated_at?: string
         }
