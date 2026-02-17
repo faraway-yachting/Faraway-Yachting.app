@@ -76,6 +76,12 @@ function rowToAllocation(row: CabinAllocationRow): CabinAllocation {
     commissionDeduction: row.commission_deduction ?? undefined,
     commissionReceived: row.commission_received ?? undefined,
     commissionNote: row.commission_note ?? undefined,
+    agencyCommissionRate: (row as any).agency_commission_rate ?? undefined,
+    agencyCommissionAmount: (row as any).agency_commission_amount ?? undefined,
+    agencyCommissionThb: (row as any).agency_commission_thb ?? undefined,
+    agencyPaymentStatus: (row as any).agency_payment_status ?? undefined,
+    agencyPaidDate: (row as any).agency_paid_date ?? undefined,
+    agencyPaymentNote: (row as any).agency_payment_note ?? undefined,
     internalNotes: row.internal_notes ?? undefined,
     internalNoteAttachments: parseJsonbAttachments(row.internal_note_attachments),
     customerNotes: row.customer_notes ?? undefined,
@@ -120,6 +126,12 @@ function allocationToRow(a: Partial<CabinAllocation> & { bookingId: string }): R
   if (a.commissionDeduction !== undefined) row.commission_deduction = a.commissionDeduction ?? null;
   if (a.commissionReceived !== undefined) row.commission_received = a.commissionReceived ?? null;
   if (a.commissionNote !== undefined) row.commission_note = a.commissionNote || null;
+  if (a.agencyCommissionRate !== undefined) row.agency_commission_rate = a.agencyCommissionRate ?? null;
+  if (a.agencyCommissionAmount !== undefined) row.agency_commission_amount = a.agencyCommissionAmount ?? null;
+  if (a.agencyCommissionThb !== undefined) row.agency_commission_thb = a.agencyCommissionThb ?? null;
+  if (a.agencyPaymentStatus !== undefined) row.agency_payment_status = a.agencyPaymentStatus || null;
+  if (a.agencyPaidDate !== undefined) row.agency_paid_date = a.agencyPaidDate || null;
+  if (a.agencyPaymentNote !== undefined) row.agency_payment_note = a.agencyPaymentNote || null;
   if (a.internalNotes !== undefined) row.internal_notes = a.internalNotes || null;
   if (a.internalNoteAttachments !== undefined) row.internal_note_attachments = a.internalNoteAttachments || [];
   if (a.customerNotes !== undefined) row.customer_notes = a.customerNotes || null;
@@ -186,6 +198,12 @@ export const cabinAllocationsApi = {
     if (updates.commissionDeduction !== undefined) dbUpdates.commission_deduction = updates.commissionDeduction ?? null;
     if (updates.commissionReceived !== undefined) dbUpdates.commission_received = updates.commissionReceived ?? null;
     if (updates.commissionNote !== undefined) dbUpdates.commission_note = updates.commissionNote || null;
+    if (updates.agencyCommissionRate !== undefined) dbUpdates.agency_commission_rate = updates.agencyCommissionRate ?? null;
+    if (updates.agencyCommissionAmount !== undefined) dbUpdates.agency_commission_amount = updates.agencyCommissionAmount ?? null;
+    if (updates.agencyCommissionThb !== undefined) dbUpdates.agency_commission_thb = updates.agencyCommissionThb ?? null;
+    if (updates.agencyPaymentStatus !== undefined) dbUpdates.agency_payment_status = updates.agencyPaymentStatus || null;
+    if (updates.agencyPaidDate !== undefined) dbUpdates.agency_paid_date = updates.agencyPaidDate || null;
+    if (updates.agencyPaymentNote !== undefined) dbUpdates.agency_payment_note = updates.agencyPaymentNote || null;
     if (updates.internalNotes !== undefined) dbUpdates.internal_notes = updates.internalNotes || null;
     if (updates.internalNoteAttachments !== undefined) dbUpdates.internal_note_attachments = updates.internalNoteAttachments || [];
     if (updates.customerNotes !== undefined) dbUpdates.customer_notes = updates.customerNotes || null;
@@ -274,5 +292,36 @@ export const cabinAllocationsApi = {
     }
 
     return result;
+  },
+
+  /**
+   * Get all cabin allocations that have agency commission (for Agency Payments page).
+   * Joins parent booking for context (booking number, dates, boat).
+   */
+  async getAgencyPayments(): Promise<(CabinAllocation & { booking?: { booking_number: string; date_from: string; date_to: string; type: string; project_id: string | null; external_boat_name: string | null } })[]> {
+    const supabase = createClient();
+    const { data, error } = await (supabase as any)
+      .from('cabin_allocations')
+      .select('*, booking:bookings!booking_id(booking_number, date_from, date_to, type, project_id, external_boat_name)')
+      .gt('agency_commission_amount', 0)
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    return ((data ?? []) as any[]).map((row: any) => ({
+      ...rowToAllocation(row),
+      booking: row.booking,
+    }));
+  },
+
+  async updateAgencyPaymentStatus(id: string, status: 'unpaid' | 'paid', paidDate?: string): Promise<void> {
+    const supabase = createClient();
+    const updates: Record<string, any> = {
+      agency_payment_status: status,
+      agency_paid_date: status === 'paid' ? (paidDate || new Date().toISOString().split('T')[0]) : null,
+    };
+    const { error } = await (supabase as any)
+      .from('cabin_allocations')
+      .update(updates)
+      .eq('id', id);
+    if (error) throw error;
   },
 };

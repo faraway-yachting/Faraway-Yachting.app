@@ -22,33 +22,28 @@ function getDefaultRate(type?: string, agentPlatform?: string): number {
 
 export default function CommissionSection({ formData, onChange, canEdit, isCollapsed, onToggleCollapse, isCompleted, onToggleCompleted }: CommissionSectionProps) {
   const isExternalBoat = !!formData.externalBoatName && !formData.projectId;
+  const isAgencyBooking = !!formData.agentPlatform && formData.agentPlatform !== 'Direct';
 
   // Charter fee commission base — normalize currencies when they differ
   const bookingCurrency = formData.currency || 'THB';
   const costCurrency = formData.charterCostCurrency || bookingCurrency;
   const fxRate = formData.fxRate || null;
 
-  // ALWAYS calculate commission base in THB
-  let charterCommissionBase: number;
-  if (!isExternalBoat) {
-    // Regular booking: charter fee → THB
-    const fee = formData.charterFee || 0;
-    charterCommissionBase = bookingCurrency === 'THB' ? fee : fxRate ? fee * fxRate : 0;
-  } else if (bookingCurrency === costCurrency) {
-    // External, same currency: (fee - cost) → THB
-    const profit = (formData.charterFee || 0) - (formData.charterCost || 0);
-    charterCommissionBase = bookingCurrency === 'THB' ? profit : fxRate ? profit * fxRate : 0;
-  } else {
-    // External, different currencies: normalize each to THB then subtract
-    const feeThb = bookingCurrency === 'THB'
-      ? (formData.charterFee || 0)
-      : fxRate ? (formData.charterFee || 0) * fxRate : 0;
-    const costThb = costCurrency === 'THB'
-      ? (formData.charterCost || 0)
-      : 0; // no FX rate for cost currency
-    charterCommissionBase = feeThb - costThb;
-  }
-  charterCommissionBase = Math.round(charterCommissionBase * 100) / 100;
+  // --- Agency commission (what we pay to the agency) ---
+  const agencyCommThb = formData.agencyCommissionThb || 0;
+
+  // Auto-calculate agency commission amount from rate
+  const agencyAutoAmount = formData.agencyCommissionRate
+    ? Math.round((formData.charterFee || 0) * formData.agencyCommissionRate) / 100
+    : 0;
+  const agencyAmount = formData.agencyCommissionAmount ?? agencyAutoAmount;
+  const agencyThbCalc = bookingCurrency === 'THB' ? agencyAmount : fxRate ? agencyAmount * fxRate : 0;
+
+  // Net revenue after agency commission (in booking currency and THB)
+  const charterFee = formData.charterFee || 0;
+  const netRevenue = charterFee - agencyAmount;
+  const charterFeeThb = bookingCurrency === 'THB' ? charterFee : fxRate ? charterFee * fxRate : 0;
+  const netRevenueThb = charterFeeThb - agencyCommThb;
 
   // Extras commission base — only commissionable items, commission on profit in THB
   const extraItems = formData.extraItems || [];
@@ -65,17 +60,49 @@ export default function CommissionSection({ formData, onChange, canEdit, isColla
       return sum + profit; // last resort, no conversion
     }, 0);
 
-  // Combined commission base
-  const commissionBase = charterCommissionBase + extrasCommissionBase;
+  // Helper: compute commission base in THB from given agency amounts
+  // Used both for display AND inside agency handlers to avoid useEffect cascade
+  const calcCommissionBase = (agencyAmt: number, agencyThb: number): number => {
+    const netRev = charterFee - agencyAmt;
+    const netRevThb = charterFeeThb - agencyThb;
+    let base: number;
+    if (!isExternalBoat) {
+      base = netRevThb;
+    } else if (bookingCurrency === costCurrency) {
+      const profit = netRev - (formData.charterCost || 0);
+      base = bookingCurrency === 'THB' ? profit : fxRate ? profit * fxRate : 0;
+    } else {
+      const costThb = costCurrency === 'THB' ? (formData.charterCost || 0) : 0;
+      base = netRevThb - costThb;
+    }
+    return Math.round(base * 100) / 100 + extrasCommissionBase;
+  };
+
+  // Combined commission base (charter + extras, in THB)
+  const commissionBase = calcCommissionBase(agencyAmount, agencyCommThb);
+  const charterCommissionBase = commissionBase - extrasCommissionBase;
 
   const rate = formData.commissionRate || 0;
   const charterCommission = charterCommissionBase * rate / 100;
   const extrasCommission = extrasCommissionBase * rate / 100;
-  const autoTotalCommission = commissionBase * rate / 100;
-  const autoCommissionReceived = (formData.totalCommission ?? autoTotalCommission) - (formData.commissionDeduction || 0);
+  const autoTotalCommission = Math.round(commissionBase * rate) / 100;
+  const autoCommissionReceived = Math.round(((formData.totalCommission ?? autoTotalCommission) - (formData.commissionDeduction || 0)) * 100) / 100;
 
   const defaultRate = getDefaultRate(formData.type, formData.agentPlatform);
   const prevDefaultRef = useRef<number | null>(null);
+
+  // Ref for agency amount input — managed imperatively to avoid React 19 typing issues
+  const agencyAmountRef = useRef<HTMLInputElement>(null);
+  const agencyAmountFocused = useRef(false);
+  const pendingAgencyAmount = useRef<number | undefined>(undefined);
+  const hasPendingAgencyUpdate = useRef(false);
+
+  // Sync amount DOM from formData when NOT focused (handles data loading, external changes)
+  useEffect(() => {
+    if (agencyAmountRef.current && !agencyAmountFocused.current) {
+      agencyAmountRef.current.value = formData.agencyCommissionAmount != null ? String(formData.agencyCommissionAmount) : '';
+    }
+  }, [formData.agencyCommissionAmount]);
 
   // Auto-fill commission rate based on charter type and booking source
   useEffect(() => {
@@ -94,41 +121,104 @@ export default function CommissionSection({ formData, onChange, canEdit, isColla
     prevDefaultRef.current = newDefault;
   }, [formData.type, formData.agentPlatform]);
 
-  // Recalculate commission when base amounts change (charter fee, cost, fx rate, extras)
+  // Recalculate commission when base amounts change (charter fee, cost, fx rate, extras, agency commission)
   // Also recalculate on initial mount to fix stale values from old calculations
   const prevBaseRef = useRef<number | null>(null);
   useEffect(() => {
     if (rate > 0 && (prevBaseRef.current === null || prevBaseRef.current !== commissionBase)) {
       const newTotal = Math.round(commissionBase * rate) / 100;
-      onChange('totalCommission', newTotal);
-      onChange('commissionReceived', newTotal - (formData.commissionDeduction || 0));
+      onChange('totalCommission', Math.round(newTotal * 100) / 100);
+      onChange('commissionReceived', Math.round((newTotal - (formData.commissionDeduction || 0)) * 100) / 100);
     }
     prevBaseRef.current = commissionBase;
   }, [commissionBase]);
 
+  // Auto-sync agency commission THB when fxRate or currency changes
+  // (amount changes are handled directly in the agency handlers above)
+  useEffect(() => {
+    if (!isAgencyBooking || !agencyAmount) return;
+    const newThb = Math.round(agencyThbCalc * 100) / 100;
+    if (newThb !== (formData.agencyCommissionThb || 0)) {
+      onChange('agencyCommissionThb', newThb || undefined);
+    }
+  }, [fxRate, bookingCurrency]);
+
   const handleRateChange = (value: string) => {
     const newRate = value === '' ? undefined : parseFloat(value);
     onChange('commissionRate', newRate);
-    const newTotal = commissionBase * (newRate || 0) / 100;
+    const newTotal = Math.round(commissionBase * (newRate || 0)) / 100;
     onChange('totalCommission', newTotal);
-    onChange('commissionReceived', newTotal - (formData.commissionDeduction || 0));
+    onChange('commissionReceived', Math.round((newTotal - (formData.commissionDeduction || 0)) * 100) / 100);
   };
 
   const handleTotalCommissionChange = (value: string) => {
     const total = value === '' ? undefined : parseFloat(value);
     onChange('totalCommission', total);
-    onChange('commissionReceived', (total || 0) - (formData.commissionDeduction || 0));
+    onChange('commissionReceived', Math.round(((total || 0) - (formData.commissionDeduction || 0)) * 100) / 100);
   };
 
   const handleDeductionChange = (value: string) => {
     const deduction = value === '' ? undefined : parseFloat(value);
     onChange('commissionDeduction', deduction);
-    onChange('commissionReceived', (formData.totalCommission ?? autoTotalCommission) - (deduction || 0));
+    onChange('commissionReceived', Math.round(((formData.totalCommission ?? autoTotalCommission) - (deduction || 0)) * 100) / 100);
   };
 
   const handleReceivedChange = (value: string) => {
     const received = value === '' ? undefined : parseFloat(value);
     onChange('commissionReceived', received);
+  };
+
+  // --- Agency commission handlers ---
+  const agencyRateOptions = [5, 7.5, 10, 12.5, 15, 17.5, 20, 25, 30];
+
+  // Select handler — no typing involved, so no React 19 issues
+  const handleAgencyRateSelect = (value: string) => {
+    const newRate = value === '' ? undefined : parseFloat(value);
+    onChange('agencyCommissionRate', newRate);
+    const newAmount = newRate ? Math.round(charterFee * newRate / 100 * 100) / 100 : undefined;
+    onChange('agencyCommissionAmount', newAmount);
+    // Update amount input DOM directly
+    if (agencyAmountRef.current) {
+      agencyAmountRef.current.value = newAmount != null ? String(newAmount) : '';
+    }
+    pendingAgencyAmount.current = newAmount;
+    const newThb = newAmount
+      ? Math.round((bookingCurrency === 'THB' ? newAmount : fxRate ? newAmount * fxRate : 0) * 100) / 100
+      : undefined;
+    onChange('agencyCommissionThb', newThb);
+    const newBase = calcCommissionBase(newAmount || 0, newThb || 0);
+    if (rate > 0) {
+      const newTotal = Math.round(newBase * rate) / 100;
+      onChange('totalCommission', Math.round(newTotal * 100) / 100);
+      onChange('commissionReceived', Math.round((newTotal - (formData.commissionDeduction || 0)) * 100) / 100);
+    }
+    prevBaseRef.current = newBase;
+  };
+
+  // Amount handler — flush on blur to avoid React 19 typing issues
+  const handleAgencyAmountChange = (value: string) => {
+    const amount = value === '' ? undefined : parseFloat(value);
+    if (value !== '' && isNaN(amount!)) return;
+    pendingAgencyAmount.current = amount;
+    hasPendingAgencyUpdate.current = true;
+  };
+
+  const flushAgencyAmountUpdate = () => {
+    if (!hasPendingAgencyUpdate.current) return;
+    hasPendingAgencyUpdate.current = false;
+    const newAmount = pendingAgencyAmount.current;
+    onChange('agencyCommissionAmount', newAmount);
+    const newThb = newAmount
+      ? Math.round((bookingCurrency === 'THB' ? newAmount : fxRate ? newAmount * fxRate : 0) * 100) / 100
+      : undefined;
+    onChange('agencyCommissionThb', newThb);
+    const newBase = calcCommissionBase(newAmount || 0, newThb || 0);
+    if (rate > 0) {
+      const newTotal = Math.round(newBase * rate) / 100;
+      onChange('totalCommission', Math.round(newTotal * 100) / 100);
+      onChange('commissionReceived', Math.round((newTotal - (formData.commissionDeduction || 0)) * 100) / 100);
+    }
+    prevBaseRef.current = newBase;
   };
 
   const fmtAmt = (n: number) =>
@@ -163,6 +253,123 @@ export default function CommissionSection({ formData, onChange, canEdit, isColla
       </div>
 
       {!isCollapsed && <>
+
+      {/* === Agency Commission Block (only for agency bookings) === */}
+      {isAgencyBooking && (
+        <div className="bg-amber-50 rounded-md p-3 mb-3 border border-amber-200">
+          <h4 className="text-xs font-semibold text-amber-800 mb-2 uppercase tracking-wide">Agency Commission</h4>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-2">
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Rate (%)</label>
+              <select
+                value={formData.agencyCommissionRate != null ? String(formData.agencyCommissionRate) : ''}
+                onChange={(e) => handleAgencyRateSelect(e.target.value)}
+                disabled={!canEdit}
+                className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 focus:border-transparent disabled:bg-gray-100"
+              >
+                <option value="">-- Select --</option>
+                {agencyRateOptions.map(r => (
+                  <option key={r} value={String(r)}>{r}%</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Amount ({bookingCurrency})</label>
+              <input
+                ref={agencyAmountRef}
+                type="text"
+                inputMode="decimal"
+                defaultValue={formData.agencyCommissionAmount != null ? String(formData.agencyCommissionAmount) : ''}
+                onChange={(e) => {
+                  if (/^\d*\.?\d*$/.test(e.target.value)) {
+                    handleAgencyAmountChange(e.target.value);
+                  }
+                }}
+                onFocus={() => {
+                  agencyAmountFocused.current = true;
+                  pendingAgencyAmount.current = formData.agencyCommissionAmount;
+                }}
+                onBlur={() => {
+                  agencyAmountFocused.current = false;
+                  flushAgencyAmountUpdate();
+                  if (agencyAmountRef.current) {
+                    agencyAmountRef.current.value = pendingAgencyAmount.current != null ? String(pendingAgencyAmount.current) : '';
+                  }
+                }}
+                disabled={!canEdit}
+                className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 focus:border-transparent disabled:bg-gray-100"
+                placeholder="0.00"
+              />
+              {bookingCurrency !== 'THB' && agencyThbCalc > 0 && (
+                <p className="text-xs text-gray-500 mt-0.5">= {fmtAmt(agencyThbCalc)} THB</p>
+              )}
+            </div>
+          </div>
+
+          {/* Net revenue display */}
+          {agencyAmount > 0 && (
+            <div className="text-sm bg-white/60 rounded px-2 py-1.5 mb-2">
+              <div className="flex justify-between text-gray-600">
+                <span>Charter Fee</span>
+                <span>{fmtAmt(charterFee)} {bookingCurrency}</span>
+              </div>
+              <div className="flex justify-between text-amber-700">
+                <span>Agency Commission</span>
+                <span>-{fmtAmt(agencyAmount)} {bookingCurrency}</span>
+              </div>
+              <div className="flex justify-between font-medium text-gray-800 border-t border-gray-200 mt-1 pt-1">
+                <span>Net Revenue</span>
+                <span>{fmtAmt(netRevenue)} {bookingCurrency}{bookingCurrency !== 'THB' && netRevenueThb > 0 ? ` (${fmtAmt(netRevenueThb)} THB)` : ''}</span>
+              </div>
+            </div>
+          )}
+
+          {/* Payment status */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Payment Status</label>
+              <select
+                value={formData.agencyPaymentStatus || 'unpaid'}
+                onChange={(e) => {
+                  onChange('agencyPaymentStatus', e.target.value as 'unpaid' | 'paid');
+                  if (e.target.value === 'paid' && !formData.agencyPaidDate) {
+                    onChange('agencyPaidDate', new Date().toISOString().split('T')[0]);
+                  }
+                }}
+                disabled={!canEdit}
+                className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 disabled:bg-gray-100"
+              >
+                <option value="unpaid">Unpaid</option>
+                <option value="paid">Paid</option>
+              </select>
+            </div>
+            {formData.agencyPaymentStatus === 'paid' && (
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Paid Date</label>
+                <input
+                  type="date"
+                  value={formData.agencyPaidDate || ''}
+                  onChange={(e) => onChange('agencyPaidDate', e.target.value || undefined)}
+                  disabled={!canEdit}
+                  className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 disabled:bg-gray-100"
+                />
+              </div>
+            )}
+            <div className={formData.agencyPaymentStatus === 'paid' ? '' : 'sm:col-span-2'}>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Note</label>
+              <input
+                type="text"
+                value={formData.agencyPaymentNote || ''}
+                onChange={(e) => onChange('agencyPaymentNote', e.target.value || undefined)}
+                disabled={!canEdit}
+                placeholder="Payment reference, bank details..."
+                className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 disabled:bg-gray-100"
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Commission Rate */}
       <div className="mb-3 max-w-xs">
         <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -189,7 +396,7 @@ export default function CommissionSection({ formData, onChange, canEdit, isColla
             <p className="text-xs text-teal-600 mb-1">Commission calculated in THB</p>
           )}
           <div className="flex justify-between text-gray-600">
-            <span>Charter fee ({fmtAmt(charterCommissionBase)}{bookingCurrency !== 'THB' ? ' THB' : ''})</span>
+            <span>{isAgencyBooking && agencyAmount > 0 ? 'Charter net revenue' : 'Charter fee'} ({fmtAmt(charterCommissionBase)}{bookingCurrency !== 'THB' ? ' THB' : ''})</span>
             <span>{fmtAmt(charterCommission)}</span>
           </div>
           {extrasCommissionBase > 0 && (

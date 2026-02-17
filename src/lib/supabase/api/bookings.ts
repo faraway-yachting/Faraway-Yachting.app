@@ -112,6 +112,12 @@ function dbBookingToFrontend(db: DbBooking): Booking {
     commissionDeduction: db.commission_deduction ?? undefined,
     commissionReceived: db.commission_received ?? undefined,
     commissionNote: (db as any).commission_note ?? undefined,
+    agencyCommissionRate: (db as any).agency_commission_rate ?? undefined,
+    agencyCommissionAmount: (db as any).agency_commission_amount ?? undefined,
+    agencyCommissionThb: (db as any).agency_commission_thb ?? undefined,
+    agencyPaymentStatus: (db as any).agency_payment_status ?? undefined,
+    agencyPaidDate: (db as any).agency_paid_date ?? undefined,
+    agencyPaymentNote: (db as any).agency_payment_note ?? undefined,
     depositReceiptId: db.deposit_receipt_id ?? undefined,
     finalReceiptId: db.final_receipt_id ?? undefined,
     invoiceId: db.invoice_id ?? undefined,
@@ -186,6 +192,12 @@ function frontendToDb(booking: Partial<Booking>): Partial<DbBookingInsert> {
   if (booking.commissionDeduction !== undefined) db.commission_deduction = booking.commissionDeduction ?? null;
   if (booking.commissionReceived !== undefined) db.commission_received = booking.commissionReceived ?? null;
   if (booking.commissionNote !== undefined) (db as any).commission_note = booking.commissionNote || null;
+  if (booking.agencyCommissionRate !== undefined) (db as any).agency_commission_rate = booking.agencyCommissionRate ?? null;
+  if (booking.agencyCommissionAmount !== undefined) (db as any).agency_commission_amount = booking.agencyCommissionAmount ?? null;
+  if (booking.agencyCommissionThb !== undefined) (db as any).agency_commission_thb = booking.agencyCommissionThb ?? null;
+  if (booking.agencyPaymentStatus !== undefined) (db as any).agency_payment_status = booking.agencyPaymentStatus || null;
+  if (booking.agencyPaidDate !== undefined) (db as any).agency_paid_date = booking.agencyPaidDate || null;
+  if (booking.agencyPaymentNote !== undefined) (db as any).agency_payment_note = booking.agencyPaymentNote || null;
   if (booking.depositReceiptId !== undefined) db.deposit_receipt_id = booking.depositReceiptId || null;
   if (booking.finalReceiptId !== undefined) db.final_receipt_id = booking.finalReceiptId || null;
   if (booking.invoiceId !== undefined) db.invoice_id = booking.invoiceId || null;
@@ -452,6 +464,30 @@ export const bookingsApi = {
     const { data, error } = await query;
     if (error) throw error;
     return (data ?? []).map(dbBookingToFrontend);
+  },
+
+  async getAgencyPayments(): Promise<Booking[]> {
+    const supabase = createClient();
+    const { data, error } = await (supabase as any)
+      .from('bookings')
+      .select('*, sales_owner:employees!sales_owner_id(full_name_en, nickname)')
+      .gt('agency_commission_amount', 0)
+      .order('date_from', { ascending: false });
+    if (error) throw error;
+    return (data ?? []).map(dbBookingToFrontend);
+  },
+
+  async updateAgencyPaymentStatus(id: string, status: 'unpaid' | 'paid', paidDate?: string): Promise<void> {
+    const supabase = createClient();
+    const updates: Record<string, any> = {
+      agency_payment_status: status,
+      agency_paid_date: status === 'paid' ? (paidDate || new Date().toISOString().split('T')[0]) : null,
+    };
+    const { error } = await supabase
+      .from('bookings')
+      .update(updates as any)
+      .eq('id', id);
+    if (error) throw error;
   },
 };
 

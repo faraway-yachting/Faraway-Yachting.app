@@ -761,6 +761,12 @@ export function BookingFormContainer({
               fxRateSource: allocation.fxRateSource,
               thbTotalPrice: allocation.thbTotalPrice,
               isCompleted: allocation.isCompleted,
+              agencyCommissionRate: allocation.agencyCommissionRate,
+              agencyCommissionAmount: allocation.agencyCommissionAmount,
+              agencyCommissionThb: allocation.agencyCommissionThb,
+              agencyPaymentStatus: allocation.agencyPaymentStatus,
+              agencyPaidDate: allocation.agencyPaidDate,
+              agencyPaymentNote: allocation.agencyPaymentNote,
             };
 
             if (allocation.id.startsWith('temp-')) {

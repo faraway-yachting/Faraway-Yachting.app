@@ -82,12 +82,15 @@ const paymentMethods = [
   { value: 'promptpay', label: 'PromptPay' },
 ];
 
-// Commission base: THB charter fee + commissionable extras profit (converted if non-THB)
+// Commission base: THB charter fee (minus agency commission) + commissionable extras profit (converted if non-THB)
 function getThbCommissionBase(alloc: CabinAllocation, defaultCurrency: string): { charterBase: number; extrasBase: number; total: number } {
   const cabinCurrency = alloc.currency || defaultCurrency;
   const charterFee = alloc.charterFee || 0;
   const fxRate = alloc.fxRate || 0;
-  const charterBase = cabinCurrency !== 'THB' ? charterFee * fxRate : charterFee;
+  const charterFeeThb = cabinCurrency !== 'THB' ? charterFee * fxRate : charterFee;
+  // Deduct agency commission (in THB) from charter fee base
+  const agencyThb = alloc.agencyCommissionThb || 0;
+  const charterBase = charterFeeThb - agencyThb;
 
   // Extras: commissionable items profit in THB
   const extraItems = alloc.extraItems || [];
@@ -391,8 +394,8 @@ export default function CabinSection({
     if (!alloc) return;
     const rate = rateStr === '' ? undefined : parseFloat(rateStr);
     const { total: base } = getThbCommissionBase(alloc, currency);
-    const total = base * (rate || 0) / 100;
-    const received = total - (alloc.commissionDeduction || 0);
+    const total = Math.round(base * (rate || 0)) / 100;
+    const received = Math.round((total - (alloc.commissionDeduction || 0)) * 100) / 100;
     onAllocationsChange(
       cabinAllocations.map(a => a.id === allocationId ? {
         ...a,
@@ -407,7 +410,7 @@ export default function CabinSection({
     const alloc = cabinAllocations.find(a => a.id === allocationId);
     if (!alloc) return;
     const total = totalStr === '' ? undefined : parseFloat(totalStr);
-    const received = (total || 0) - (alloc.commissionDeduction || 0);
+    const received = Math.round(((total || 0) - (alloc.commissionDeduction || 0)) * 100) / 100;
     onAllocationsChange(
       cabinAllocations.map(a => a.id === allocationId ? {
         ...a,
@@ -422,12 +425,60 @@ export default function CabinSection({
     if (!alloc) return;
     const deduction = deductStr === '' ? undefined : parseFloat(deductStr);
     const { total: base } = getThbCommissionBase(alloc, currency);
-    const autoTotal = base * (alloc.commissionRate || 0) / 100;
-    const received = (alloc.totalCommission ?? autoTotal) - (deduction || 0);
+    const autoTotal = Math.round(base * (alloc.commissionRate || 0)) / 100;
+    const received = Math.round(((alloc.totalCommission ?? autoTotal) - (deduction || 0)) * 100) / 100;
     onAllocationsChange(
       cabinAllocations.map(a => a.id === allocationId ? {
         ...a,
         commissionDeduction: deduction,
+        commissionReceived: received,
+      } : a)
+    );
+  };
+
+  // Agency commission handlers (per-cabin)
+  // Both handlers merge agency + commission recalc into a single onAllocationsChange
+  // to avoid stale-closure bugs from setTimeout.
+  const handleAgencyCommissionRateChange = (allocationId: string, rateStr: string) => {
+    const alloc = cabinAllocations.find(a => a.id === allocationId);
+    if (!alloc) return;
+    const rate = rateStr === '' ? undefined : parseFloat(rateStr);
+    const charterFee = alloc.charterFee || 0;
+    const amount = rate ? Math.round(charterFee * rate) / 100 : undefined;
+    const cabinCurrency = alloc.currency || currency;
+    const fx = alloc.fxRate || 0;
+    const thb = amount ? (cabinCurrency === 'THB' ? amount : Math.round(amount * fx * 100) / 100) : undefined;
+    // Build updated allocation, then recalculate commission base from it
+    const updated = { ...alloc, agencyCommissionRate: rate, agencyCommissionAmount: amount, agencyCommissionThb: thb };
+    const { total: base } = getThbCommissionBase(updated, currency);
+    const commRate = alloc.commissionRate || 0;
+    const total = Math.round(base * commRate) / 100;
+    const received = Math.round((total - (alloc.commissionDeduction || 0)) * 100) / 100;
+    onAllocationsChange(
+      cabinAllocations.map(a => a.id === allocationId ? {
+        ...updated,
+        totalCommission: total,
+        commissionReceived: received,
+      } : a)
+    );
+  };
+
+  const handleAgencyCommissionAmountChange = (allocationId: string, amountStr: string) => {
+    const alloc = cabinAllocations.find(a => a.id === allocationId);
+    if (!alloc) return;
+    const amount = amountStr === '' ? undefined : parseFloat(amountStr);
+    const cabinCurrency = alloc.currency || currency;
+    const fx = alloc.fxRate || 0;
+    const thb = amount ? (cabinCurrency === 'THB' ? amount : Math.round(amount * fx * 100) / 100) : undefined;
+    const updated = { ...alloc, agencyCommissionAmount: amount, agencyCommissionThb: thb };
+    const { total: base } = getThbCommissionBase(updated, currency);
+    const commRate = alloc.commissionRate || 0;
+    const total = Math.round(base * commRate) / 100;
+    const received = Math.round((total - (alloc.commissionDeduction || 0)) * 100) / 100;
+    onAllocationsChange(
+      cabinAllocations.map(a => a.id === allocationId ? {
+        ...updated,
+        totalCommission: total,
         commissionReceived: received,
       } : a)
     );
@@ -477,8 +528,8 @@ export default function CabinSection({
         const thbTotalPrice = cabinCurrency !== 'THB' && fxRate > 0 ? totalPrice * fxRate : (cabinCurrency === 'THB' ? totalPrice : undefined);
         // Recalculate commission if rate is set (uses charter fee + extras profit)
         const { total: commissionBase } = getThbCommissionBase(merged, currency);
-        const totalCommission = commissionBase * (merged.commissionRate || 0) / 100;
-        const commissionReceived = totalCommission - (merged.commissionDeduction || 0);
+        const totalCommission = Math.round(commissionBase * (merged.commissionRate || 0)) / 100;
+        const commissionReceived = Math.round((totalCommission - (merged.commissionDeduction || 0)) * 100) / 100;
         return {
           ...merged,
           price: totalPrice,
@@ -559,6 +610,8 @@ export default function CabinSection({
             handleCommissionRateChange={handleCommissionRateChange}
             handleCommissionTotalChange={handleCommissionTotalChange}
             handleCommissionDeductionChange={handleCommissionDeductionChange}
+            handleAgencyCommissionRateChange={handleAgencyCommissionRateChange}
+            handleAgencyCommissionAmountChange={handleAgencyCommissionAmountChange}
             uploadAttachments={uploadAttachments}
             onAllocationsChange={onAllocationsChange}
             allAllocations={cabinAllocations}
@@ -742,6 +795,8 @@ interface CabinAllocationCardProps {
   handleCommissionRateChange: (allocationId: string, rateStr: string) => void;
   handleCommissionTotalChange: (allocationId: string, totalStr: string) => void;
   handleCommissionDeductionChange: (allocationId: string, deductStr: string) => void;
+  handleAgencyCommissionRateChange: (allocationId: string, rateStr: string) => void;
+  handleAgencyCommissionAmountChange: (allocationId: string, amountStr: string) => void;
   uploadAttachments: (files: File[], prefix: string) => Promise<BookingAttachment[]>;
   onAllocationsChange: (allocations: CabinAllocation[]) => void;
   allAllocations: CabinAllocation[];
@@ -778,6 +833,8 @@ function CabinAllocationCard({
   handleCommissionRateChange,
   handleCommissionTotalChange,
   handleCommissionDeductionChange,
+  handleAgencyCommissionRateChange,
+  handleAgencyCommissionAmountChange,
   uploadAttachments,
   onAllocationsChange,
   allAllocations,
@@ -935,11 +992,25 @@ function CabinAllocationCard({
     updateAllocation(allocation.id, 'internalNoteAttachments', existing);
   };
 
+  // Agency commission derived values
+  const isAgencyCabin = allocation.bookingSourceType === 'agency';
+  const cabinCurrency = allocation.currency || currency;
+  const cabinCharterFee = allocation.charterFee || 0;
+  const cabinFxRate = allocation.fxRate || 0;
+  const agencyAutoAmt = allocation.agencyCommissionRate
+    ? Math.round(cabinCharterFee * allocation.agencyCommissionRate) / 100
+    : 0;
+  const agencyAmt = allocation.agencyCommissionAmount ?? agencyAutoAmt;
+  const agencyThbCalc = agencyAmt ? (cabinCurrency === 'THB' ? agencyAmt : agencyAmt * cabinFxRate) : 0;
+  const cabinNetRevenue = cabinCharterFee - agencyAmt;
+  const cabinCharterFeeThb = cabinCurrency !== 'THB' ? cabinCharterFee * cabinFxRate : cabinCharterFee;
+  const cabinNetRevenueThb = cabinCharterFeeThb - (allocation.agencyCommissionThb || 0);
+
   // Commission auto-calc values
   const { charterBase: commCharterBase, extrasBase: commExtrasBase, total: commBase } = getThbCommissionBase(allocation, currency);
   const defaultRate = getDefaultCommissionRate(allocation.bookingSourceType);
-  const autoTotal = commBase * (allocation.commissionRate || 0) / 100;
-  const autoReceived = (allocation.totalCommission ?? autoTotal) - (allocation.commissionDeduction || 0);
+  const autoTotal = Math.round(commBase * (allocation.commissionRate || 0)) / 100;
+  const autoReceived = Math.round(((allocation.totalCommission ?? autoTotal) - (allocation.commissionDeduction || 0)) * 100) / 100;
 
   return (
     <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
@@ -1416,8 +1487,8 @@ function CabinAllocationCard({
                   // Update extraItems and recalculate commission
                   const updated = { ...allocation, extraItems: items };
                   const { total: commBase } = getThbCommissionBase(updated, currency);
-                  const totalCommission = commBase * (updated.commissionRate || 0) / 100;
-                  const commissionReceived = totalCommission - (updated.commissionDeduction || 0);
+                  const totalCommission = Math.round(commBase * (updated.commissionRate || 0)) / 100;
+                  const commissionReceived = Math.round((totalCommission - (updated.commissionDeduction || 0)) * 100) / 100;
                   onAllocationsChange(
                     allAllocations.map(a => a.id === allocation.id ? {
                       ...a,
@@ -1734,7 +1805,111 @@ function CabinAllocationCard({
             )}
           </div>
 
-          {/* ── F. Commission (teal) ── */}
+          {/* ── F1. Agency Commission (amber, only for agency cabins) ── */}
+          {isAgencyCabin && (
+            <div className="border-t border-gray-100 pt-4">
+              <div className="bg-amber-50 rounded-lg p-3 border border-amber-200">
+                <div className="flex items-center gap-2 mb-2">
+                  <Banknote className="h-4 w-4 text-amber-600" />
+                  <h4 className="text-xs font-semibold text-amber-800 uppercase tracking-wide">Agency Commission</h4>
+                </div>
+                <div className="grid grid-cols-2 gap-3 mb-2">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">Rate (%)</label>
+                    <select
+                      value={allocation.agencyCommissionRate != null ? String(allocation.agencyCommissionRate) : ''}
+                      onChange={e => handleAgencyCommissionRateChange(allocation.id, e.target.value)}
+                      disabled={!canEdit}
+                      className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded-lg focus:ring-1 focus:ring-amber-400 disabled:bg-gray-100"
+                    >
+                      <option value="">-- Select --</option>
+                      {[5, 7.5, 10, 12.5, 15, 17.5, 20, 25, 30].map(r => (
+                        <option key={r} value={String(r)}>{r}%</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">Amount ({cabinCurrency})</label>
+                    <input
+                      type="number" step="0.01" min="0"
+                      value={allocation.agencyCommissionAmount ?? (agencyAutoAmt || '')}
+                      onChange={e => handleAgencyCommissionAmountChange(allocation.id, e.target.value)}
+                      disabled={!canEdit}
+                      placeholder="0.00"
+                      className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded-lg focus:ring-1 focus:ring-amber-400 disabled:bg-gray-100"
+                    />
+                    {cabinCurrency !== 'THB' && agencyThbCalc > 0 && (
+                      <p className="text-xs text-gray-500 mt-0.5">= {agencyThbCalc.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} THB</p>
+                    )}
+                  </div>
+                </div>
+
+                {/* Net revenue */}
+                {agencyAmt > 0 && (
+                  <div className="text-xs bg-white/60 rounded px-2 py-1.5 mb-2 space-y-0.5">
+                    <div className="flex justify-between text-gray-600">
+                      <span>Charter Fee</span>
+                      <span>{cabinCharterFee.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {cabinCurrency}</span>
+                    </div>
+                    <div className="flex justify-between text-amber-700">
+                      <span>Agency Commission</span>
+                      <span>-{agencyAmt.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {cabinCurrency}</span>
+                    </div>
+                    <div className="flex justify-between font-medium text-gray-800 border-t border-gray-200 pt-0.5">
+                      <span>Net Revenue</span>
+                      <span>{cabinNetRevenue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {cabinCurrency}{cabinCurrency !== 'THB' && cabinNetRevenueThb > 0 ? ` (${cabinNetRevenueThb.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} THB)` : ''}</span>
+                    </div>
+                  </div>
+                )}
+
+                {/* Payment status */}
+                <div className="grid grid-cols-3 gap-2">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">Payment</label>
+                    <select
+                      value={allocation.agencyPaymentStatus || 'unpaid'}
+                      onChange={e => {
+                        updateAllocation(allocation.id, 'agencyPaymentStatus', e.target.value);
+                        if (e.target.value === 'paid' && !allocation.agencyPaidDate) {
+                          updateAllocation(allocation.id, 'agencyPaidDate', new Date().toISOString().split('T')[0]);
+                        }
+                      }}
+                      disabled={!canEdit}
+                      className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded-lg focus:ring-1 focus:ring-amber-400 disabled:bg-gray-100"
+                    >
+                      <option value="unpaid">Unpaid</option>
+                      <option value="paid">Paid</option>
+                    </select>
+                  </div>
+                  {allocation.agencyPaymentStatus === 'paid' && (
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600 mb-1">Paid Date</label>
+                      <input
+                        type="date"
+                        value={allocation.agencyPaidDate || ''}
+                        onChange={e => updateAllocation(allocation.id, 'agencyPaidDate', e.target.value || undefined)}
+                        disabled={!canEdit}
+                        className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded-lg focus:ring-1 focus:ring-amber-400 disabled:bg-gray-100"
+                      />
+                    </div>
+                  )}
+                  <div className={allocation.agencyPaymentStatus === 'paid' ? '' : 'col-span-2'}>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">Note</label>
+                    <input
+                      type="text"
+                      value={allocation.agencyPaymentNote || ''}
+                      onChange={e => updateAllocation(allocation.id, 'agencyPaymentNote', e.target.value || undefined)}
+                      disabled={!canEdit}
+                      placeholder="Payment ref..."
+                      className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded-lg focus:ring-1 focus:ring-amber-400 disabled:bg-gray-100"
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ── F2. Commission (teal) ── */}
           <div className="border-t border-gray-100 pt-4">
             <div className="bg-teal-50 rounded-lg p-3">
               <div className="flex items-center gap-2 mb-2">
@@ -1765,7 +1940,7 @@ function CabinAllocationCard({
                     <p className="text-xs text-teal-600 mb-1">Commission calculated in THB</p>
                   )}
                   <div className="flex justify-between text-gray-600 text-xs">
-                    <span>Charter fee ({commCharterBase.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})</span>
+                    <span>{isAgencyCabin && agencyAmt > 0 ? 'Charter net revenue' : 'Charter fee'} ({commCharterBase.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})</span>
                     <span>{(commCharterBase * (allocation.commissionRate || 0) / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                   </div>
                   {commExtrasBase > 0 && (

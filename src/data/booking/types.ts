@@ -104,6 +104,14 @@ export interface Booking {
   commissionReceived?: number;
   commissionNote?: string;
 
+  // Agency commission (what we pay to the agency)
+  agencyCommissionRate?: number;
+  agencyCommissionAmount?: number;  // in booking currency
+  agencyCommissionThb?: number;     // in THB
+  agencyPaymentStatus?: 'unpaid' | 'paid';
+  agencyPaidDate?: string;
+  agencyPaymentNote?: string;
+
   // Links to Accounting
   depositReceiptId?: string;
   finalReceiptId?: string;
@@ -298,6 +306,13 @@ export interface CabinAllocation {
   commissionDeduction?: number;
   commissionReceived?: number;
   commissionNote?: string;
+  // Agency commission (what we pay to the agency)
+  agencyCommissionRate?: number;
+  agencyCommissionAmount?: number;
+  agencyCommissionThb?: number;
+  agencyPaymentStatus?: 'unpaid' | 'paid';
+  agencyPaidDate?: string;
+  agencyPaymentNote?: string;
   // Notes (same as Booking.internalNotes/customerNotes)
   internalNotes?: string;
   internalNoteAttachments?: BookingAttachment[];

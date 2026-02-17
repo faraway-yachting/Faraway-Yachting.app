@@ -15,6 +15,7 @@ import {
   Shield,
   Users,
   Anchor,
+  Banknote,
 } from "lucide-react";
 
 export type BookingsRole = "admin" | "manager" | "agent" | "viewer" | "crew" | "investor";
@@ -30,6 +31,7 @@ const allMenuItems = [
   { name: "Bookings List", href: "/bookings/{role}/list", icon: List, menuKey: "list" },
   { name: "Agencies", href: "/bookings/{role}/agencies", icon: Users, menuKey: "agencies" },
   { name: "Boat Register", href: "/bookings/{role}/boats", icon: Anchor, menuKey: "boats" },
+  { name: "Agency Payments", href: "/bookings/{role}/agency-payments", icon: Banknote, menuKey: "agency_payments" },
   { name: "Settings", href: "/bookings/{role}/settings", icon: Settings, menuKey: "settings" },
 ];
 
