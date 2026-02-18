@@ -528,6 +528,13 @@ export default function CommissionTable() {
   const formatCurrency = (amount: number, currency: string = 'THB') =>
     `${currency} ${amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
+  // Format YYYY-MM-DD → DD.MM.YYYY
+  const fmtDate = (d: string | null) => {
+    if (!d) return '-';
+    const [y, m, day] = d.split('-');
+    return `${day}.${m}.${y}`;
+  };
+
   const formatCharterType = (type: string | null) => {
     if (!type) return '-';
     return type.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
@@ -891,8 +898,8 @@ export default function CommissionTable() {
                   <div className="flex items-start justify-between gap-2">
                     <dt className="shrink-0 text-xs font-medium text-gray-500">Charter</dt>
                     <dd className="text-right text-sm text-gray-900">
-                      {r.charter_date_from || '-'}
-                      {r.charter_date_to && r.charter_date_to !== r.charter_date_from && ` — ${r.charter_date_to}`}
+                      {fmtDate(r.charter_date_from)}
+                      {r.charter_date_to && r.charter_date_to !== r.charter_date_from && ` — ${fmtDate(r.charter_date_to)}`}
                     </dd>
                   </div>
                   <div className="flex items-start justify-between gap-2">
@@ -998,9 +1005,9 @@ export default function CommissionTable() {
                         </div>
                       </td>
                       <td className="px-3 py-2.5">
-                        <div className="text-sm text-gray-600">{r.charter_date_from || '-'}</div>
+                        <div className="text-sm text-gray-600">{fmtDate(r.charter_date_from)}</div>
                         {r.charter_date_to && r.charter_date_to !== r.charter_date_from && (
-                          <div className="text-xs text-gray-400">to {r.charter_date_to}</div>
+                          <div className="text-xs text-gray-400">to {fmtDate(r.charter_date_to)}</div>
                         )}
                       </td>
                       <td className="px-3 py-2.5 text-sm text-gray-600">{formatCharterType(r.charter_type)}</td>

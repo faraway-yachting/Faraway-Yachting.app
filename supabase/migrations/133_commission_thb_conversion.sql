@@ -338,6 +338,7 @@ BEGIN
     WHERE cr.booking_id = b.id
       AND cr.cabin_allocation_id IS NULL
       AND b.status IN ('booked', 'completed')
+      AND b.type != 'cabin_charter'
       AND NOT cr.management_fee_overridden
     RETURNING cr.id
   )
@@ -397,6 +398,7 @@ BEGIN
     WHERE cr.booking_id = b.id
       AND cr.cabin_allocation_id IS NULL
       AND b.status IN ('booked', 'completed')
+      AND b.type != 'cabin_charter'
       AND cr.management_fee_overridden
     RETURNING cr.id
   )
@@ -544,6 +546,18 @@ BEGIN
     RETURNING id
   )
   SELECT COUNT(*) INTO v_cleaned FROM cleaned;
+
+  -- Also remove stale "total" (non-cabin) records for cabin charter bookings
+  WITH cleaned_totals AS (
+    DELETE FROM commission_records cr
+    USING bookings b
+    WHERE cr.booking_id = b.id
+      AND cr.cabin_allocation_id IS NULL
+      AND cr.source = 'booking'
+      AND b.type = 'cabin_charter'
+    RETURNING cr.id
+  )
+  SELECT v_cleaned + COUNT(*) INTO v_cleaned FROM cleaned_totals;
 
   RETURN json_build_object('created', v_created, 'updated', v_updated, 'cleaned', v_cleaned);
 END;
