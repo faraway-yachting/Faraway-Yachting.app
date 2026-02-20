@@ -16,6 +16,7 @@ import {
   getDeferredRevenueSummary,
   getById,
   getByReceiptId,
+  getByReceiptIds,
   getRecentlyRecognized,
   hasUnrecognizedRevenue,
   getRevenueAccountCode,
@@ -49,6 +50,14 @@ export const revenueRecognitionApi = {
    */
   async getByReceiptId(receiptId: string): Promise<RevenueRecognition[]> {
     return getByReceiptId(receiptId);
+  },
+
+  /**
+   * Batch-fetch revenue recognition records for multiple receipts.
+   * Use this instead of calling getByReceiptId() in a loop.
+   */
+  async getByReceiptIds(receiptIds: string[]): Promise<RevenueRecognition[]> {
+    return getByReceiptIds(receiptIds);
   },
 
   /**

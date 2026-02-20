@@ -453,7 +453,7 @@ export const pettyCashApi = {
     const supabase = createClient();
     const { data, error } = await supabase
       .from('petty_cash_expenses')
-      .select('*')
+      .select('id, expense_number, wallet_id, company_id, project_id, expense_date, description, amount, status, created_by, created_at')
       .eq('status', status)
       .order('expense_date', { ascending: false });
     if (error) throw error;
@@ -692,7 +692,7 @@ export const pettyCashApi = {
     const supabase = createClient();
     const { data, error } = await supabase
       .from('petty_cash_expenses')
-      .select('*')
+      .select('id, expense_number, wallet_id, company_id, project_id, expense_date, description, amount, status, created_by, created_at')
       .eq('wallet_id', walletId)
       .order('expense_date', { ascending: false });
     if (error) throw error;
@@ -703,7 +703,7 @@ export const pettyCashApi = {
     const supabase = createClient();
     const { data, error } = await supabase
       .from('petty_cash_expenses')
-      .select('*')
+      .select('id, expense_number, wallet_id, company_id, project_id, expense_date, description, amount, status, created_by, created_at')
       .gte('expense_date', startDate)
       .lte('expense_date', endDate)
       .order('expense_date', { ascending: false });

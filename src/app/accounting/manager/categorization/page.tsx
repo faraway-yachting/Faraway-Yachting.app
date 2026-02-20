@@ -86,19 +86,18 @@ export default function CategorizationPage() {
       setExpenses(expensesData);
       setReceipts(receiptsData);
 
-      // Fetch recognition records for all receipts
+      // Batch-fetch recognition records for all receipts (single query instead of N+1)
       const recognitionMap = new Map<string, RevenueRecognitionStatus>();
-      for (const receipt of receiptsData) {
-        try {
-          const records = await revenueRecognitionApi.getByReceiptId(receipt.id);
-          for (const record of records) {
-            if (record.receiptLineItemId) {
-              recognitionMap.set(record.receiptLineItemId, record.recognitionStatus);
-            }
+      try {
+        const receiptIds = receiptsData.map(r => r.id);
+        const allRecords = await revenueRecognitionApi.getByReceiptIds(receiptIds);
+        for (const record of allRecords) {
+          if (record.receiptLineItemId) {
+            recognitionMap.set(record.receiptLineItemId, record.recognitionStatus);
           }
-        } catch {
-          // Ignore errors for individual receipts
         }
+      } catch {
+        // Ignore errors — recognition data is supplementary
       }
       setRecognitionRecords(recognitionMap);
     } catch (error) {

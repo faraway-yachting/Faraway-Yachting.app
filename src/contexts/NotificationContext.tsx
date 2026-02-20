@@ -20,9 +20,7 @@ import {
   clearNotification as clearNotificationFromStore,
   setNotificationsFromDb,
 } from '@/data/notifications/notifications';
-import { notificationsApi } from '@/lib/supabase/api/notifications';
 import { useNotificationsQuery } from '@/hooks/queries/useNotifications';
-import { createClient } from '@/lib/supabase/client';
 
 interface NotificationContextType {
   notifications: Notification[];
@@ -74,25 +72,9 @@ export function NotificationProvider({
     setRefreshKey((prev) => prev + 1);
   }, [dbNotifs]);
 
-  // Subscribe to Supabase Realtime for instant notification delivery
-  useEffect(() => {
-    const supabase = createClient();
-    const channel = supabase
-      .channel('notifications-realtime')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'notifications' },
-        () => {
-          // Invalidate React Query cache — triggers refetch
-          queryClient.invalidateQueries({ queryKey: ['notifications'] });
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [queryClient]);
+  // Notifications are now fetched via React Query with polling (refetchInterval: 30s)
+  // This replaces the previous Supabase Realtime subscription which was consuming
+  // significant compute via the WAL reader (94.9% of total query time).
 
   const refreshNotifications = useCallback(() => {
     queryClient.invalidateQueries({ queryKey: ['notifications'] });

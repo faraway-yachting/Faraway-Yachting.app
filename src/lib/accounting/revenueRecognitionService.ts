@@ -491,6 +491,26 @@ export async function getByReceiptId(receiptId: string): Promise<RevenueRecognit
 }
 
 /**
+ * Batch-fetch revenue recognition records for multiple receipt IDs.
+ * Replaces the N+1 pattern of calling getByReceiptId() per receipt.
+ */
+export async function getByReceiptIds(receiptIds: string[]): Promise<RevenueRecognition[]> {
+  if (receiptIds.length === 0) return [];
+
+  const supabase = createClient();
+
+  const { data, error } = await supabase
+    .from('revenue_recognition' as any)
+    .select('*')
+    .in('receipt_id', receiptIds)
+    .order('created_at', { ascending: false });
+
+  if (error) throw error;
+
+  return ((data as unknown as Record<string, unknown>[]) ?? []).map(mapDbRowToRevenueRecognition);
+}
+
+/**
  * Get recently recognized revenue (for dashboard)
  */
 export async function getRecentlyRecognized(
