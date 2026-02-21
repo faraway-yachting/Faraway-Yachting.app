@@ -29,6 +29,8 @@ function dbToFrontend(db: DbRow): TaxiTransfer {
     returnDropoffUrl: db.return_dropoff_url ?? undefined,
     taxiCompanyId: db.taxi_company_id ?? undefined,
     taxiCompanyName: db.taxi_companies?.name ?? undefined,
+    taxiDriverId: db.taxi_driver_id ?? undefined,
+    taxiVehicleId: db.taxi_vehicle_id ?? undefined,
     driverName: db.driver_name ?? undefined,
     driverPhone: db.driver_phone ?? undefined,
     vanNumberPlate: db.van_number_plate ?? undefined,
@@ -70,6 +72,8 @@ function frontendToDb(t: Partial<TaxiTransfer>): Record<string, any> {
   if (t.returnDropoff !== undefined) db.return_dropoff = t.returnDropoff || null;
   if (t.returnDropoffUrl !== undefined) db.return_dropoff_url = t.returnDropoffUrl || null;
   if (t.taxiCompanyId !== undefined) db.taxi_company_id = t.taxiCompanyId || null;
+  if (t.taxiDriverId !== undefined) db.taxi_driver_id = t.taxiDriverId || null;
+  if (t.taxiVehicleId !== undefined) db.taxi_vehicle_id = t.taxiVehicleId || null;
   if (t.driverName !== undefined) db.driver_name = t.driverName || null;
   if (t.driverPhone !== undefined) db.driver_phone = t.driverPhone || null;
   if (t.vanNumberPlate !== undefined) db.van_number_plate = t.vanNumberPlate || null;

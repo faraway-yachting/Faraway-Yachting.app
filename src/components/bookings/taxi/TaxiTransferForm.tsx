@@ -14,7 +14,7 @@ import {
 import { Booking } from '@/data/booking/types';
 import { taxiTransfersApi, createTransferWithNumber } from '@/lib/supabase/api/taxiTransfers';
 import { bookingsApi } from '@/lib/supabase/api/bookings';
-import { useTaxiCompanies, useTaxiGuestNoteTemplates } from '@/hooks/queries/useTaxiTransfers';
+import { useTaxiCompanies, useTaxiGuestNoteTemplates, useTaxiDriversByCompany, useTaxiVehiclesByCompany } from '@/hooks/queries/useTaxiTransfers';
 import { useYachtProjects } from '@/hooks/queries/useProjects';
 import { useAuth } from '@/components/auth';
 
@@ -62,9 +62,15 @@ export function TaxiTransferForm({ transfer, bookingId, onClose }: TaxiTransferF
 
   // Company & driver
   const [taxiCompanyId, setTaxiCompanyId] = useState(transfer?.taxiCompanyId || '');
+  const [taxiDriverId, setTaxiDriverId] = useState(transfer?.taxiDriverId || '');
+  const [taxiVehicleId, setTaxiVehicleId] = useState(transfer?.taxiVehicleId || '');
   const [driverName, setDriverName] = useState(transfer?.driverName || '');
   const [driverPhone, setDriverPhone] = useState(transfer?.driverPhone || '');
   const [vanNumberPlate, setVanNumberPlate] = useState(transfer?.vanNumberPlate || '');
+
+  // Fetch drivers/vehicles for selected company
+  const { data: companyDrivers = [] } = useTaxiDriversByCompany(taxiCompanyId || undefined);
+  const { data: companyVehicles = [] } = useTaxiVehiclesByCompany(taxiCompanyId || undefined);
 
   // Payment
   const [paidBy, setPaidBy] = useState<PaidBy>(transfer?.paidBy || 'guest');
@@ -193,6 +199,8 @@ export function TaxiTransferForm({ transfer, bookingId, onClose }: TaxiTransferF
         returnDropoff: returnDropoff || undefined,
         returnDropoffUrl: returnDropoffUrl || undefined,
         taxiCompanyId: taxiCompanyId || undefined,
+        taxiDriverId: taxiDriverId || undefined,
+        taxiVehicleId: taxiVehicleId || undefined,
         driverName: driverName || undefined,
         driverPhone: driverPhone || undefined,
         vanNumberPlate: vanNumberPlate || undefined,
@@ -595,7 +603,15 @@ export function TaxiTransferForm({ transfer, bookingId, onClose }: TaxiTransferF
                 <label className="block text-sm font-medium text-gray-700 mb-1">Taxi Company</label>
                 <select
                   value={taxiCompanyId}
-                  onChange={(e) => setTaxiCompanyId(e.target.value)}
+                  onChange={(e) => {
+                    setTaxiCompanyId(e.target.value);
+                    // Reset driver/vehicle selections when company changes
+                    setTaxiDriverId('');
+                    setTaxiVehicleId('');
+                    setDriverName('');
+                    setDriverPhone('');
+                    setVanNumberPlate('');
+                  }}
                   disabled={!canEdit}
                   className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
                 >
@@ -605,12 +621,50 @@ export function TaxiTransferForm({ transfer, bookingId, onClose }: TaxiTransferF
                   ))}
                 </select>
               </div>
+
+              {/* Driver dropdown */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Driver</label>
+                <select
+                  value={taxiDriverId || '__custom'}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    if (val === '__custom' || val === '') {
+                      setTaxiDriverId('');
+                      setDriverName('');
+                      setDriverPhone('');
+                    } else {
+                      setTaxiDriverId(val);
+                      const driver = companyDrivers.find(d => d.id === val);
+                      if (driver) {
+                        setDriverName(driver.name);
+                        setDriverPhone(driver.phone || '');
+                      }
+                    }
+                  }}
+                  disabled={!canEdit || !taxiCompanyId}
+                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
+                >
+                  {companyDrivers.length > 0 ? (
+                    <>
+                      <option value="">Select driver...</option>
+                      {companyDrivers.map(d => (
+                        <option key={d.id} value={d.id}>{d.name}{d.phone ? ` (${d.phone})` : ''}</option>
+                      ))}
+                      <option value="__custom">-- Type custom --</option>
+                    </>
+                  ) : (
+                    <option value="__custom">{taxiCompanyId ? 'No drivers — type below' : 'Select a company first'}</option>
+                  )}
+                </select>
+              </div>
+
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Driver Name</label>
                 <input
                   type="text"
                   value={driverName}
-                  onChange={(e) => setDriverName(e.target.value)}
+                  onChange={(e) => { setDriverName(e.target.value); if (taxiDriverId) setTaxiDriverId(''); }}
                   disabled={!canEdit}
                   placeholder="Assigned by taxi company"
                   className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
@@ -621,18 +675,53 @@ export function TaxiTransferForm({ transfer, bookingId, onClose }: TaxiTransferF
                 <input
                   type="text"
                   value={driverPhone}
-                  onChange={(e) => setDriverPhone(e.target.value)}
+                  onChange={(e) => { setDriverPhone(e.target.value); if (taxiDriverId) setTaxiDriverId(''); }}
                   disabled={!canEdit}
                   placeholder="Driver phone number"
                   className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
                 />
+              </div>
+
+              {/* Vehicle dropdown */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Vehicle</label>
+                <select
+                  value={taxiVehicleId || '__custom'}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    if (val === '__custom' || val === '') {
+                      setTaxiVehicleId('');
+                      setVanNumberPlate('');
+                    } else {
+                      setTaxiVehicleId(val);
+                      const vehicle = companyVehicles.find(v => v.id === val);
+                      if (vehicle) {
+                        setVanNumberPlate(vehicle.plateNumber);
+                      }
+                    }
+                  }}
+                  disabled={!canEdit || !taxiCompanyId}
+                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
+                >
+                  {companyVehicles.length > 0 ? (
+                    <>
+                      <option value="">Select vehicle...</option>
+                      {companyVehicles.map(v => (
+                        <option key={v.id} value={v.id}>{v.plateNumber}{v.description ? ` — ${v.description}` : ''}</option>
+                      ))}
+                      <option value="__custom">-- Type custom --</option>
+                    </>
+                  ) : (
+                    <option value="__custom">{taxiCompanyId ? 'No vehicles — type below' : 'Select a company first'}</option>
+                  )}
+                </select>
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Van Number Plate</label>
                 <input
                   type="text"
                   value={vanNumberPlate}
-                  onChange={(e) => setVanNumberPlate(e.target.value)}
+                  onChange={(e) => { setVanNumberPlate(e.target.value); if (taxiVehicleId) setTaxiVehicleId(''); }}
                   disabled={!canEdit}
                   placeholder="e.g. กข 1234"
                   className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"

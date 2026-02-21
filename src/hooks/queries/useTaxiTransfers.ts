@@ -1,6 +1,8 @@
 import { useQuery } from '@tanstack/react-query';
 import { taxiTransfersApi } from '@/lib/supabase/api/taxiTransfers';
 import { taxiCompaniesApi } from '@/lib/supabase/api/taxiCompanies';
+import { taxiDriversApi } from '@/lib/supabase/api/taxiDrivers';
+import { taxiVehiclesApi } from '@/lib/supabase/api/taxiVehicles';
 import { taxiGuestNoteTemplatesApi } from '@/lib/supabase/api/taxiGuestNoteTemplates';
 
 export function useAllTaxiTransfers() {
@@ -57,6 +59,42 @@ export function useTaxiGuestNoteTemplates() {
   return useQuery({
     queryKey: ['taxiGuestNoteTemplates'],
     queryFn: () => taxiGuestNoteTemplatesApi.getActive(),
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+export function useTaxiDriversByCompany(companyId: string | undefined) {
+  return useQuery({
+    queryKey: ['taxiDrivers', companyId],
+    queryFn: () => taxiDriversApi.getActiveByCompanyId(companyId!),
+    enabled: !!companyId,
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+export function useAllTaxiDriversByCompany(companyId: string | undefined) {
+  return useQuery({
+    queryKey: ['taxiDrivers', 'all', companyId],
+    queryFn: () => taxiDriversApi.getByCompanyId(companyId!),
+    enabled: !!companyId,
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+export function useTaxiVehiclesByCompany(companyId: string | undefined) {
+  return useQuery({
+    queryKey: ['taxiVehicles', companyId],
+    queryFn: () => taxiVehiclesApi.getActiveByCompanyId(companyId!),
+    enabled: !!companyId,
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+export function useAllTaxiVehiclesByCompany(companyId: string | undefined) {
+  return useQuery({
+    queryKey: ['taxiVehicles', 'all', companyId],
+    queryFn: () => taxiVehiclesApi.getByCompanyId(companyId!),
+    enabled: !!companyId,
     staleTime: 5 * 60 * 1000,
   });
 }

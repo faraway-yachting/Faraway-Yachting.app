@@ -28,8 +28,13 @@ interface PublicTransfer {
   driverName?: string;
   driverPhone?: string;
   vanNumberPlate?: string;
+  taxiDriverId?: string;
+  taxiVehicleId?: string;
   driverNote?: string;
 }
+
+interface CompanyDriver { id: string; name: string; phone?: string; }
+interface CompanyVehicle { id: string; plateNumber: string; description?: string; }
 
 const statusLabels: Record<string, string> = {
   pending: 'Pending',
@@ -51,11 +56,15 @@ export default function PublicTaxiSchedulePage() {
 
   const [transfers, setTransfers] = useState<PublicTransfer[]>([]);
   const [companyName, setCompanyName] = useState('');
+  const [drivers, setDrivers] = useState<CompanyDriver[]>([]);
+  const [vehicles, setVehicles] = useState<CompanyVehicle[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
   // Driver assignment form state
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [selectedDriverId, setSelectedDriverId] = useState('');
+  const [selectedVehicleId, setSelectedVehicleId] = useState('');
   const [driverName, setDriverName] = useState('');
   const [driverPhone, setDriverPhone] = useState('');
   const [vanNumberPlate, setVanNumberPlate] = useState('');
@@ -73,6 +82,8 @@ export default function PublicTaxiSchedulePage() {
       const data = await res.json();
       setTransfers(data.transfers || []);
       setCompanyName(data.companyName || '');
+      setDrivers(data.drivers || []);
+      setVehicles(data.vehicles || []);
     } catch {
       setError('Failed to load schedule');
     } finally {
@@ -84,6 +95,8 @@ export default function PublicTaxiSchedulePage() {
 
   const startDriverAssignment = (transfer: PublicTransfer) => {
     setEditingId(transfer.id);
+    setSelectedDriverId(transfer.taxiDriverId || '');
+    setSelectedVehicleId(transfer.taxiVehicleId || '');
     setDriverName(transfer.driverName || '');
     setDriverPhone(transfer.driverPhone || '');
     setVanNumberPlate(transfer.vanNumberPlate || '');
@@ -95,7 +108,7 @@ export default function PublicTaxiSchedulePage() {
       const res = await fetch(`/api/public/taxi/${token}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ transferId, driverName, driverPhone, vanNumberPlate }),
+        body: JSON.stringify({ transferId, driverName, driverPhone, vanNumberPlate, taxiDriverId: selectedDriverId || undefined, taxiVehicleId: selectedVehicleId || undefined }),
       });
       if (res.ok) {
         setSubmitSuccess(transferId);
@@ -299,25 +312,73 @@ export default function PublicTaxiSchedulePage() {
                   ) : editingId === transfer.id ? (
                     <div className="bg-yellow-50 rounded-lg p-3 space-y-3">
                       <p className="text-xs font-semibold text-yellow-700 uppercase">Assign Driver</p>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        {/* Driver dropdown */}
+                        {drivers.length > 0 && (
+                          <select
+                            value={selectedDriverId || '__custom'}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              if (val === '__custom' || val === '') {
+                                setSelectedDriverId('');
+                              } else {
+                                setSelectedDriverId(val);
+                                const d = drivers.find(dr => dr.id === val);
+                                if (d) { setDriverName(d.name); setDriverPhone(d.phone || ''); }
+                              }
+                            }}
+                            className="px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
+                          >
+                            <option value="">Select driver...</option>
+                            {drivers.map(d => (
+                              <option key={d.id} value={d.id}>{d.name}{d.phone ? ` (${d.phone})` : ''}</option>
+                            ))}
+                            <option value="__custom">-- Type custom --</option>
+                          </select>
+                        )}
+                        {/* Vehicle dropdown */}
+                        {vehicles.length > 0 && (
+                          <select
+                            value={selectedVehicleId || '__custom'}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              if (val === '__custom' || val === '') {
+                                setSelectedVehicleId('');
+                              } else {
+                                setSelectedVehicleId(val);
+                                const v = vehicles.find(vh => vh.id === val);
+                                if (v) setVanNumberPlate(v.plateNumber);
+                              }
+                            }}
+                            className="px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
+                          >
+                            <option value="">Select vehicle...</option>
+                            {vehicles.map(v => (
+                              <option key={v.id} value={v.id}>{v.plateNumber}{v.description ? ` — ${v.description}` : ''}</option>
+                            ))}
+                            <option value="__custom">-- Type custom --</option>
+                          </select>
+                        )}
+                      </div>
                       <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                         <input
                           type="text"
                           value={driverName}
-                          onChange={(e) => setDriverName(e.target.value)}
+                          onChange={(e) => { setDriverName(e.target.value); if (selectedDriverId) setSelectedDriverId(''); }}
                           placeholder="Driver name"
                           className="px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
                         />
                         <input
                           type="text"
                           value={driverPhone}
-                          onChange={(e) => setDriverPhone(e.target.value)}
+                          onChange={(e) => { setDriverPhone(e.target.value); if (selectedDriverId) setSelectedDriverId(''); }}
                           placeholder="Phone number"
                           className="px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
                         />
                         <input
                           type="text"
                           value={vanNumberPlate}
-                          onChange={(e) => setVanNumberPlate(e.target.value)}
+                          onChange={(e) => { setVanNumberPlate(e.target.value); if (selectedVehicleId) setSelectedVehicleId(''); }}
                           placeholder="Van number plate"
                           className="px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
                         />

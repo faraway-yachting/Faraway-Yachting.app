@@ -1,12 +1,227 @@
 'use client';
 
 import { useState } from 'react';
-import { X, Plus, Edit2, Trash2, Link2, Copy, Check } from 'lucide-react';
-import { TaxiCompany, TaxiPublicLink } from '@/data/taxi/types';
+import { X, Plus, Edit2, Trash2, Link2, Copy, Check, ChevronDown, ChevronRight, Car, User } from 'lucide-react';
+import { TaxiCompany, TaxiPublicLink, TaxiDriver, TaxiVehicle } from '@/data/taxi/types';
 import { taxiCompaniesApi } from '@/lib/supabase/api/taxiCompanies';
 import { taxiPublicLinksApi } from '@/lib/supabase/api/taxiPublicLinks';
-import { useAllTaxiCompanies } from '@/hooks/queries/useTaxiTransfers';
+import { taxiDriversApi } from '@/lib/supabase/api/taxiDrivers';
+import { taxiVehiclesApi } from '@/lib/supabase/api/taxiVehicles';
+import { useAllTaxiCompanies, useAllTaxiDriversByCompany, useAllTaxiVehiclesByCompany } from '@/hooks/queries/useTaxiTransfers';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+
+// ── Drivers & Vehicles sub-component ──
+function CompanyDriversVehicles({ companyId }: { companyId: string }) {
+  const queryClient = useQueryClient();
+  const { data: drivers = [] } = useAllTaxiDriversByCompany(companyId);
+  const { data: vehicles = [] } = useAllTaxiVehiclesByCompany(companyId);
+
+  // Driver form
+  const [showDriverForm, setShowDriverForm] = useState(false);
+  const [editingDriverId, setEditingDriverId] = useState<string | null>(null);
+  const [driverName, setDriverName] = useState('');
+  const [driverPhone, setDriverPhone] = useState('');
+  const [driverNotes, setDriverNotes] = useState('');
+  const [savingDriver, setSavingDriver] = useState(false);
+
+  // Vehicle form
+  const [showVehicleForm, setShowVehicleForm] = useState(false);
+  const [editingVehicleId, setEditingVehicleId] = useState<string | null>(null);
+  const [plateNumber, setPlateNumber] = useState('');
+  const [vehicleDescription, setVehicleDescription] = useState('');
+  const [vehicleNotes, setVehicleNotes] = useState('');
+  const [savingVehicle, setSavingVehicle] = useState(false);
+
+  const resetDriverForm = () => { setDriverName(''); setDriverPhone(''); setDriverNotes(''); setEditingDriverId(null); setShowDriverForm(false); };
+  const resetVehicleForm = () => { setPlateNumber(''); setVehicleDescription(''); setVehicleNotes(''); setEditingVehicleId(null); setShowVehicleForm(false); };
+
+  const startEditDriver = (d: TaxiDriver) => {
+    setEditingDriverId(d.id); setDriverName(d.name); setDriverPhone(d.phone || ''); setDriverNotes(d.notes || ''); setShowDriverForm(true);
+  };
+  const startEditVehicle = (v: TaxiVehicle) => {
+    setEditingVehicleId(v.id); setPlateNumber(v.plateNumber); setVehicleDescription(v.description || ''); setVehicleNotes(v.notes || ''); setShowVehicleForm(true);
+  };
+
+  const handleSaveDriver = async () => {
+    if (!driverName.trim()) return;
+    setSavingDriver(true);
+    try {
+      if (editingDriverId) {
+        await taxiDriversApi.update(editingDriverId, { name: driverName, phone: driverPhone, notes: driverNotes });
+      } else {
+        await taxiDriversApi.create({ taxiCompanyId: companyId, name: driverName, phone: driverPhone, notes: driverNotes });
+      }
+      queryClient.invalidateQueries({ queryKey: ['taxiDrivers'] });
+      resetDriverForm();
+    } finally { setSavingDriver(false); }
+  };
+
+  const handleSaveVehicle = async () => {
+    if (!plateNumber.trim()) return;
+    setSavingVehicle(true);
+    try {
+      if (editingVehicleId) {
+        await taxiVehiclesApi.update(editingVehicleId, { plateNumber, description: vehicleDescription, notes: vehicleNotes });
+      } else {
+        await taxiVehiclesApi.create({ taxiCompanyId: companyId, plateNumber, description: vehicleDescription, notes: vehicleNotes });
+      }
+      queryClient.invalidateQueries({ queryKey: ['taxiVehicles'] });
+      resetVehicleForm();
+    } finally { setSavingVehicle(false); }
+  };
+
+  const handleDeleteDriver = async (id: string) => {
+    if (!confirm('Delete this driver?')) return;
+    await taxiDriversApi.delete(id);
+    queryClient.invalidateQueries({ queryKey: ['taxiDrivers'] });
+  };
+
+  const handleDeleteVehicle = async (id: string) => {
+    if (!confirm('Delete this vehicle?')) return;
+    await taxiVehiclesApi.delete(id);
+    queryClient.invalidateQueries({ queryKey: ['taxiVehicles'] });
+  };
+
+  const handleToggleDriverActive = async (d: TaxiDriver) => {
+    await taxiDriversApi.update(d.id, { isActive: !d.isActive });
+    queryClient.invalidateQueries({ queryKey: ['taxiDrivers'] });
+  };
+
+  const handleToggleVehicleActive = async (v: TaxiVehicle) => {
+    await taxiVehiclesApi.update(v.id, { isActive: !v.isActive });
+    queryClient.invalidateQueries({ queryKey: ['taxiVehicles'] });
+  };
+
+  const inputClass = 'w-full px-2 py-1 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500';
+
+  return (
+    <div className="mt-3 space-y-4">
+      {/* ── Drivers ── */}
+      <div>
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-xs font-semibold text-gray-600 uppercase tracking-wider flex items-center gap-1">
+            <User className="h-3.5 w-3.5" /> Drivers
+          </span>
+          {!showDriverForm && (
+            <button onClick={() => { resetDriverForm(); setShowDriverForm(true); }} className="text-xs text-blue-600 hover:text-blue-800 flex items-center gap-1">
+              <Plus className="h-3 w-3" /> Add
+            </button>
+          )}
+        </div>
+
+        {showDriverForm && (
+          <div className="mb-2 p-3 border border-gray-200 rounded-lg bg-gray-50">
+            <div className="grid grid-cols-3 gap-2">
+              <div>
+                <label className="block text-xs text-gray-500 mb-0.5">Name *</label>
+                <input type="text" value={driverName} onChange={(e) => setDriverName(e.target.value)} className={inputClass} />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-0.5">Phone</label>
+                <input type="text" value={driverPhone} onChange={(e) => setDriverPhone(e.target.value)} className={inputClass} />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-0.5">Notes</label>
+                <input type="text" value={driverNotes} onChange={(e) => setDriverNotes(e.target.value)} className={inputClass} />
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 mt-2">
+              <button onClick={resetDriverForm} className="px-2 py-1 text-xs text-gray-600 hover:text-gray-800">Cancel</button>
+              <button onClick={handleSaveDriver} disabled={savingDriver || !driverName.trim()} className="px-2 py-1 text-xs font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 disabled:opacity-50">
+                {savingDriver ? 'Saving...' : editingDriverId ? 'Update' : 'Add'}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {drivers.length === 0 ? (
+          <p className="text-xs text-gray-400 italic">No drivers yet</p>
+        ) : (
+          <div className="space-y-1">
+            {drivers.map((d) => (
+              <div key={d.id} className={`flex items-center justify-between py-1.5 px-2 rounded text-sm ${d.isActive ? '' : 'opacity-50'}`}>
+                <div className="flex items-center gap-3">
+                  <span className="font-medium text-gray-800">{d.name}</span>
+                  {d.phone && <span className="text-xs text-gray-500">{d.phone}</span>}
+                  {d.notes && <span className="text-xs text-gray-400 italic">{d.notes}</span>}
+                </div>
+                <div className="flex items-center gap-1">
+                  <button onClick={() => startEditDriver(d)} className="p-1 text-gray-400 hover:text-gray-600"><Edit2 className="h-3 w-3" /></button>
+                  <button onClick={() => handleToggleDriverActive(d)} className={`px-1.5 py-0.5 text-[10px] rounded ${d.isActive ? 'text-green-700 bg-green-50' : 'text-gray-500 bg-gray-100'}`}>
+                    {d.isActive ? 'Active' : 'Inactive'}
+                  </button>
+                  <button onClick={() => handleDeleteDriver(d.id)} className="p-1 text-red-400 hover:text-red-600"><Trash2 className="h-3 w-3" /></button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* ── Vehicles ── */}
+      <div>
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-xs font-semibold text-gray-600 uppercase tracking-wider flex items-center gap-1">
+            <Car className="h-3.5 w-3.5" /> Vehicles
+          </span>
+          {!showVehicleForm && (
+            <button onClick={() => { resetVehicleForm(); setShowVehicleForm(true); }} className="text-xs text-blue-600 hover:text-blue-800 flex items-center gap-1">
+              <Plus className="h-3 w-3" /> Add
+            </button>
+          )}
+        </div>
+
+        {showVehicleForm && (
+          <div className="mb-2 p-3 border border-gray-200 rounded-lg bg-gray-50">
+            <div className="grid grid-cols-3 gap-2">
+              <div>
+                <label className="block text-xs text-gray-500 mb-0.5">Plate Number *</label>
+                <input type="text" value={plateNumber} onChange={(e) => setPlateNumber(e.target.value)} className={inputClass} />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-0.5">Description</label>
+                <input type="text" value={vehicleDescription} onChange={(e) => setVehicleDescription(e.target.value)} placeholder="e.g. Toyota Commuter" className={inputClass} />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-0.5">Notes</label>
+                <input type="text" value={vehicleNotes} onChange={(e) => setVehicleNotes(e.target.value)} className={inputClass} />
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 mt-2">
+              <button onClick={resetVehicleForm} className="px-2 py-1 text-xs text-gray-600 hover:text-gray-800">Cancel</button>
+              <button onClick={handleSaveVehicle} disabled={savingVehicle || !plateNumber.trim()} className="px-2 py-1 text-xs font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 disabled:opacity-50">
+                {savingVehicle ? 'Saving...' : editingVehicleId ? 'Update' : 'Add'}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {vehicles.length === 0 ? (
+          <p className="text-xs text-gray-400 italic">No vehicles yet</p>
+        ) : (
+          <div className="space-y-1">
+            {vehicles.map((v) => (
+              <div key={v.id} className={`flex items-center justify-between py-1.5 px-2 rounded text-sm ${v.isActive ? '' : 'opacity-50'}`}>
+                <div className="flex items-center gap-3">
+                  <span className="font-medium text-gray-800">{v.plateNumber}</span>
+                  {v.description && <span className="text-xs text-gray-500">{v.description}</span>}
+                  {v.notes && <span className="text-xs text-gray-400 italic">{v.notes}</span>}
+                </div>
+                <div className="flex items-center gap-1">
+                  <button onClick={() => startEditVehicle(v)} className="p-1 text-gray-400 hover:text-gray-600"><Edit2 className="h-3 w-3" /></button>
+                  <button onClick={() => handleToggleVehicleActive(v)} className={`px-1.5 py-0.5 text-[10px] rounded ${v.isActive ? 'text-green-700 bg-green-50' : 'text-gray-500 bg-gray-100'}`}>
+                    {v.isActive ? 'Active' : 'Inactive'}
+                  </button>
+                  <button onClick={() => handleDeleteVehicle(v.id)} className="p-1 text-red-400 hover:text-red-600"><Trash2 className="h-3 w-3" /></button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 
 interface TaxiCompanyManagerProps {
   onClose: () => void;
@@ -32,6 +247,7 @@ export function TaxiCompanyManager({ onClose }: TaxiCompanyManagerProps) {
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
   const [copiedLinkId, setCopiedLinkId] = useState<string | null>(null);
+  const [expandedCompanyId, setExpandedCompanyId] = useState<string | null>(null);
 
   const resetForm = () => {
     setName('');
@@ -107,7 +323,7 @@ export function TaxiCompanyManager({ onClose }: TaxiCompanyManagerProps) {
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[80vh] overflow-hidden flex flex-col">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-3xl max-h-[80vh] overflow-hidden flex flex-col">
         {/* Header */}
         <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between bg-gray-50">
           <h2 className="text-lg font-semibold text-gray-900">Taxi Companies</h2>
@@ -293,6 +509,22 @@ export function TaxiCompanyManager({ onClose }: TaxiCompanyManagerProps) {
                         </div>
                       ))}
                     </div>
+
+                    {/* Drivers & Vehicles expand toggle */}
+                    <div className="mt-3 pt-2 border-t border-gray-100">
+                      <button
+                        onClick={() => setExpandedCompanyId(expandedCompanyId === company.id ? null : company.id)}
+                        className="flex items-center gap-1.5 text-xs font-medium text-[#5A7A8F] hover:text-[#4a6a7f]"
+                      >
+                        {expandedCompanyId === company.id ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+                        Drivers & Vehicles
+                      </button>
+                    </div>
+
+                    {/* Drivers & Vehicles sections */}
+                    {expandedCompanyId === company.id && (
+                      <CompanyDriversVehicles companyId={company.id} />
+                    )}
                   </div>
                 );
               })}

@@ -59,6 +59,21 @@ export async function GET(
     .eq('id', link.taxi_company_id)
     .single();
 
+  // Fetch active drivers and vehicles for this company
+  const { data: drivers } = await supabase
+    .from('taxi_drivers')
+    .select('id, name, phone')
+    .eq('taxi_company_id', link.taxi_company_id)
+    .eq('is_active', true)
+    .order('name');
+
+  const { data: vehicles } = await supabase
+    .from('taxi_vehicles')
+    .select('id, plate_number, description')
+    .eq('taxi_company_id', link.taxi_company_id)
+    .eq('is_active', true)
+    .order('plate_number');
+
   return NextResponse.json({
     transfers: (transfers ?? []).map(t => ({
       id: t.id,
@@ -84,9 +99,13 @@ export async function GET(
       driverName: t.driver_name,
       driverPhone: t.driver_phone,
       vanNumberPlate: t.van_number_plate,
+      taxiDriverId: t.taxi_driver_id,
+      taxiVehicleId: t.taxi_vehicle_id,
       driverNote: t.driver_note,
     })),
     companyName: company?.name || link.label,
+    drivers: (drivers ?? []).map((d: any) => ({ id: d.id, name: d.name, phone: d.phone })),
+    vehicles: (vehicles ?? []).map((v: any) => ({ id: v.id, plateNumber: v.plate_number, description: v.description })),
   });
 }
 
@@ -125,7 +144,7 @@ export async function PATCH(
   }
 
   // Validate transfer belongs to this company
-  const { transferId, driverName, driverPhone, vanNumberPlate } = body;
+  const { transferId, driverName, driverPhone, vanNumberPlate, taxiDriverId, taxiVehicleId } = body;
   if (!transferId) {
     return NextResponse.json({ error: 'Transfer ID required' }, { status: 400 });
   }
@@ -147,6 +166,8 @@ export async function PATCH(
   if (driverName !== undefined) updates.driver_name = driverName;
   if (driverPhone !== undefined) updates.driver_phone = driverPhone;
   if (vanNumberPlate !== undefined) updates.van_number_plate = vanNumberPlate;
+  if (taxiDriverId !== undefined) updates.taxi_driver_id = taxiDriverId || null;
+  if (taxiVehicleId !== undefined) updates.taxi_vehicle_id = taxiVehicleId || null;
 
   // Auto-set status to 'assigned' if driver info is provided
   if (driverName && driverPhone) {

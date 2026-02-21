@@ -48,6 +48,8 @@ export interface TaxiTransfer {
   taxiCompanyName?: string; // joined from taxi_companies
 
   // Driver info (filled after taxi company confirms)
+  taxiDriverId?: string;
+  taxiVehicleId?: string;
   driverName?: string;
   driverPhone?: string;
   vanNumberPlate?: string;
@@ -103,6 +105,28 @@ export interface TaxiGuestNoteTemplate {
   contentTh?: string;
   isActive: boolean;
   sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TaxiDriver {
+  id: string;
+  taxiCompanyId: string;
+  name: string;
+  phone?: string;
+  notes?: string;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TaxiVehicle {
+  id: string;
+  taxiCompanyId: string;
+  plateNumber: string;
+  description?: string;
+  notes?: string;
+  isActive: boolean;
   createdAt: string;
   updatedAt: string;
 }
