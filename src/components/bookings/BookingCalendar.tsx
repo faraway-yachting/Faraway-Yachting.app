@@ -24,6 +24,7 @@ interface BookingCalendarProps {
   boatTabDisplayFields?: string[];
   cabinCounts?: Map<string, { total: number; booked: number }>;
   paymentTotals?: Map<string, number>;
+  taxiCounts?: Map<string, number>;
 }
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -75,6 +76,7 @@ export function BookingCalendar({
   boatTabDisplayFields = ['title'],
   cabinCounts,
   paymentTotals,
+  taxiCounts,
 }: BookingCalendarProps) {
   const [hoveredDate, setHoveredDate] = useState<string | null>(null);
 
@@ -108,7 +110,11 @@ export function BookingCalendar({
       case 'destination': return booking.destination || '';
       case 'numberOfGuests': return booking.numberOfGuests ? `${booking.numberOfGuests} guests` : '';
       case 'bookingOwner': return booking.bookingOwnerName || '';
-      case 'extras': return booking.extras?.length ? booking.extras.join(', ') : '';
+      case 'extras': {
+        const items = booking.extraItems;
+        if (!items?.length) return booking.extras?.length ? booking.extras.join(', ') : '';
+        return items.map(e => e.name).filter(Boolean).join(', ');
+      }
       case 'contractNote': return booking.contractNote || '';
       case 'meetAndGreeter': return booking.meetAndGreeter || '';
       case 'cabinSummary': {
@@ -124,6 +130,11 @@ export function BookingCalendar({
         const balance = total - paid;
         if (balance <= 0) return '';
         return `Balance: ${booking.currency || 'THB'} ${balance.toLocaleString()}`;
+      }
+      case 'taxi': {
+        const count = taxiCounts?.get(booking.id);
+        if (!count) return '';
+        return `🚕 ${count} taxi`;
       }
       default: return '';
     }

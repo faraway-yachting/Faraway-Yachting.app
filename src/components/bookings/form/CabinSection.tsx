@@ -48,6 +48,7 @@ import { ExchangeRateField } from '@/components/shared/ExchangeRateField';
 import { Currency } from '@/data/company/types';
 import { FxRateSource } from '@/data/exchangeRate/types';
 import { getExchangeRate, getTodayISO } from '@/lib/exchangeRate/service';
+import type { Project } from '@/data/project/types';
 
 interface AgencyContact {
   id: string;
@@ -73,6 +74,7 @@ interface CabinSectionProps {
   onCollectBalance?: (allocationId: string, remainingBalance: number) => void;
   onCreateInvoice?: (allocation: CabinAllocation) => void;
   onCreateReceipt?: (allocation: CabinAllocation) => void;
+  projects?: Project[];
   isCollapsed?: boolean;
   onToggleCollapse?: () => void;
 }
@@ -86,7 +88,13 @@ const paymentMethods = [
 ];
 
 // Commission base: THB charter fee (minus agency commission) + commissionable extras profit (converted if non-THB)
-function getThbCommissionBase(alloc: CabinAllocation, defaultCurrency: string): { charterBase: number; extrasBase: number; total: number } {
+function getThbCommissionBase(
+  alloc: CabinAllocation,
+  defaultCurrency: string,
+  projects?: Project[],
+  bookingProjectMfPct?: number,
+  bookingProjectOwnPct?: number,
+): { charterBase: number; extrasBase: number; adjustedExtrasBase: number; total: number } {
   const cabinCurrency = alloc.currency || defaultCurrency;
   const charterFee = alloc.charterFee || 0;
   const fxRate = alloc.fxRate || 0;
@@ -95,20 +103,39 @@ function getThbCommissionBase(alloc: CabinAllocation, defaultCurrency: string): 
   const agencyThb = alloc.agencyCommissionThb || 0;
   const charterBase = charterFeeThb - agencyThb;
 
-  // Extras: commissionable items profit in THB
+  // Helper: convert extra profit to THB
+  const extraProfitThb = (item: { sellingPrice?: number; cost?: number; currency?: string; fxRate?: number }): number => {
+    const profit = (item.sellingPrice || 0) - (item.cost || 0);
+    const itemCur = item.currency || cabinCurrency;
+    if (itemCur === 'THB') return profit;
+    if (item.fxRate) return profit * item.fxRate;
+    if (itemCur === cabinCurrency && fxRate) return profit * fxRate;
+    return profit;
+  };
+
+  // Extras: commissionable items profit in THB (raw)
   const extraItems = alloc.extraItems || [];
   const extrasBase = extraItems
     .filter(item => item.commissionable !== false)
+    .reduce((sum, item) => sum + extraProfitThb(item), 0);
+
+  // Ownership-adjusted extras base (per-item project lookup)
+  const mfPctDefault = bookingProjectMfPct || 0;
+  const ownPctDefault = bookingProjectOwnPct ?? 100;
+  const adjustedExtrasBase = extraItems
+    .filter(item => item.commissionable !== false)
     .reduce((sum, item) => {
-      const profit = (item.sellingPrice || 0) - (item.cost || 0);
-      const itemCur = item.currency || cabinCurrency;
-      if (itemCur === 'THB') return sum + profit;
-      if (item.fxRate) return sum + profit * item.fxRate;
-      if (itemCur === cabinCurrency && fxRate) return sum + profit * fxRate;
-      return sum + profit;
+      const profitThb = extraProfitThb(item);
+      const extraProject = item.projectId && projects ? projects.find(p => p.id === item.projectId) : null;
+      const mfPct = extraProject ? (extraProject.managementFeePercentage || 0) : mfPctDefault;
+      const ownPct = extraProject ? (extraProject.managementOwnershipPercentage ?? 100) : ownPctDefault;
+      if (ownPct === 100) return sum + profitThb;
+      const mf = Math.round(profitThb * mfPct) / 100;
+      const ni = profitThb - mf;
+      return sum + Math.round((mf + ni * ownPct / 100) * 100) / 100;
     }, 0);
 
-  return { charterBase, extrasBase, total: charterBase + extrasBase };
+  return { charterBase, extrasBase, adjustedExtrasBase, total: charterBase + adjustedExtrasBase };
 }
 
 // Default commission rate based on booking source type
@@ -134,6 +161,7 @@ export default function CabinSection({
   onCollectBalance,
   onCreateInvoice,
   onCreateReceipt,
+  projects,
   isCollapsed,
   onToggleCollapse,
 }: CabinSectionProps) {
@@ -410,8 +438,8 @@ export default function CabinSection({
     const alloc = cabinAllocations.find(a => a.id === allocationId);
     if (!alloc) return;
     const rate = rateStr === '' ? undefined : parseFloat(rateStr);
-    const { charterBase, extrasBase } = getThbCommissionBase(alloc, currency);
-    const adjustedBase = applyMfOwnership(charterBase) + extrasBase;
+    const { charterBase, adjustedExtrasBase } = getThbCommissionBase(alloc, currency, projects, managementFeePercentage, ownershipPercentage);
+    const adjustedBase = applyMfOwnership(charterBase) + adjustedExtrasBase;
     const total = Math.round(adjustedBase * (rate || 0)) / 100;
     const received = Math.round((total - (alloc.commissionDeduction || 0)) * 100) / 100;
     onAllocationsChange(
@@ -442,8 +470,8 @@ export default function CabinSection({
     const alloc = cabinAllocations.find(a => a.id === allocationId);
     if (!alloc) return;
     const deduction = deductStr === '' ? undefined : parseFloat(deductStr);
-    const { charterBase, extrasBase } = getThbCommissionBase(alloc, currency);
-    const adjustedBase = applyMfOwnership(charterBase) + extrasBase;
+    const { charterBase, adjustedExtrasBase } = getThbCommissionBase(alloc, currency, projects, managementFeePercentage, ownershipPercentage);
+    const adjustedBase = applyMfOwnership(charterBase) + adjustedExtrasBase;
     const autoTotal = Math.round(adjustedBase * (alloc.commissionRate || 0)) / 100;
     const received = Math.round(((alloc.totalCommission ?? autoTotal) - (deduction || 0)) * 100) / 100;
     onAllocationsChange(
@@ -469,8 +497,8 @@ export default function CabinSection({
     const thb = amount ? (cabinCurrency === 'THB' ? amount : Math.round(amount * fx * 100) / 100) : undefined;
     // Build updated allocation, then recalculate commission base from it
     const updated = { ...alloc, agencyCommissionRate: rate, agencyCommissionAmount: amount, agencyCommissionThb: thb };
-    const { charterBase, extrasBase } = getThbCommissionBase(updated, currency);
-    const adjustedBase = applyMfOwnership(charterBase) + extrasBase;
+    const { charterBase, adjustedExtrasBase } = getThbCommissionBase(updated, currency, projects, managementFeePercentage, ownershipPercentage);
+    const adjustedBase = applyMfOwnership(charterBase) + adjustedExtrasBase;
     const commRate = alloc.commissionRate || 0;
     const total = Math.round(adjustedBase * commRate) / 100;
     const received = Math.round((total - (alloc.commissionDeduction || 0)) * 100) / 100;
@@ -491,8 +519,8 @@ export default function CabinSection({
     const fx = alloc.fxRate || 0;
     const thb = amount ? (cabinCurrency === 'THB' ? amount : Math.round(amount * fx * 100) / 100) : undefined;
     const updated = { ...alloc, agencyCommissionAmount: amount, agencyCommissionThb: thb };
-    const { charterBase, extrasBase } = getThbCommissionBase(updated, currency);
-    const adjustedBase = applyMfOwnership(charterBase) + extrasBase;
+    const { charterBase, adjustedExtrasBase } = getThbCommissionBase(updated, currency, projects, managementFeePercentage, ownershipPercentage);
+    const adjustedBase = applyMfOwnership(charterBase) + adjustedExtrasBase;
     const commRate = alloc.commissionRate || 0;
     const total = Math.round(adjustedBase * commRate) / 100;
     const received = Math.round((total - (alloc.commissionDeduction || 0)) * 100) / 100;
@@ -548,7 +576,7 @@ export default function CabinSection({
         const fxRate = merged.fxRate || 0;
         const thbTotalPrice = cabinCurrency !== 'THB' && fxRate > 0 ? totalPrice * fxRate : (cabinCurrency === 'THB' ? totalPrice : undefined);
         // Recalculate commission if rate is set (uses charter fee + extras profit, adjusted for mf+ownership)
-        const { charterBase: cb, extrasBase: eb } = getThbCommissionBase(merged, currency);
+        const { charterBase: cb, adjustedExtrasBase: eb } = getThbCommissionBase(merged, currency, projects, managementFeePercentage, ownershipPercentage);
         const adjustedBase = applyMfOwnership(cb) + eb;
         const totalCommission = Math.round(adjustedBase * (merged.commissionRate || 0)) / 100;
         const commissionReceived = Math.round((totalCommission - (merged.commissionDeduction || 0)) * 100) / 100;
@@ -644,6 +672,7 @@ export default function CabinSection({
             onAddAgency={(agency) => setAgencies(prev => [...prev, agency])}
             managementFeePercentage={managementFeePercentage}
             ownershipPercentage={ownershipPercentage}
+            projects={projects}
             onDelete={() => {
               onAllocationsChange(cabinAllocations.filter(a => a.id !== allocation.id));
               if (expandedCabinId === allocation.id) setExpandedCabinId(null);
@@ -833,6 +862,7 @@ interface CabinAllocationCardProps {
   onAddAgency?: (agency: AgencyContact) => void;
   managementFeePercentage?: number;
   ownershipPercentage?: number;
+  projects?: Project[];
 }
 
 function CabinAllocationCard({
@@ -874,6 +904,7 @@ function CabinAllocationCard({
   onAddAgency,
   managementFeePercentage,
   ownershipPercentage,
+  projects,
 }: CabinAllocationCardProps) {
   const contractFileRef = useRef<HTMLInputElement>(null);
   const internalFileRef = useRef<HTMLInputElement>(null);
@@ -1038,7 +1069,7 @@ function CabinAllocationCard({
   const cabinNetRevenueThb = cabinCharterFeeThb - (allocation.agencyCommissionThb || 0);
 
   // Commission auto-calc values (adjusted for management fee + ownership)
-  const { charterBase: commCharterBase, extrasBase: commExtrasBase } = getThbCommissionBase(allocation, currency);
+  const { charterBase: commCharterBase, adjustedExtrasBase: commAdjustedExtrasBase } = getThbCommissionBase(allocation, currency, projects, managementFeePercentage, ownershipPercentage);
   const adjustedCharterBase = (!managementFeePercentage && !ownershipPercentage) ? commCharterBase : (() => {
     const mfPct = managementFeePercentage || 0;
     const ownPct = ownershipPercentage ?? 100;
@@ -1046,7 +1077,7 @@ function CabinAllocationCard({
     const ni = commCharterBase - mf;
     return Math.round((mf + ni * ownPct / 100) * 100) / 100;
   })();
-  const adjustedCommBase = adjustedCharterBase + commExtrasBase;
+  const adjustedCommBase = adjustedCharterBase + commAdjustedExtrasBase;
   const defaultRate = getDefaultCommissionRate(allocation.bookingSourceType);
   const autoTotal = Math.round(adjustedCommBase * (allocation.commissionRate || 0)) / 100;
   const autoReceived = Math.round(((allocation.totalCommission ?? autoTotal) - (allocation.commissionDeduction || 0)) * 100) / 100;
@@ -1525,7 +1556,7 @@ function CabinAllocationCard({
                 onChange={(items) => {
                   // Update extraItems and recalculate commission (adjusted for mf+ownership)
                   const updated = { ...allocation, extraItems: items };
-                  const { charterBase: ecb, extrasBase: eeb } = getThbCommissionBase(updated, currency);
+                  const { charterBase: ecb, adjustedExtrasBase: eeb } = getThbCommissionBase(updated, currency, projects, managementFeePercentage, ownershipPercentage);
                   const eAdjusted = (() => {
                     if (!managementFeePercentage && !ownershipPercentage) return ecb;
                     const mfPct = managementFeePercentage || 0;
@@ -2007,7 +2038,7 @@ function CabinAllocationCard({
               </div>
 
               {/* Commission Breakdown */}
-              {(commCharterBase > 0 || commExtrasBase > 0) && (allocation.commissionRate || 0) > 0 && (
+              {(commCharterBase > 0 || commAdjustedExtrasBase > 0) && (allocation.commissionRate || 0) > 0 && (
                 <div className="text-sm bg-white/50 rounded-md p-2.5 mb-3 space-y-1">
                   {(allocation.currency || currency) !== 'THB' && (
                     <p className="text-xs text-teal-600 mb-1">Commission calculated in THB</p>
@@ -2016,10 +2047,10 @@ function CabinAllocationCard({
                     <span>{isAgencyCabin && agencyAmt > 0 ? 'Charter net revenue' : 'Charter fee'} ({commCharterBase.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})</span>
                     <span>{(adjustedCharterBase * (allocation.commissionRate || 0) / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                   </div>
-                  {commExtrasBase > 0 && (
+                  {commAdjustedExtrasBase > 0 && (
                     <div className="flex justify-between text-gray-600 text-xs">
-                      <span>Extras ({commExtrasBase.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})</span>
-                      <span>{(commExtrasBase * (allocation.commissionRate || 0) / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                      <span>Extras ({commAdjustedExtrasBase.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})</span>
+                      <span>{(commAdjustedExtrasBase * (allocation.commissionRate || 0) / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                     </div>
                   )}
                   {(managementFeePercentage || ownershipPercentage) && (ownershipPercentage ?? 100) < 100 && commCharterBase > 0 && (() => {

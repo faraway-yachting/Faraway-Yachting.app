@@ -1416,6 +1416,7 @@ export function BookingFormContainer({
               onRemoveContractAttachment={handleRemoveContractAttachment}
               cabinCharterMode={formData.type === 'cabin_charter'}
               projects={projects.map(p => ({ id: p.id, name: p.name }))}
+              bookingId={isEditing && booking?.id ? booking.id : undefined}
               isCollapsed={!!collapsedSections.bookingDetails}
               onToggleCollapse={() => toggleSection('bookingDetails')}
               isCompleted={!!(formData.completedSections || {}).bookingDetails}
@@ -1463,6 +1464,7 @@ export function BookingFormContainer({
                 canEdit={canEdit}
                 managementFeePercentage={projects.find(p => p.id === formData.projectId)?.managementFeePercentage}
                 ownershipPercentage={projects.find(p => p.id === formData.projectId)?.managementOwnershipPercentage}
+                projects={projects}
                 isCollapsed={!!collapsedSections.commission}
                 onToggleCollapse={() => toggleSection('commission')}
                 isCompleted={!!(formData.completedSections || {}).commission}
@@ -1493,6 +1495,7 @@ export function BookingFormContainer({
                 dateFrom={formData.dateFrom}
                 managementFeePercentage={projects.find(p => p.id === formData.projectId)?.managementFeePercentage}
                 ownershipPercentage={projects.find(p => p.id === formData.projectId)?.managementOwnershipPercentage}
+                projects={projects}
                 bankAccounts={bankAccounts}
                 companies={companies}
                 users={users}
@@ -1549,6 +1552,7 @@ export function BookingFormContainer({
                 onToggleCompleted={canEdit ? () => toggleSectionCompleted('customerNote') : undefined}
               />
             )}
+
           </div>
         </form>
 

@@ -3,6 +3,7 @@
 import { useEffect, useRef } from 'react';
 import { DollarSign, ChevronDown, CheckCircle2, Circle, Info } from 'lucide-react';
 import type { Booking } from '@/data/booking/types';
+import type { Project } from '@/data/project/types';
 
 interface CommissionSectionProps {
   formData: Partial<Booking>;
@@ -10,6 +11,7 @@ interface CommissionSectionProps {
   canEdit: boolean;
   managementFeePercentage?: number;
   ownershipPercentage?: number;
+  projects?: Project[];
   isCollapsed?: boolean;
   onToggleCollapse?: () => void;
   isCompleted?: boolean;
@@ -22,7 +24,7 @@ function getDefaultRate(type?: string, agentPlatform?: string): number {
   return 1; // Agency
 }
 
-export default function CommissionSection({ formData, onChange, canEdit, managementFeePercentage, ownershipPercentage, isCollapsed, onToggleCollapse, isCompleted, onToggleCompleted }: CommissionSectionProps) {
+export default function CommissionSection({ formData, onChange, canEdit, managementFeePercentage, ownershipPercentage, projects, isCollapsed, onToggleCollapse, isCompleted, onToggleCompleted }: CommissionSectionProps) {
   const isExternalBoat = !!formData.externalBoatName && !formData.projectId;
   const isAgencyBooking = !!formData.agentPlatform && formData.agentPlatform !== 'Direct';
 
@@ -49,17 +51,37 @@ export default function CommissionSection({ formData, onChange, canEdit, managem
 
   // Extras commission base — only commissionable items, commission on profit in THB
   const extraItems = formData.extraItems || [];
+  const bookingProjectMfPct = managementFeePercentage || 0;
+  const bookingProjectOwnPct = ownershipPercentage ?? 100;
+
+  // Helper: convert extra item profit to THB
+  const extraProfitThb = (item: typeof extraItems[number]): number => {
+    const profit = (item.sellingPrice || 0) - (item.cost || 0);
+    const itemCur = item.currency || bookingCurrency;
+    if (itemCur === 'THB') return profit;
+    if (item.fxRate) return profit * item.fxRate;
+    if (itemCur === bookingCurrency && fxRate) return profit * fxRate;
+    return profit;
+  };
+
+  // Raw extras profit (for display)
   const extrasCommissionBase = extraItems
     .filter(item => item.commissionable !== false)
+    .reduce((sum, item) => sum + extraProfitThb(item), 0);
+
+  // Ownership-adjusted extras base (per-item project lookup)
+  const adjustedExtrasBase = extraItems
+    .filter(item => item.commissionable !== false)
     .reduce((sum, item) => {
-      const profit = (item.sellingPrice || 0) - (item.cost || 0);
-      const itemCur = item.currency || bookingCurrency;
-      // Convert profit to THB
-      if (itemCur === 'THB') return sum + profit;
-      if (item.fxRate) return sum + profit * item.fxRate;
-      // Fallback: same as booking currency → use booking fxRate
-      if (itemCur === bookingCurrency && fxRate) return sum + profit * fxRate;
-      return sum + profit; // last resort, no conversion
+      const profitThb = extraProfitThb(item);
+      if (isExternalBoat) return sum + profitThb;
+      const extraProject = item.projectId && projects ? projects.find(p => p.id === item.projectId) : null;
+      const mfPct = extraProject ? (extraProject.managementFeePercentage || 0) : bookingProjectMfPct;
+      const ownPct = extraProject ? (extraProject.managementOwnershipPercentage ?? 100) : bookingProjectOwnPct;
+      if (ownPct === 100) return sum + profitThb;
+      const mf = Math.round(profitThb * mfPct) / 100;
+      const ni = profitThb - mf;
+      return sum + Math.round((mf + ni * ownPct / 100) * 100) / 100;
     }, 0);
 
   // Helper: compute commission base in THB from given agency amounts
@@ -77,12 +99,12 @@ export default function CommissionSection({ formData, onChange, canEdit, managem
       const costThb = costCurrency === 'THB' ? (formData.charterCost || 0) : 0;
       base = netRevThb - costThb;
     }
-    return Math.round(base * 100) / 100 + extrasCommissionBase;
+    return Math.round(base * 100) / 100 + adjustedExtrasBase;
   };
 
   // Combined commission base (charter + extras, in THB)
   const commissionBase = calcCommissionBase(agencyAmount, agencyCommThb);
-  const charterCommissionBase = commissionBase - extrasCommissionBase;
+  const charterCommissionBase = commissionBase - adjustedExtrasBase;
 
   // Apply management fee + ownership to charter portion (matches sync RPC formula)
   const applyMfOwnership = (charterBase: number): number => {
@@ -96,11 +118,11 @@ export default function CommissionSection({ formData, onChange, canEdit, managem
   };
 
   const adjustedCharterBase = applyMfOwnership(charterCommissionBase);
-  const adjustedCommissionBase = adjustedCharterBase + extrasCommissionBase;
+  const adjustedCommissionBase = adjustedCharterBase + adjustedExtrasBase;
 
   const rate = formData.commissionRate || 0;
   const charterCommission = adjustedCharterBase * rate / 100;
-  const extrasCommission = extrasCommissionBase * rate / 100;
+  const extrasCommission = adjustedExtrasBase * rate / 100;
   const autoTotalCommission = Math.round(adjustedCommissionBase * rate) / 100;
   const autoCommissionReceived = Math.round(((formData.totalCommission ?? autoTotalCommission) - (formData.commissionDeduction || 0)) * 100) / 100;
 
@@ -203,8 +225,8 @@ export default function CommissionSection({ formData, onChange, canEdit, managem
       : undefined;
     onChange('agencyCommissionThb', newThb);
     const newBase = calcCommissionBase(newAmount || 0, newThb || 0);
-    const newCharterBase = newBase - extrasCommissionBase;
-    const adjustedBase = applyMfOwnership(newCharterBase) + extrasCommissionBase;
+    const newCharterBase = newBase - adjustedExtrasBase;
+    const adjustedBase = applyMfOwnership(newCharterBase) + adjustedExtrasBase;
     if (rate > 0) {
       const newTotal = Math.round(adjustedBase * rate) / 100;
       onChange('totalCommission', Math.round(newTotal * 100) / 100);
@@ -231,8 +253,8 @@ export default function CommissionSection({ formData, onChange, canEdit, managem
       : undefined;
     onChange('agencyCommissionThb', newThb);
     const newBase = calcCommissionBase(newAmount || 0, newThb || 0);
-    const newCharterBase = newBase - extrasCommissionBase;
-    const adjustedBase = applyMfOwnership(newCharterBase) + extrasCommissionBase;
+    const newCharterBase = newBase - adjustedExtrasBase;
+    const adjustedBase = applyMfOwnership(newCharterBase) + adjustedExtrasBase;
     if (rate > 0) {
       const newTotal = Math.round(adjustedBase * rate) / 100;
       onChange('totalCommission', Math.round(newTotal * 100) / 100);
@@ -410,7 +432,7 @@ export default function CommissionSection({ formData, onChange, canEdit, managem
       </div>
 
       {/* Commission Breakdown — all values in THB */}
-      {(charterCommissionBase > 0 || extrasCommissionBase > 0) && (
+      {(charterCommissionBase > 0 || adjustedExtrasBase > 0) && (
         <div className="text-sm bg-white/50 rounded-md p-3 mb-3 space-y-1.5">
           {bookingCurrency !== 'THB' && (
             <p className="text-xs text-teal-600 mb-1">Commission calculated in THB</p>
@@ -419,9 +441,9 @@ export default function CommissionSection({ formData, onChange, canEdit, managem
             <span>{isAgencyBooking && agencyAmount > 0 ? 'Charter net revenue' : 'Charter fee'} ({fmtAmt(charterCommissionBase)}{bookingCurrency !== 'THB' ? ' THB' : ''})</span>
             <span>{fmtAmt(charterCommission)}</span>
           </div>
-          {extrasCommissionBase > 0 && (
+          {adjustedExtrasBase > 0 && (
             <div className="flex justify-between text-gray-600">
-              <span>Extras ({fmtAmt(extrasCommissionBase)}{bookingCurrency !== 'THB' ? ' THB' : ''})</span>
+              <span>Extras ({fmtAmt(adjustedExtrasBase)}{bookingCurrency !== 'THB' ? ' THB' : ''})</span>
               <span>{fmtAmt(extrasCommission)}</span>
             </div>
           )}

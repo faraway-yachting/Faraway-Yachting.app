@@ -16,6 +16,10 @@ import {
   Users,
   Anchor,
   Banknote,
+  Package,
+  Car,
+  ChevronDown,
+  ChevronRight,
 } from "lucide-react";
 
 export type BookingsRole = "admin" | "manager" | "agent" | "viewer" | "crew" | "investor";
@@ -25,13 +29,42 @@ interface BookingsAppShellProps {
   currentRole: BookingsRole;
 }
 
+// Menu item types supporting flat items and collapsible groups
+interface MenuItem {
+  name: string;
+  href: string;
+  icon: typeof Calendar;
+  menuKey: string;
+}
+
+interface MenuGroup {
+  groupName: string;
+  groupIcon: typeof Calendar;
+  menuKey: string;
+  children: MenuItem[];
+}
+
+type NavigationItem = MenuItem | MenuGroup;
+
+function isMenuGroup(item: NavigationItem): item is MenuGroup {
+  return 'children' in item;
+}
+
 // Define all available menu items with menu keys for database-driven visibility
-const allMenuItems = [
+const allMenuItems: NavigationItem[] = [
   { name: "Calendar", href: "/bookings/{role}/calendar", icon: Calendar, menuKey: "calendar" },
   { name: "Bookings List", href: "/bookings/{role}/list", icon: List, menuKey: "list" },
   { name: "Agencies", href: "/bookings/{role}/agencies", icon: Users, menuKey: "agencies" },
   { name: "Boat Register", href: "/bookings/{role}/boats", icon: Anchor, menuKey: "boats" },
   { name: "Agency Payments", href: "/bookings/{role}/agency-payments", icon: Banknote, menuKey: "agency_payments" },
+  {
+    groupName: "Extra",
+    groupIcon: Package,
+    menuKey: "extra",
+    children: [
+      { name: "Taxi", href: "/bookings/{role}/taxi", icon: Car, menuKey: "taxi" },
+    ],
+  },
   { name: "Settings", href: "/bookings/{role}/settings", icon: Settings, menuKey: "settings" },
 ];
 
@@ -47,6 +80,7 @@ const roleDisplayNames: Record<string, string> = {
 
 export function BookingsAppShell({ children, currentRole }: BookingsAppShellProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
   const pathname = usePathname();
 
   // Get auth context for real user data
@@ -56,18 +90,43 @@ export function BookingsAppShell({ children, currentRole }: BookingsAppShellProp
   const bookingsRole = getModuleRole('bookings');
   const roleName = isSuperAdmin ? "Super Admin" : (roleDisplayNames[bookingsRole || ''] || 'User');
 
+  const toggleGroup = (groupKey: string) => {
+    setExpandedGroups((prev) => ({ ...prev, [groupKey]: !prev[groupKey] }));
+  };
+
   // Filter menu items based on database menu visibility - memoized
   const navigation = useMemo(() => {
     return allMenuItems
       .filter((item) => {
         if (isSuperAdmin) return true;
+        if (isMenuGroup(item)) {
+          // Show group if at least one child is visible
+          return item.children.some((child) => isMenuVisible('bookings', child.menuKey));
+        }
         return isMenuVisible('bookings', item.menuKey);
       })
-      .map((item) => ({
-        ...item,
-        href: item.href.replace("{role}", currentRole),
-      }));
+      .map((item) => {
+        if (isMenuGroup(item)) {
+          return {
+            ...item,
+            children: item.children
+              .filter((child) => isSuperAdmin || isMenuVisible('bookings', child.menuKey))
+              .map((child) => ({ ...child, href: child.href.replace("{role}", currentRole) })),
+          };
+        }
+        return { ...item, href: (item as MenuItem).href.replace("{role}", currentRole) };
+      });
   }, [isSuperAdmin, isMenuVisible, currentRole]);
+
+  // Auto-expand groups when a child route is active
+  const isChildActive = (group: MenuGroup) =>
+    group.children.some((child) => {
+      const href = child.href.replace("{role}", currentRole);
+      return pathname === href || pathname.startsWith(href + '/');
+    });
+
+  const isGroupExpanded = (group: MenuGroup) =>
+    expandedGroups[group.menuKey] ?? isChildActive(group);
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -91,12 +150,60 @@ export function BookingsAppShell({ children, currentRole }: BookingsAppShellProp
           <div className="flex flex-1 flex-col overflow-y-auto pt-6 pb-4">
             <nav className="flex-1 space-y-2 px-4">
               {navigation.map((item) => {
-                const Icon = item.icon;
-                const isActive = pathname === item.href || pathname.startsWith(item.href + '/');
+                if (isMenuGroup(item)) {
+                  const GroupIcon = item.groupIcon;
+                  const expanded = isGroupExpanded(item);
+                  const groupActive = isChildActive(item);
+                  return (
+                    <div key={item.groupName}>
+                      <button
+                        onClick={() => toggleGroup(item.menuKey)}
+                        className={`w-full group flex items-center px-4 py-3 text-sm font-medium rounded-xl transition-all duration-200 ${
+                          groupActive
+                            ? "text-white bg-white/5"
+                            : "text-gray-300 hover:bg-white/10 hover:text-white"
+                        }`}
+                      >
+                        <GroupIcon className={`mr-3 h-5 w-5 flex-shrink-0 ${groupActive ? "text-white" : "text-gray-400 group-hover:text-white"}`} />
+                        {item.groupName}
+                        {expanded ? (
+                          <ChevronDown className="ml-auto h-4 w-4 text-gray-400" />
+                        ) : (
+                          <ChevronRight className="ml-auto h-4 w-4 text-gray-400" />
+                        )}
+                      </button>
+                      {expanded && (
+                        <div className="mt-1 ml-4 space-y-1">
+                          {item.children.map((child) => {
+                            const ChildIcon = child.icon;
+                            const isActive = pathname === child.href || pathname.startsWith(child.href + '/');
+                            return (
+                              <Link
+                                key={child.name}
+                                href={child.href}
+                                className={`group flex items-center px-4 py-2.5 text-sm font-medium rounded-xl transition-all duration-200 ${
+                                  isActive
+                                    ? "bg-gradient-to-r from-[#3b82f6] to-[#1d4ed8] text-white shadow-lg shadow-blue-500/30"
+                                    : "text-gray-300 hover:bg-white/10 hover:text-white"
+                                }`}
+                              >
+                                <ChildIcon className={`mr-3 h-4 w-4 flex-shrink-0 ${isActive ? "text-white" : "text-gray-400 group-hover:text-white"}`} />
+                                {child.name}
+                              </Link>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  );
+                }
+                const menuItem = item as MenuItem;
+                const Icon = menuItem.icon;
+                const isActive = pathname === menuItem.href || pathname.startsWith(menuItem.href + '/');
                 return (
                   <Link
-                    key={item.name}
-                    href={item.href}
+                    key={menuItem.name}
+                    href={menuItem.href}
                     className={`group flex items-center px-4 py-3 text-sm font-medium rounded-xl transition-all duration-200 ${
                       isActive
                         ? "bg-gradient-to-r from-[#3b82f6] to-[#1d4ed8] text-white shadow-lg shadow-blue-500/30"
@@ -108,7 +215,7 @@ export function BookingsAppShell({ children, currentRole }: BookingsAppShellProp
                         isActive ? "text-white" : "text-gray-400 group-hover:text-white"
                       }`}
                     />
-                    {item.name}
+                    {menuItem.name}
                   </Link>
                 );
               })}
@@ -163,12 +270,62 @@ export function BookingsAppShell({ children, currentRole }: BookingsAppShellProp
                     <li>
                       <ul role="list" className="space-y-2">
                         {navigation.map((item) => {
-                          const Icon = item.icon;
-                          const isActive = pathname === item.href || pathname.startsWith(item.href + '/');
+                          if (isMenuGroup(item)) {
+                            const GroupIcon = item.groupIcon;
+                            const expanded = isGroupExpanded(item);
+                            const groupActive = isChildActive(item);
+                            return (
+                              <li key={item.groupName}>
+                                <button
+                                  onClick={() => toggleGroup(item.menuKey)}
+                                  className={`w-full group flex items-center gap-x-3 rounded-xl px-4 py-3 text-sm font-medium transition-all duration-200 ${
+                                    groupActive
+                                      ? "text-white bg-white/5"
+                                      : "text-gray-300 hover:bg-white/10 hover:text-white"
+                                  }`}
+                                >
+                                  <GroupIcon className="h-5 w-5 shrink-0" />
+                                  {item.groupName}
+                                  {expanded ? (
+                                    <ChevronDown className="ml-auto h-4 w-4 text-gray-400" />
+                                  ) : (
+                                    <ChevronRight className="ml-auto h-4 w-4 text-gray-400" />
+                                  )}
+                                </button>
+                                {expanded && (
+                                  <ul className="mt-1 ml-4 space-y-1">
+                                    {item.children.map((child) => {
+                                      const ChildIcon = child.icon;
+                                      const isActive = pathname === child.href || pathname.startsWith(child.href + '/');
+                                      return (
+                                        <li key={child.name}>
+                                          <Link
+                                            href={child.href}
+                                            onClick={() => setSidebarOpen(false)}
+                                            className={`group flex items-center gap-x-3 rounded-xl px-4 py-2.5 text-sm font-medium transition-all duration-200 ${
+                                              isActive
+                                                ? "bg-gradient-to-r from-[#3b82f6] to-[#1d4ed8] text-white shadow-lg shadow-blue-500/30"
+                                                : "text-gray-300 hover:bg-white/10 hover:text-white"
+                                            }`}
+                                          >
+                                            <ChildIcon className="h-4 w-4 shrink-0" />
+                                            {child.name}
+                                          </Link>
+                                        </li>
+                                      );
+                                    })}
+                                  </ul>
+                                )}
+                              </li>
+                            );
+                          }
+                          const menuItem = item as MenuItem;
+                          const Icon = menuItem.icon;
+                          const isActive = pathname === menuItem.href || pathname.startsWith(menuItem.href + '/');
                           return (
-                            <li key={item.name}>
+                            <li key={menuItem.name}>
                               <Link
-                                href={item.href}
+                                href={menuItem.href}
                                 onClick={() => setSidebarOpen(false)}
                                 className={`group flex items-center gap-x-3 rounded-xl px-4 py-3 text-sm font-medium transition-all duration-200 ${
                                   isActive
@@ -177,7 +334,7 @@ export function BookingsAppShell({ children, currentRole }: BookingsAppShellProp
                                 }`}
                               >
                                 <Icon className="h-5 w-5 shrink-0" />
-                                {item.name}
+                                {menuItem.name}
                               </Link>
                             </li>
                           );

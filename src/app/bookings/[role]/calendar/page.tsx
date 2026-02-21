@@ -13,6 +13,7 @@ import { Currency } from '@/data/company/types';
 import { bookingsApi, createBookingWithNumber } from '@/lib/supabase/api/bookings';
 import { cabinAllocationsApi } from '@/lib/supabase/api/cabinAllocations';
 import { bookingPaymentsApi } from '@/lib/supabase/api/bookingPayments';
+import { taxiTransfersApi } from '@/lib/supabase/api/taxiTransfers';
 import { projectCabinsApi } from '@/lib/supabase/api/projectCabins';
 import { yachtProductsApi } from '@/lib/supabase/api/yachtProducts';
 import { useYachtProjects } from '@/hooks/queries/useProjects';
@@ -78,6 +79,16 @@ export default function BookingCalendarPage() {
     if (ids.length === 0) return;
     bookingPaymentsApi.getPaidTotalsByBookingIds(ids)
       .then(setPaymentTotals)
+      .catch(() => {});
+  }, [bookings]);
+
+  // Load taxi transfer counts per booking
+  const [taxiCounts, setTaxiCounts] = useState<Map<string, number>>(new Map());
+  useEffect(() => {
+    const ids = bookings.map(b => b.id);
+    if (ids.length === 0) return;
+    taxiTransfersApi.getTaxiCountsByBookingIds(ids)
+      .then(setTaxiCounts)
       .catch(() => {});
   }, [bookings]);
 
@@ -424,6 +435,7 @@ export default function BookingCalendarPage() {
         boatTabDisplayFields={calendarDisplay.boatTabFields}
         cabinCounts={cabinCounts}
         paymentTotals={paymentTotals}
+        taxiCounts={taxiCounts}
       />
 
       {/* Booking Form Modal */}

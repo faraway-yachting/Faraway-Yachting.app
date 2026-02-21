@@ -70,6 +70,12 @@ export const BOOKINGS_PERMISSIONS = {
   BOATS_EDIT: 'bookings.boats.edit',
   SETTINGS_VIEW: 'bookings.settings.view',
   SETTINGS_MANAGE: 'bookings.settings.manage',
+  TAXI_VIEW: 'bookings.taxi.view',
+  TAXI_CREATE: 'bookings.taxi.create',
+  TAXI_EDIT: 'bookings.taxi.edit',
+  TAXI_DELETE: 'bookings.taxi.delete',
+  TAXI_PAYMENTS_VIEW: 'bookings.taxi_payments.view',
+  TAXI_PAYMENTS_MANAGE: 'bookings.taxi_payments.manage',
 } as const;
 
 // HR permissions
@@ -280,6 +286,14 @@ export function usePermissions() {
     // Bookings - Settings
     viewBookingSettings: () => hasPermission(BOOKINGS_PERMISSIONS.SETTINGS_VIEW),
     manageBookingSettings: () => hasPermission(BOOKINGS_PERMISSIONS.SETTINGS_MANAGE),
+
+    // Bookings - Taxi
+    viewTaxi: () => hasPermission(BOOKINGS_PERMISSIONS.TAXI_VIEW),
+    createTaxi: () => hasPermission(BOOKINGS_PERMISSIONS.TAXI_CREATE),
+    editTaxi: () => hasPermission(BOOKINGS_PERMISSIONS.TAXI_EDIT),
+    deleteTaxi: () => hasPermission(BOOKINGS_PERMISSIONS.TAXI_DELETE),
+    viewTaxiPayments: () => hasPermission(BOOKINGS_PERMISSIONS.TAXI_PAYMENTS_VIEW),
+    manageTaxiPayments: () => hasPermission(BOOKINGS_PERMISSIONS.TAXI_PAYMENTS_MANAGE),
 
     // HR - Dashboard
     viewHRDashboard: () => hasPermission(HR_PERMISSIONS.DASHBOARD_VIEW),

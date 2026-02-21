@@ -19,6 +19,7 @@ import {
 } from '@/data/booking/types';
 import { DynamicSelect } from './DynamicSelect';
 import { ExtraItemsEditor } from './ExtraItemsEditor';
+import { BookingTaxiSection } from '../taxi/BookingTaxiSection';
 
 interface BookingDetailsSectionProps {
   formData: Partial<Booking>;
@@ -30,6 +31,7 @@ interface BookingDetailsSectionProps {
   onRemoveContractAttachment?: (index: number) => void;
   cabinCharterMode?: boolean;
   projects?: { id: string; name: string }[];
+  bookingId?: string;
   isCollapsed?: boolean;
   onToggleCollapse?: () => void;
   isCompleted?: boolean;
@@ -46,6 +48,7 @@ export function BookingDetailsSection({
   onRemoveContractAttachment,
   cabinCharterMode,
   projects,
+  bookingId,
   isCollapsed,
   onToggleCollapse,
   isCompleted,
@@ -200,6 +203,15 @@ export function BookingDetailsSection({
               projects={projects}
             />
           </div>
+
+          {/* Taxi Transfers Section */}
+          {bookingId ? (
+            <BookingTaxiSection bookingId={bookingId} />
+          ) : (
+            <div className="border border-dashed border-gray-200 rounded-lg p-3 text-center">
+              <p className="text-xs text-gray-400">Save booking to add taxi transfers</p>
+            </div>
+          )}
 
           {/* Charter Contract Section */}
           <div className="bg-slate-50 rounded-lg p-4">

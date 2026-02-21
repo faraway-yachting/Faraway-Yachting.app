@@ -20,6 +20,7 @@ const FIELD_DESCRIPTIONS: Record<string, string> = {
   meetAndGreeter: 'Assigned meet & greet person',
   cabinSummary: 'Booked vs total cabins (cabin charters only)',
   balanceDue: 'Outstanding balance in bold red — shows amount still owed',
+  taxi: 'Shows number of linked taxi transfers for this booking',
 };
 
 export function CalendarDisplayPopover() {

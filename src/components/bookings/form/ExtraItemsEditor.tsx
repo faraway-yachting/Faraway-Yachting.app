@@ -3,8 +3,8 @@
 import { useEffect, useState } from 'react';
 import { Plus, X } from 'lucide-react';
 import type { BookingExtraItem } from '@/data/booking/types';
-import { bookingLookupsApi } from '@/lib/supabase/api/bookingLookups';
 import { projectsApi } from '@/lib/supabase/api/projects';
+import { DynamicSelect } from './DynamicSelect';
 
 interface ExtraItemsEditorProps {
   items: BookingExtraItem[];
@@ -18,13 +18,9 @@ interface ExtraItemsEditorProps {
 const CURRENCIES = ['THB', 'USD', 'EUR', 'GBP', 'AUD'];
 
 export function ExtraItemsEditor({ items, onChange, disabled, currency = 'THB', bookingFxRate, projects: projectsProp }: ExtraItemsEditorProps) {
-  const [suggestions, setSuggestions] = useState<string[]>([]);
   const [allProjects, setAllProjects] = useState<{ id: string; name: string }[]>([]);
 
   useEffect(() => {
-    bookingLookupsApi.getByCategory('extras').then(lookups => {
-      setSuggestions(lookups.map(l => l.label));
-    }).catch(() => {});
     // Load all active projects (not just yachts)
     projectsApi.getActive().then(data => {
       setAllProjects(data.map(p => ({ id: p.id, name: p.name })));
@@ -93,7 +89,7 @@ export function ExtraItemsEditor({ items, onChange, disabled, currency = 'THB', 
   return (
     <div className="space-y-2">
       {items.length > 0 && (
-        <div className="overflow-x-auto">
+        <div className="overflow-visible">
           <table className="w-full text-sm">
             <thead>
               <tr className="text-xs text-gray-500 border-b border-gray-200">
@@ -113,14 +109,13 @@ export function ExtraItemsEditor({ items, onChange, disabled, currency = 'THB', 
               {items.map((item, index) => (
                 <tr key={item.id} className="border-b border-gray-100">
                   <td className="py-1.5 pr-2">
-                    <input
-                      type="text"
-                      list="extra-suggestions"
+                    <DynamicSelect
+                      category="extras"
                       value={item.name}
-                      onChange={(e) => updateItem(index, 'name', e.target.value)}
+                      onChange={(val) => updateItem(index, 'name', val)}
                       disabled={disabled}
                       placeholder="e.g., Massage, Diving..."
-                      className={inputCls}
+                      allowCustomInput
                     />
                   </td>
                   <td className="py-1.5 px-1">
@@ -211,15 +206,6 @@ export function ExtraItemsEditor({ items, onChange, disabled, currency = 'THB', 
             </tbody>
           </table>
         </div>
-      )}
-
-      {/* Suggestions datalist */}
-      {suggestions.length > 0 && (
-        <datalist id="extra-suggestions">
-          {suggestions.map(s => (
-            <option key={s} value={s} />
-          ))}
-        </datalist>
       )}
 
       {/* Footer: total + add button */}
