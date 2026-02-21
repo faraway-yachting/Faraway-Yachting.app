@@ -111,6 +111,9 @@ export default function CommissionTable() {
   const [filterDateFrom, setFilterDateFrom] = useState<string>('');
   const [filterDateTo, setFilterDateTo] = useState<string>('');
 
+  // Sort
+  const [sortBy, setSortBy] = useState<'date' | 'boat'>('date');
+
   // Helper: is a commission record "earned" (charter completed)?
   const isEarned = useCallback((record: CommissionRecord) => {
     const today = new Date().toISOString().split('T')[0];
@@ -215,7 +218,7 @@ export default function CommissionTable() {
 
   // Filtered records
   const filteredRecords = useMemo(() => {
-    return records.filter((r) => {
+    const filtered = records.filter((r) => {
       // Month filter
       if (filterMonth !== 'all') {
         const dateStr = r.charter_date_from || '';
@@ -234,7 +237,21 @@ export default function CommissionTable() {
       if (filterDateTo && (r.charter_date_to || r.charter_date_from || '') > filterDateTo) return false;
       return true;
     });
-  }, [records, filterMonth, filterBoat, filterOwner, filterSource, filterDateFrom, filterDateTo]);
+
+    if (sortBy === 'boat') {
+      filtered.sort((a, b) => {
+        const nameA = getBoatName(a);
+        const nameB = getBoatName(b);
+        const cmp = nameA.localeCompare(nameB);
+        if (cmp !== 0) return cmp;
+        // Secondary sort by date descending within same boat
+        return (b.charter_date_from || '').localeCompare(a.charter_date_from || '');
+      });
+    }
+    // 'date' is the default order from API (charter_date_from DESC)
+
+    return filtered;
+  }, [records, filterMonth, filterBoat, filterOwner, filterSource, filterDateFrom, filterDateTo, sortBy, getBoatName]);
 
   // Summary
   const summary = useMemo(() => {
@@ -728,6 +745,17 @@ export default function CommissionTable() {
           <span className="text-xs text-gray-400">to</span>
           <input type="date" value={filterDateTo} onChange={(e) => setFilterDateTo(e.target.value)}
             className="px-2 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#5A7A8F]/20 focus:border-[#5A7A8F]" />
+        </div>
+
+        <div className="flex items-center gap-1 border border-gray-300 rounded-lg overflow-hidden">
+          <button onClick={() => setSortBy('date')}
+            className={`px-3 py-1.5 text-sm font-medium transition-colors ${sortBy === 'date' ? 'bg-[#5A7A8F] text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}>
+            By Date
+          </button>
+          <button onClick={() => setSortBy('boat')}
+            className={`px-3 py-1.5 text-sm font-medium transition-colors ${sortBy === 'boat' ? 'bg-[#5A7A8F] text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}>
+            By Boat
+          </button>
         </div>
 
         <div className="flex-1" />
