@@ -397,7 +397,7 @@ export const pettyCashApi = {
    * The `balance` field in the database is the initial balance.
    * This method calculates the current balance from transactions.
    */
-  async getAllWalletsWithCalculatedBalances(): Promise<(PettyCashWallet & { calculated_balance: number })[]> {
+  async getAllWalletsWithCalculatedBalances(): Promise<(PettyCashWallet & { calculated_balance: number; total_topups: number; total_paid_reimbursements: number; total_submitted_expenses: number })[]> {
     const supabase = createClient();
 
     // Single RPC call replaces 4 separate queries (wallets + topups + expenses + reimbursements)
@@ -407,9 +407,12 @@ export const pettyCashApi = {
 
     if (error) throw error;
 
-    return ((data ?? []) as Array<PettyCashWallet & { calculated_balance: number }>).map(row => ({
+    return ((data ?? []) as Array<PettyCashWallet & { calculated_balance: number; total_topups: number; total_paid_reimbursements: number; total_submitted_expenses: number }>).map(row => ({
       ...row,
       calculated_balance: Number(row.calculated_balance) || 0,
+      total_topups: Number(row.total_topups) || 0,
+      total_paid_reimbursements: Number(row.total_paid_reimbursements) || 0,
+      total_submitted_expenses: Number(row.total_submitted_expenses) || 0,
     }));
   },
 

@@ -145,19 +145,30 @@ export default function PettyCashExpenseDetailsPage() {
   useEffect(() => {
     async function loadDropdownData() {
       try {
-        const [companiesData, projectsData, accountsData] = await Promise.all([
+        const [companiesData, projectsData, accountsData, inventoryAccount] = await Promise.all([
           companiesApi.getActive(),
           projectsApi.getActive(),
           chartOfAccountsApi.getByType('expense'),
+          chartOfAccountsApi.getByCode('1200'),
         ]);
 
         setCompanies(companiesData.map((c: DbCompany) => ({ id: c.id, name: c.name })));
         setProjects(projectsData.map((p: DbProject) => ({ id: p.id, name: p.name })));
-        setExpenseAccounts(accountsData.map((a) => ({
+
+        // Include GL 1200 (Inventory) so accountants can classify PC expenses as inventory
+        const accounts = accountsData.map((a) => ({
           code: a.code,
           name: a.name,
           type: a.account_type,
-        })));
+        }));
+        if (inventoryAccount) {
+          accounts.unshift({
+            code: inventoryAccount.code,
+            name: inventoryAccount.name,
+            type: inventoryAccount.account_type,
+          });
+        }
+        setExpenseAccounts(accounts);
       } catch (error) {
         console.error('Failed to load dropdown data:', error);
       } finally {

@@ -850,6 +850,101 @@ export function frontendWhtCertificateToDb(cert: Partial<WhtCertificate>): DbWht
   };
 }
 
+// ============= INVENTORY PURCHASE TRANSFORMATIONS =============
+
+import type {
+  InventoryPurchase,
+  InventoryPurchaseItem,
+  InventoryPurchasePayment,
+  InventoryPurchaseStatus,
+  InventoryPaymentType,
+  ReceiptStatus as InventoryReceiptStatus,
+} from '@/data/expenses/types';
+import type {
+  InventoryPurchaseWithDetails,
+  InventoryPurchaseLineItemRow,
+  InventoryPurchasePaymentRow,
+} from '@/lib/supabase/api/inventoryPurchases';
+
+function dbInventoryLineItemToFrontend(li: InventoryPurchaseLineItemRow): InventoryPurchaseItem {
+  return {
+    id: li.id,
+    description: li.description,
+    sku: li.sku ?? undefined,
+    unit: (li.unit as InventoryPurchaseItem['unit']) ?? undefined,
+    quantity: li.quantity,
+    quantityConsumed: li.quantity_consumed,
+    unitPrice: li.unit_price,
+    taxRate: li.tax_rate,
+    amount: li.amount,
+    preVatAmount: li.pre_vat_amount,
+    projectId: li.project_id,
+    accountCode: li.account_code,
+    expenseAccountCode: li.expense_account_code ?? undefined,
+  };
+}
+
+function dbInventoryPaymentToFrontend(pmt: InventoryPurchasePaymentRow): InventoryPurchasePayment {
+  return {
+    id: pmt.id,
+    paymentDate: pmt.payment_date,
+    amount: pmt.amount,
+    paymentType: pmt.payment_type as InventoryPaymentType,
+    bankAccountId: pmt.bank_account_id ?? undefined,
+    bankAccountGlCode: pmt.bank_account_gl_code ?? undefined,
+    pettyWalletId: pmt.petty_cash_wallet_id ?? undefined,
+    pettyCashExpenseId: pmt.petty_cash_expense_id ?? undefined,
+    reference: pmt.reference ?? undefined,
+    remark: pmt.remark ?? undefined,
+    fxRate: pmt.fx_rate ?? undefined,
+    thbAmount: pmt.thb_amount ?? undefined,
+  };
+}
+
+export function dbInventoryPurchaseToFrontend(db: InventoryPurchaseWithDetails): InventoryPurchase {
+  return {
+    id: db.id,
+    purchaseNumber: db.purchase_number,
+    supplierInvoiceNumber: db.supplier_invoice_number ?? undefined,
+    supplierInvoiceDate: db.supplier_invoice_date ?? undefined,
+    companyId: db.company_id,
+    vendorId: db.vendor_id ?? undefined,
+    vendorName: db.vendor_name ?? undefined,
+    purchaseDate: db.purchase_date,
+    category: db.category ?? undefined,
+    expectedDeliveryDate: db.expected_delivery_date ?? undefined,
+    actualDeliveryDate: db.actual_delivery_date ?? undefined,
+    pricingType: (db.pricing_type || 'exclude_vat') as ExpensePricingType,
+    currency: (db.currency || 'THB') as Currency,
+    fxRate: db.fx_rate ?? undefined,
+    fxRateSource: (db.fx_rate_source as FxRateSource) ?? undefined,
+    fxRateDate: db.fx_rate_date ?? undefined,
+    thbSubtotal: db.thb_subtotal ?? undefined,
+    thbVatAmount: db.thb_vat_amount ?? undefined,
+    thbTotalAmount: db.thb_total_amount ?? undefined,
+    thbNetPayable: db.thb_net_payable ?? undefined,
+    lineItems: db.line_items.map(dbInventoryLineItemToFrontend),
+    subtotal: db.subtotal,
+    vatAmount: db.vat_amount,
+    totalAmount: db.total_amount,
+    netPayable: db.net_payable,
+    paymentStatus: (db.payment_status || 'unpaid') as PaymentStatus,
+    amountPaid: db.amount_paid,
+    amountOutstanding: db.amount_outstanding,
+    payments: db.payments?.map(dbInventoryPaymentToFrontend),
+    receiptStatus: (db.receipt_status || 'pending') as InventoryReceiptStatus,
+    receiptReceivedDate: db.receipt_received_date ?? undefined,
+    receiptReceivedBy: db.receipt_received_by ?? undefined,
+    status: (db.status || 'draft') as InventoryPurchaseStatus,
+    receivedDate: db.received_date ?? undefined,
+    receivedBy: db.received_by ?? undefined,
+    notes: db.notes ?? undefined,
+    createdBy: db.created_by || '',
+    createdAt: db.created_at,
+    updatedAt: db.updated_at,
+  };
+}
+
 // ============= BOOKING TRANSFORMATIONS =============
 // NOTE: Booking transforms are temporarily in /src/lib/supabase/api/bookings.ts
 // until the database migration is run and database.types.ts is regenerated.

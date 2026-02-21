@@ -1,6 +1,7 @@
 'use client';
 
-import { Wallet, TrendingDown, Clock, AlertTriangle } from 'lucide-react';
+import { Wallet, TrendingDown, Clock, AlertTriangle, HelpCircle } from 'lucide-react';
+import { useState } from 'react';
 import { formatCurrency } from '@/lib/petty-cash/utils';
 import type { Currency } from '@/data/company/types';
 
@@ -16,10 +17,18 @@ interface WalletDisplay {
   lowBalanceThreshold?: number | null;
 }
 
+interface BalanceBreakdown {
+  initialBalance: number;
+  topups: number;
+  paidReimbursements: number;
+  submittedExpenses: number;
+}
+
 interface WalletSummaryCardProps {
   wallet: WalletDisplay | null;
   pendingReimbursement: number;
   monthlyExpenses: number;
+  balanceBreakdown?: BalanceBreakdown | null;
   className?: string;
 }
 
@@ -27,8 +36,11 @@ export default function WalletSummaryCard({
   wallet,
   pendingReimbursement,
   monthlyExpenses,
+  balanceBreakdown,
   className = '',
 }: WalletSummaryCardProps) {
+  const [showTooltip, setShowTooltip] = useState(false);
+
   if (!wallet) {
     return null;
   }
@@ -68,7 +80,52 @@ export default function WalletSummaryCard({
       <div className="px-6 py-5">
         <div className="flex items-start justify-between mb-4">
           <div>
-            <p className="text-sm text-gray-500 mb-1">Available Balance</p>
+            <div className="flex items-center gap-1.5 mb-1">
+              <p className="text-sm text-gray-500">Available Balance</p>
+              {balanceBreakdown && (
+                <div className="relative">
+                  <button
+                    onMouseEnter={() => setShowTooltip(true)}
+                    onMouseLeave={() => setShowTooltip(false)}
+                    onClick={() => setShowTooltip(!showTooltip)}
+                    className="text-gray-400 hover:text-gray-600 transition-colors"
+                  >
+                    <HelpCircle className="h-3.5 w-3.5" />
+                  </button>
+                  {showTooltip && (
+                    <div className="absolute left-0 top-6 z-50 w-72 p-3 bg-gray-800 text-white text-xs rounded-lg shadow-lg">
+                      <p className="font-medium mb-2 text-gray-200">Balance Calculation</p>
+                      <div className="space-y-1.5">
+                        <div className="flex justify-between">
+                          <span className="text-gray-300">Initial Balance</span>
+                          <span className="font-mono">{formatCurrency(balanceBreakdown.initialBalance, wallet.currency)}</span>
+                        </div>
+                        {balanceBreakdown.topups > 0 && (
+                          <div className="flex justify-between">
+                            <span className="text-gray-300">+ Top-ups</span>
+                            <span className="font-mono text-green-400">{formatCurrency(balanceBreakdown.topups, wallet.currency)}</span>
+                          </div>
+                        )}
+                        {balanceBreakdown.paidReimbursements > 0 && (
+                          <div className="flex justify-between">
+                            <span className="text-gray-300">+ Paid Reimbursements</span>
+                            <span className="font-mono text-green-400">{formatCurrency(balanceBreakdown.paidReimbursements, wallet.currency)}</span>
+                          </div>
+                        )}
+                        <div className="flex justify-between">
+                          <span className="text-gray-300">- Submitted Expenses</span>
+                          <span className="font-mono text-red-400">{formatCurrency(balanceBreakdown.submittedExpenses, wallet.currency)}</span>
+                        </div>
+                        <div className="border-t border-gray-600 pt-1.5 mt-1.5 flex justify-between font-medium">
+                          <span>= Available Balance</span>
+                          <span className="font-mono">{formatCurrency(wallet.balance, wallet.currency)}</span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
             <p
               className={`text-3xl font-bold ${
                 isLowBalance ? 'text-orange-600' : 'text-gray-900'

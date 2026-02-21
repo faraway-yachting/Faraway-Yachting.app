@@ -64,12 +64,9 @@ export const journalEventSettingsApi = {
       .select('*')
       .eq('company_id', companyId)
       .eq('event_type', eventType)
-      .single();
+      .maybeSingle();
 
-    if (error) {
-      if (error.code === 'PGRST116') return null; // Not found
-      throw error;
-    }
+    if (error) throw error;
     return data;
   },
 

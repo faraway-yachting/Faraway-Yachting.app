@@ -57,6 +57,7 @@ import { pettyCashExpenseHandler } from './eventHandlers/pettyCashExpenseHandler
 import { pettyCashTopupHandler } from './eventHandlers/pettyCashTopupHandler';
 import { pettyCashReimbursementHandler } from './eventHandlers/pettyCashReimbursementHandler';
 import { expensePaidIntercompanyHandler } from './eventHandlers/expensePaidIntercompanyHandler';
+import { inventoryPurchaseRecordedHandler, inventoryConsumedHandler } from './eventHandlers/inventoryPurchaseHandler';
 import { receiptReceivedIntercompanyHandler } from './eventHandlers/receiptReceivedIntercompanyHandler';
 
 // ============================================================================
@@ -81,6 +82,8 @@ eventHandlers.set('CAPEX_INCURRED', capexIncurredHandler);
 eventHandlers.set('PETTYCASH_EXPENSE_CREATED', pettyCashExpenseHandler);
 eventHandlers.set('PETTYCASH_TOPUP_COMPLETED', pettyCashTopupHandler);
 eventHandlers.set('PETTYCASH_REIMBURSEMENT_PAID', pettyCashReimbursementHandler);
+eventHandlers.set('INVENTORY_PURCHASE_RECORDED', inventoryPurchaseRecordedHandler);
+eventHandlers.set('INVENTORY_CONSUMED', inventoryConsumedHandler);
 
 // ============================================================================
 // Default Account Fallback Logic

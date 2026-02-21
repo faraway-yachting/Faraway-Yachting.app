@@ -9,7 +9,7 @@ import type { Database } from '@/lib/supabase/database.types';
 type JournalEntry = Database['public']['Tables']['journal_entries']['Row'];
 
 interface RelatedJournalEntriesProps {
-  documentType: 'expense' | 'expense_payment' | 'receipt';
+  documentType: 'expense' | 'expense_payment' | 'receipt' | 'inventory_purchase';
   documentId: string;
 }
 

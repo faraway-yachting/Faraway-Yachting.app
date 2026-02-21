@@ -26,7 +26,9 @@ export type AccountingEventType =
   | 'PARTNER_PAYMENT'
   | 'PETTYCASH_EXPENSE_CREATED'
   | 'PETTYCASH_TOPUP_COMPLETED'
-  | 'PETTYCASH_REIMBURSEMENT_PAID';
+  | 'PETTYCASH_REIMBURSEMENT_PAID'
+  | 'INVENTORY_PURCHASE_RECORDED'
+  | 'INVENTORY_CONSUMED';
 
 export type EventStatus = 'pending' | 'processed' | 'failed' | 'cancelled';
 
@@ -286,6 +288,45 @@ export interface ReceiptReceivedIntercompanyEventData {
   usesDeferredRevenue: boolean;
 }
 
+// Inventory Purchase Event Data Interfaces
+export interface InventoryPurchaseRecordedEventData {
+  purchaseId: string;
+  purchaseNumber: string;
+  vendorName: string;
+  purchaseDate: string;
+  lineItems: {
+    description: string;
+    amount: number; // Pre-VAT line amount for inventory debit
+  }[];
+  totalSubtotal: number;
+  totalVatAmount: number;
+  totalAmount: number;
+  totalNetPayable: number;
+  currency: string;
+  // Payment info — determines the credit GL
+  paymentType: 'bank' | 'cash' | 'petty_cash';
+  bankAccountGlCode?: string;       // When paymentType = 'bank'
+  pettyCashGlCode?: string;         // When paymentType = 'petty_cash' (e.g. '1000')
+  pettyCashWalletName?: string;
+}
+
+export interface InventoryConsumedEventData {
+  purchaseId: string;
+  purchaseNumber: string;
+  consumptions: {
+    lineItemId: string;
+    description: string;
+    quantity: number;
+    amount: number;              // Cost of consumed items (qty × unit_price)
+    projectId: string;
+    projectName?: string;
+    expenseAccountCode: string;  // 5xxx account
+  }[];
+  totalAmount: number;
+  consumedDate: string;
+  currency: string;
+}
+
 // Union type for all event data
 export type EventData =
   | ExpenseApprovedEventData
@@ -302,7 +343,9 @@ export type EventData =
   | ProjectServiceCompletedEventData
   | PettyCashExpenseEventData
   | PettyCashTopupEventData
-  | PettyCashReimbursementEventData;
+  | PettyCashReimbursementEventData
+  | InventoryPurchaseRecordedEventData
+  | InventoryConsumedEventData;
 
 // ============================================================================
 // Processing Types
@@ -343,6 +386,8 @@ export const DEFAULT_ACCOUNTS = {
   // Assets
   CASH: '1000',
   DEFAULT_BANK: '1010',
+  INVENTORY: '1200',
+  CASH_ON_HAND: '1020',
   VAT_RECEIVABLE: '1170',
   INTERCOMPANY_RECEIVABLE: '1180',
 
@@ -466,6 +511,18 @@ export const EVENT_TYPE_METADATA: Record<
     label: 'Petty Cash Reimbursement',
     description: 'Wallet holder reimbursed from bank account',
     sourceDocumentTypes: ['petty_cash_reimbursement'],
+    isMultiCompany: false,
+  },
+  INVENTORY_PURCHASE_RECORDED: {
+    label: 'Inventory Purchase',
+    description: 'Inventory purchased and recorded as asset (GL 1200)',
+    sourceDocumentTypes: ['inventory_purchase'],
+    isMultiCompany: false,
+  },
+  INVENTORY_CONSUMED: {
+    label: 'Inventory Consumed',
+    description: 'Inventory issued to project and expensed from asset (GL 1200 → 5xxx)',
+    sourceDocumentTypes: ['inventory_purchase'],
     isMultiCompany: false,
   },
 };

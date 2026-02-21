@@ -25,3 +25,6 @@ export { partnerPaymentHandler } from './partnerPaymentHandler';
 export { openingBalanceHandler } from './openingBalanceHandler';
 export { capexIncurredHandler } from './capexIncurredHandler';
 export { projectServiceCompletedHandler } from './projectServiceCompletedHandler';
+
+// Inventory handlers
+export { inventoryPurchaseRecordedHandler, inventoryConsumedHandler } from './inventoryPurchaseHandler';

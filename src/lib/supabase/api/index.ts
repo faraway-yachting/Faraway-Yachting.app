@@ -12,6 +12,9 @@ export { receiptsApi, type ReceiptWithDetails } from './receipts';
 // Expense APIs
 export { expensesApi, type ExpenseWithDetails } from './expenses';
 
+// Inventory Purchase APIs
+export { inventoryPurchasesApi, type InventoryPurchaseWithDetails } from './inventoryPurchases';
+
 // Petty Cash APIs
 export { pettyCashApi, type WalletWithDetails } from './pettyCash';
 

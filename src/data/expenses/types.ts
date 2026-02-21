@@ -249,55 +249,86 @@ export interface WhtCertificate {
 
 export type InventoryPurchaseStatus = 'draft' | 'received' | 'void';
 
+export type InventoryPaymentType = 'bank' | 'cash' | 'petty_cash';
+
+export type InventoryUnit = 'pcs' | 'liters' | 'kg' | 'boxes' | 'sets' | 'meters' | 'other';
+
 export interface InventoryPurchaseItem {
   id: string;
   description: string;
   sku?: string; // Stock keeping unit
+  unit?: InventoryUnit; // Unit of measure
   quantity: number;
+  quantityConsumed: number; // Running total consumed
   unitPrice: number;
   taxRate: number;
-  whtRate: WhtRate;
-  whtBaseCalculation: WhtBaseCalculation;
-  customWhtAmount?: number;
   amount: number;
   preVatAmount: number;
-  whtAmount: number;
-  projectId: string; // Required
-  accountCode?: string;
+  projectId: string; // Required - original purchase project
+  accountCode: string; // Always '1200' (Inventory Asset) for purchase journal
+  expenseAccountCode?: string; // Default 5xxx account for consumption
   attachments?: Attachment[];
+  consumptionRecords?: InventoryConsumptionRecord[];
+}
+
+export interface InventoryConsumptionRecord {
+  id: string;
+  lineItemId: string;
+  quantity: number;
+  projectId: string; // Can differ from purchase project (transfer)
+  expenseAccountCode: string; // 5xxx account for this consumption
+  consumedDate: string;
+  consumedBy?: string;
+  notes?: string;
+}
+
+export interface InventoryPurchasePayment {
+  id: string;
+  paymentDate: string;
+  amount: number;
+  paymentType: InventoryPaymentType;
+  bankAccountId?: string;
+  bankAccountGlCode?: string;
+  pettyWalletId?: string;
+  pettyWalletName?: string;
+  pettyCashExpenseId?: string;
+  reference?: string;
+  remark?: string;
+  fxRate?: number;
+  thbAmount?: number;
 }
 
 export interface InventoryPurchase {
   id: string;
-  purchaseNumber: string; // Format: PO-INV-YYMMXXXX
+  purchaseNumber: string; // Format: PO-INV-YYMM-XXXX
   supplierInvoiceNumber?: string;
   supplierInvoiceDate?: string;
   companyId: string;
-  vendorId: string;
-  vendorName: string;
+  vendorId?: string;
+  vendorName?: string;
   purchaseDate: string;
+  category?: string;
   expectedDeliveryDate?: string;
   actualDeliveryDate?: string;
   pricingType: ExpensePricingType;
   currency: Currency;
   // FX Rate fields (for THB P&L reporting)
-  fxRate?: number; // Exchange rate to THB at transaction time (locked on save)
-  fxRateSource?: FxRateSource; // 'api' or 'manual'
-  thbSubtotal?: number; // subtotal × fxRate
-  thbVatAmount?: number; // vatAmount × fxRate
-  thbWhtAmount?: number; // whtAmount × fxRate
-  thbNetPayable?: number; // netPayable × fxRate
-  thbTotalAmount?: number; // totalAmount × fxRate
+  fxRate?: number;
+  fxRateSource?: FxRateSource;
+  fxRateDate?: string;
+  thbSubtotal?: number;
+  thbVatAmount?: number;
+  thbNetPayable?: number;
+  thbTotalAmount?: number;
   lineItems: InventoryPurchaseItem[];
   subtotal: number;
   vatAmount: number;
   totalAmount: number;
-  whtAmount: number;
   netPayable: number;
   paymentStatus: PaymentStatus;
   amountPaid: number;
   amountOutstanding: number;
-  payments?: ExpensePayment[];
+  payments?: InventoryPurchasePayment[];
   receiptStatus: ReceiptStatus;
   receiptReceivedDate?: string;
   receiptReceivedBy?: string;
@@ -306,7 +337,6 @@ export interface InventoryPurchase {
   receivedDate?: string;
   receivedBy?: string;
   notes?: string;
-  whtCertificateIds?: string[];
   journalEntryId?: string;
   createdBy: string;
   createdAt: string;

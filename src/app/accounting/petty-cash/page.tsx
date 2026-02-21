@@ -7,6 +7,7 @@ import { KPICard } from '@/components/accounting/KPICard';
 import { DataTable } from '@/components/accounting/DataTable';
 import WalletSummaryCard from '@/components/petty-cash/WalletSummaryCard';
 import ExpenseForm from '@/components/petty-cash/ExpenseForm';
+import StockPurchaseForm from '@/components/petty-cash/StockPurchaseForm';
 import ExpenseFilters, { type FilterValues } from '@/components/petty-cash/ExpenseFilters';
 import {
   Wallet,
@@ -16,13 +17,15 @@ import {
   TrendingDown,
   FileText,
   Loader2,
+  Package,
 } from 'lucide-react';
 
 // Auth import
 import { useAuth } from '@/components/auth';
 
 // Supabase API import
-import { pettyCashApi } from '@/lib/supabase/api/pettyCash';
+import { pettyCashApi, type PettyCashReimbursement } from '@/lib/supabase/api/pettyCash';
+import { inventoryPurchasesApi, type InventoryPurchaseRow } from '@/lib/supabase/api/inventoryPurchases';
 import type { Database } from '@/lib/supabase/database.types';
 import type { Currency } from '@/data/company/types';
 
@@ -30,6 +33,7 @@ import type { Currency } from '@/data/company/types';
 import { companiesApi } from '@/lib/supabase/api/companies';
 import { projectsApi } from '@/lib/supabase/api/projects';
 import type { SimplifiedExpenseInput } from '@/data/petty-cash/expenses';
+import { notifyAccountantNewReimbursement } from '@/data/notifications/notifications';
 
 // Supabase expense type
 type SupabaseExpense = Database['public']['Tables']['petty_cash_expenses']['Row'];
@@ -102,12 +106,19 @@ export default function PettyCashDashboard() {
   const router = useRouter();
   const { user, isLoading: authLoading } = useAuth();
   const [showExpenseForm, setShowExpenseForm] = useState(false);
-  const [activeTab, setActiveTab] = useState<'expenses' | 'reimbursements' | 'history'>('expenses');
+  const [showStockPurchaseForm, setShowStockPurchaseForm] = useState(false);
+  const [activeTab, setActiveTab] = useState<'expenses' | 'reimbursements' | 'history' | 'stock_purchases'>('expenses');
   const [refreshKey, setRefreshKey] = useState(0);
 
   // Wallet state from Supabase
   const [wallet, setWallet] = useState<SupabaseWallet | null>(null);
   const [walletLoading, setWalletLoading] = useState(true);
+  const [balanceBreakdown, setBalanceBreakdown] = useState<{
+    initialBalance: number;
+    topups: number;
+    paidReimbursements: number;
+    submittedExpenses: number;
+  } | null>(null);
 
   // Filter states
   const [expenseFilters, setExpenseFilters] = useState<FilterValues>(initialFilters);
@@ -116,6 +127,12 @@ export default function PettyCashDashboard() {
   // Expenses state from Supabase
   const [expenses, setExpenses] = useState<SupabaseExpense[]>([]);
   const [expensesLoading, setExpensesLoading] = useState(true);
+
+  // Reimbursements state from Supabase
+  const [reimbursementsDb, setReimbursementsDb] = useState<PettyCashReimbursement[]>([]);
+
+  // Stock purchases state
+  const [stockPurchases, setStockPurchases] = useState<InventoryPurchaseRow[]>([]);
 
   // Get companies and projects for filters (from Supabase)
   const [companies, setCompanies] = useState<{ id: string; name: string }[]>([]);
@@ -153,10 +170,25 @@ export default function PettyCashDashboard() {
       }
 
       try {
-        const wallets = await pettyCashApi.getWalletsByUser(user.id);
-        // User should have at most one wallet, take the first active one
-        const activeWallet = wallets.find(w => w.status === 'active') || wallets[0] || null;
-        setWallet(activeWallet);
+        // Use the RPC to get calculated balance (correct source of truth)
+        const allWallets = await pettyCashApi.getAllWalletsWithCalculatedBalances();
+        const activeWallet = allWallets.find(w => w.user_id === user.id && w.status === 'active')
+          || allWallets.find(w => w.user_id === user.id)
+          || null;
+
+        if (activeWallet) {
+          // Override balance with calculated_balance so WalletSummaryCard shows correct amount
+          setWallet({ ...activeWallet, balance: activeWallet.calculated_balance });
+          setBalanceBreakdown({
+            initialBalance: Number(activeWallet.balance) || 0,
+            topups: activeWallet.total_topups,
+            paidReimbursements: activeWallet.total_paid_reimbursements,
+            submittedExpenses: activeWallet.total_submitted_expenses,
+          });
+        } else {
+          setWallet(null);
+          setBalanceBreakdown(null);
+        }
       } catch (error) {
         console.error('Error fetching wallet:', error);
         setWallet(null);
@@ -194,6 +226,42 @@ export default function PettyCashDashboard() {
     fetchExpenses();
   }, [wallet, refreshKey]);
 
+  // Fetch reimbursements from Supabase when wallet is loaded
+  useEffect(() => {
+    async function fetchReimbursements() {
+      if (!wallet) {
+        setReimbursementsDb([]);
+        return;
+      }
+      try {
+        const data = await pettyCashApi.getReimbursementsByWallet(wallet.id);
+        setReimbursementsDb(data);
+      } catch (error) {
+        console.error('Error fetching reimbursements:', error);
+        setReimbursementsDb([]);
+      }
+    }
+    fetchReimbursements();
+  }, [wallet, refreshKey]);
+
+  // Fetch stock purchases when user is loaded
+  useEffect(() => {
+    async function fetchStockPurchases() {
+      if (!user?.id) {
+        setStockPurchases([]);
+        return;
+      }
+      try {
+        const data = await inventoryPurchasesApi.getByCreator(user.id);
+        setStockPurchases(data);
+      } catch (error) {
+        console.error('Error fetching stock purchases:', error);
+        setStockPurchases([]);
+      }
+    }
+    fetchStockPurchases();
+  }, [user?.id, refreshKey]);
+
   // Transform expenses to frontend format for display
   const transformedExpenses = useMemo((): TransformedExpense[] => {
     return expenses.map(e => {
@@ -217,8 +285,24 @@ export default function PettyCashDashboard() {
     });
   }, [expenses, allProjects, companies]);
 
-  // Reimbursements and top-ups are not yet in Supabase
-  const reimbursements: TransformedReimbursement[] = [];
+  // Transform reimbursements from Supabase to display format
+  const reimbursements = useMemo((): TransformedReimbursement[] => {
+    return reimbursementsDb.map((r) => {
+      const expense = expenses.find(e => e.id === r.expense_id);
+      const company = companies.find(c => c.id === r.company_id);
+      return {
+        id: r.id,
+        reimbursementNumber: r.reimbursement_number || '',
+        expenseNumber: expense?.expense_number || '',
+        companyId: r.company_id || '',
+        companyName: company?.name || '',
+        finalAmount: Number(r.final_amount) || Number(r.amount) || 0,
+        status: r.status,
+        createdAt: r.created_at || '',
+      };
+    });
+  }, [reimbursementsDb, expenses, companies]);
+
   const topUps: { id: string; date: string; amount: number; referenceNumber: string }[] = [];
 
   // Apply expense filters
@@ -264,9 +348,9 @@ export default function PettyCashDashboard() {
 
   // Calculate stats from actual data
   const pendingReimbursement = useMemo(() => {
-    // Sum up expenses with draft status (pending reimbursement)
+    // Sum up submitted expenses (awaiting reimbursement approval)
     return transformedExpenses
-      .filter(e => e.status === 'draft')
+      .filter(e => e.status === 'submitted')
       .reduce((sum, e) => sum + e.amount, 0);
   }, [transformedExpenses]);
 
@@ -315,25 +399,48 @@ export default function PettyCashDashboard() {
 
       try {
         // Create expense in Supabase with auto-generated number
-        // Use wallet's company_id if expense doesn't have one (accountant will update later)
-        // Include attachments from the form (JSONB column added in migration 032)
-        await pettyCashApi.createExpenseWithNumber({
+        // Status 'submitted' so the RPC balance calculation counts it immediately
+        const expense = await pettyCashApi.createExpenseWithNumber({
           wallet_id: wallet.id,
           company_id: expenseData.companyId || wallet.company_id,
           project_id: expenseData.projectId,
           expense_date: expenseData.expenseDate,
           description: expenseData.description,
           amount: expenseData.amount,
-          status: 'draft',
+          status: 'submitted',
           created_by: user?.id || null,
           attachments: JSON.stringify(expenseData.attachments || []),
         } as Parameters<typeof pettyCashApi.createExpenseWithNumber>[0] & { attachments?: string });
 
-        // Update wallet balance (deduct the expense amount)
-        const newBalance = wallet.balance - expenseData.amount;
-        await pettyCashApi.updateWallet(wallet.id, { balance: newBalance });
+        // Create reimbursement record so wallet can be replenished (matches manager page pattern)
+        const reimbursement = await pettyCashApi.createReimbursementWithNumber({
+          expense_id: expense.id,
+          wallet_id: expense.wallet_id,
+          company_id: expense.company_id,
+          amount: expense.amount || 0,
+          adjustment_amount: null,
+          adjustment_reason: null,
+          final_amount: expense.amount || 0,
+          status: 'pending',
+          bank_account_id: null,
+          payment_date: null,
+          payment_reference: null,
+          approved_by: null,
+          rejected_by: null,
+          rejection_reason: null,
+          bank_feed_line_id: null,
+          created_by: user?.id || null,
+        });
 
-        // Close form and refresh data
+        // Notify accountant about the new expense claim
+        notifyAccountantNewReimbursement(
+          reimbursement.id,
+          reimbursement.reimbursement_number,
+          transformedWallet?.userName || '',
+          expenseData.amount
+        );
+
+        // NOTE: No updateWallet call — the RPC calculates balance from submitted expenses automatically
         setShowExpenseForm(false);
         setRefreshKey((prev) => prev + 1);
       } catch (error) {
@@ -360,8 +467,9 @@ export default function PettyCashDashboard() {
 
   // Filter options
   const expenseStatusOptions = [
-    { value: 'draft', label: 'Draft' },
     { value: 'submitted', label: 'Submitted' },
+    { value: 'approved', label: 'Approved' },
+    { value: 'rejected', label: 'Rejected' },
   ];
 
   const reimbursementStatusOptions = [
@@ -505,6 +613,70 @@ export default function PettyCashDashboard() {
     },
   ];
 
+  // Table columns for stock purchases
+  const stockPurchaseColumns = [
+    {
+      key: 'purchase_number',
+      header: 'Number',
+      primary: true,
+      render: (row: InventoryPurchaseRow) => (
+        <span className="font-medium text-gray-900">{row.purchase_number}</span>
+      ),
+    },
+    {
+      key: 'purchase_date',
+      header: 'Date',
+      render: (row: InventoryPurchaseRow) => formatDate(row.purchase_date),
+    },
+    {
+      key: 'vendor_name',
+      header: 'Vendor',
+      render: (row: InventoryPurchaseRow) => row.vendor_name || '-',
+    },
+    {
+      key: 'category',
+      header: 'Category',
+      hideOnMobile: true,
+      render: (row: InventoryPurchaseRow) => {
+        const labels: Record<string, string> = {
+          general: 'General',
+          provisions: 'Provisions',
+          boat_parts: 'Boat Parts',
+          office_supplies: 'Office Supplies',
+        };
+        return labels[row.category || ''] || row.category || '-';
+      },
+    },
+    {
+      key: 'total_amount',
+      header: 'Amount',
+      align: 'right' as const,
+      render: (row: InventoryPurchaseRow) => formatCurrency(row.total_amount),
+    },
+    {
+      key: 'status',
+      header: 'Status',
+      align: 'center' as const,
+      render: (row: InventoryPurchaseRow) => {
+        const styles: Record<string, string> = {
+          draft: 'bg-yellow-100 text-yellow-800',
+          received: 'bg-green-100 text-green-800',
+          void: 'bg-red-100 text-red-800',
+        };
+        const labels: Record<string, string> = {
+          draft: 'Draft',
+          received: 'Received',
+          void: 'Voided',
+        };
+        return (
+          <span className={`inline-flex rounded-full px-2 py-1 text-xs font-semibold ${styles[row.status] || 'bg-gray-100 text-gray-800'}`}>
+            {labels[row.status] || row.status}
+          </span>
+        );
+      },
+    },
+  ];
+
   // Loading state
   if (authLoading || walletLoading) {
     return (
@@ -561,6 +733,7 @@ export default function PettyCashDashboard() {
           wallet={transformedWallet}
           pendingReimbursement={pendingReimbursement}
           monthlyExpenses={monthlyExpenses}
+          balanceBreakdown={balanceBreakdown}
         />
       </div>
 
@@ -573,15 +746,11 @@ export default function PettyCashDashboard() {
           subtitle="All time"
         />
         <KPICard
-          title="Draft Expenses"
-          value={expenses.filter((e) => e.status === 'draft').length}
+          title="Submitted"
+          value={expenses.filter((e) => e.status === 'submitted').length}
           icon={FileText}
-          variant={
-            expenses.filter((e) => e.status === 'draft').length > 0
-              ? 'warning'
-              : 'default'
-          }
-          subtitle="Not yet submitted"
+          variant="default"
+          subtitle="Awaiting review"
         />
         <KPICard
           title="This Month"
@@ -599,7 +768,7 @@ export default function PettyCashDashboard() {
       </div>
 
       {/* Quick Actions */}
-      <div className="mb-6">
+      <div className="mb-6 flex flex-wrap gap-3">
         <button
           onClick={() => setShowExpenseForm(true)}
           disabled={transformedWallet?.status === 'closed'}
@@ -608,8 +777,16 @@ export default function PettyCashDashboard() {
           <Plus className="h-4 w-4" />
           New Expense
         </button>
+        <button
+          onClick={() => setShowStockPurchaseForm(true)}
+          disabled={transformedWallet?.status === 'closed'}
+          className="inline-flex items-center gap-2 rounded-lg border border-[#5A7A8F] px-4 py-2 text-sm font-medium text-[#5A7A8F] hover:bg-[#5A7A8F]/5 transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          <Package className="h-4 w-4" />
+          New Stock Purchase
+        </button>
         {transformedWallet?.status === 'closed' && (
-          <span className="ml-3 text-sm text-red-600">
+          <span className="ml-3 text-sm text-red-600 self-center">
             Your wallet is closed. Contact your manager.
           </span>
         )}
@@ -622,6 +799,7 @@ export default function PettyCashDashboard() {
             { id: 'expenses', label: 'Expenses', icon: Receipt },
             { id: 'reimbursements', label: 'Reimbursements', icon: Clock },
             { id: 'history', label: 'Transaction History', icon: FileText },
+            { id: 'stock_purchases', label: 'Stock Purchases', icon: Package },
           ].map((tab) => (
             <button
               key={tab.id}
@@ -727,6 +905,19 @@ export default function PettyCashDashboard() {
         </div>
       )}
 
+      {activeTab === 'stock_purchases' && (
+        <div>
+          <h3 className="text-lg font-semibold text-gray-900 mb-4">
+            My Stock Purchases
+          </h3>
+          <DataTable
+            columns={stockPurchaseColumns}
+            data={stockPurchases}
+            emptyMessage="No stock purchases yet"
+          />
+        </div>
+      )}
+
       {/* Expense Form Modal */}
       {showExpenseForm && transformedWallet && (
         <ExpenseForm
@@ -734,6 +925,21 @@ export default function PettyCashDashboard() {
           walletHolderName={transformedWallet.userName}
           onSave={handleCreateExpense}
           onCancel={() => setShowExpenseForm(false)}
+        />
+      )}
+
+      {/* Stock Purchase Form Modal */}
+      {showStockPurchaseForm && transformedWallet && user?.id && (
+        <StockPurchaseForm
+          walletId={transformedWallet.id}
+          companyId={transformedWallet.companyId}
+          currency={transformedWallet.currency}
+          userId={user.id}
+          onSave={() => {
+            setShowStockPurchaseForm(false);
+            setRefreshKey((prev) => prev + 1);
+          }}
+          onCancel={() => setShowStockPurchaseForm(false)}
         />
       )}
     </AppShell>
