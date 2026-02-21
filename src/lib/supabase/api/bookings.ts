@@ -391,6 +391,8 @@ export const bookingsApi = {
 
   async delete(id: string): Promise<void> {
     const supabase = createClient();
+    // Delete related commission_records first (FK has no CASCADE)
+    await supabase.from('commission_records').delete().eq('booking_id', id);
     const { error } = await supabase
       .from('bookings')
       .delete()
