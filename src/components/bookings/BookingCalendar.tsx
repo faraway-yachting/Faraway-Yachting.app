@@ -23,6 +23,7 @@ interface BookingCalendarProps {
   allBookingsDisplayFields?: string[];
   boatTabDisplayFields?: string[];
   cabinCounts?: Map<string, { total: number; booked: number }>;
+  paymentTotals?: Map<string, number>;
 }
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -73,6 +74,7 @@ export function BookingCalendar({
   allBookingsDisplayFields = ['title'],
   boatTabDisplayFields = ['title'],
   cabinCounts,
+  paymentTotals,
 }: BookingCalendarProps) {
   const [hoveredDate, setHoveredDate] = useState<string | null>(null);
 
@@ -114,6 +116,14 @@ export function BookingCalendar({
         const counts = cabinCounts.get(booking.id);
         if (!counts) return '';
         return `${counts.booked}/${counts.total} cabins`;
+      }
+      case 'balanceDue': {
+        const total = booking.totalPrice || 0;
+        if (total <= 0) return '';
+        const paid = paymentTotals?.get(booking.id) || 0;
+        const balance = total - paid;
+        if (balance <= 0) return '';
+        return `Balance: ${booking.currency || 'THB'} ${balance.toLocaleString()}`;
       }
       default: return '';
     }
@@ -429,11 +439,16 @@ export function BookingCalendar({
                       {extraFields.map((field) => {
                         const value = getFieldValue(segment.booking, field, projectMap);
                         if (!value) return null;
+                        const isDominant = field === 'balanceDue';
                         return (
                           <div
                             key={field}
-                            className="truncate"
-                            style={{ color: '#4B5563', height: '20px', lineHeight: '20px' }}
+                            className={`truncate ${isDominant ? 'font-bold' : ''}`}
+                            style={{
+                              color: isDominant ? '#DC2626' : '#4B5563',
+                              height: '20px',
+                              lineHeight: '20px',
+                            }}
                           >
                             {value}
                           </div>

@@ -70,6 +70,7 @@ interface CabinSectionProps {
   companies: CompanyOption[];
   users: { id: string; full_name: string }[];
   onRecordCash?: (allocationId: string) => void;
+  onCollectBalance?: (allocationId: string, remainingBalance: number) => void;
   onCreateInvoice?: (allocation: CabinAllocation) => void;
   onCreateReceipt?: (allocation: CabinAllocation) => void;
   isCollapsed?: boolean;
@@ -130,6 +131,7 @@ export default function CabinSection({
   companies,
   users,
   onRecordCash,
+  onCollectBalance,
   onCreateInvoice,
   onCreateReceipt,
   isCollapsed,
@@ -636,6 +638,7 @@ export default function CabinSection({
             onAllocationsChange={onAllocationsChange}
             allAllocations={cabinAllocations}
             onRecordCash={onRecordCash}
+            onCollectBalance={onCollectBalance}
             onCreateInvoice={onCreateInvoice}
             onCreateReceipt={onCreateReceipt}
             onAddAgency={(agency) => setAgencies(prev => [...prev, agency])}
@@ -823,6 +826,7 @@ interface CabinAllocationCardProps {
   onAllocationsChange: (allocations: CabinAllocation[]) => void;
   allAllocations: CabinAllocation[];
   onRecordCash?: (allocationId: string) => void;
+  onCollectBalance?: (allocationId: string, remainingBalance: number) => void;
   onCreateInvoice?: (allocation: CabinAllocation) => void;
   onCreateReceipt?: (allocation: CabinAllocation) => void;
   onDelete?: () => void;
@@ -863,6 +867,7 @@ function CabinAllocationCard({
   onAllocationsChange,
   allAllocations,
   onRecordCash,
+  onCollectBalance,
   onCreateInvoice,
   onCreateReceipt,
   onDelete,
@@ -1732,6 +1737,32 @@ function CabinAllocationCard({
                 </span>
                 {allocation.paymentStatus === 'paid' && <CheckCircle2 className="h-4 w-4 text-green-500" />}
                 {allocation.paymentStatus === 'partial' && <Clock className="h-4 w-4 text-yellow-500" />}
+                {canEdit && onCollectBalance && allocation.price && paidTotal < allocation.price && !allocation.id.startsWith('temp-') && (
+                  <button
+                    type="button"
+                    onClick={() => onCollectBalance(allocation.id, allocation.price! - paidTotal)}
+                    className="ml-auto flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-white bg-emerald-600 rounded-md hover:bg-emerald-700 transition-colors"
+                  >
+                    <Banknote className="h-3 w-3" />
+                    Collect Balance
+                  </button>
+                )}
+              </div>
+            )}
+            {/* Balance Due — no payments yet */}
+            {payments.length === 0 && allocation.price && allocation.price > 0 && canEdit && onCollectBalance && !allocation.id.startsWith('temp-') && (
+              <div className="flex items-center justify-between mb-3 rounded-md border border-amber-200 bg-amber-50/50 px-3 py-2">
+                <span className="text-xs text-amber-700 font-medium">
+                  Balance Due: {allocation.currency || currency} {allocation.price.toLocaleString()}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => onCollectBalance(allocation.id, allocation.price!)}
+                  className="flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-white bg-emerald-600 rounded-md hover:bg-emerald-700 transition-colors"
+                >
+                  <Banknote className="h-3 w-3" />
+                  Collect Balance
+                </button>
               </div>
             )}
 

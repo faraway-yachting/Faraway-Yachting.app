@@ -36,6 +36,7 @@ export const CALENDAR_DISPLAY_FIELD_OPTIONS = [
   { key: 'contractNote', label: 'Charter Contract' },
   { key: 'meetAndGreeter', label: 'Meet & Greeter' },
   { key: 'cabinSummary', label: 'Cabin Summary' },
+  { key: 'balanceDue', label: 'Balance Due' },
 ] as const;
 
 const DEFAULT_CALENDAR_DISPLAY: CalendarDisplaySettings = {

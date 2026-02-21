@@ -88,6 +88,7 @@ interface FinanceSectionProps {
   companies?: CompanyOption[];
   onAddPaymentFromInvoice?: (paymentIndex: number) => void;
   loadBankAccountsForCompany?: (companyId: string) => Promise<BankAccountOption[]>;
+  onCollectBalance?: () => void;
   isCollapsed?: boolean;
   onToggleCollapse?: () => void;
   isCompleted?: boolean;
@@ -117,6 +118,7 @@ export function FinanceSection({
   companies = [],
   onAddPaymentFromInvoice,
   loadBankAccountsForCompany,
+  onCollectBalance,
   isCollapsed,
   onToggleCollapse,
   isCompleted,
@@ -462,7 +464,34 @@ export function FinanceSection({
                   (Remaining: {fmtAmt(totalCost - totalPaid, formData.currency || 'THB')})
                 </span>
               )}
+              {totalCost > 0 && totalPaid < totalCost && canEdit && isEditing && booking?.id && onCollectBalance && (
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); onCollectBalance(); }}
+                  className="ml-3 inline-flex items-center gap-1.5 px-3 py-1 text-xs font-medium text-white bg-emerald-600 rounded-md hover:bg-emerald-700 transition-colors shadow-sm"
+                >
+                  <Banknote className="h-3.5 w-3.5" />
+                  Collect Balance
+                </button>
+              )}
             </div>
+          </div>
+        )}
+
+        {/* Balance Due box — shown when no payments yet but there's a cost */}
+        {!hasPaidPayments && totalCost > 0 && canEdit && isEditing && booking?.id && onCollectBalance && (
+          <div className="rounded-lg border border-amber-200 bg-amber-50/50 p-3 flex items-center justify-between">
+            <span className="text-sm text-amber-700 font-medium">
+              Balance Due: {fmtAmt(totalCost, formData.currency || 'THB')}
+            </span>
+            <button
+              type="button"
+              onClick={onCollectBalance}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-emerald-600 rounded-md hover:bg-emerald-700 transition-colors shadow-sm"
+            >
+              <Banknote className="h-3.5 w-3.5" />
+              Collect Balance
+            </button>
           </div>
         )}
 

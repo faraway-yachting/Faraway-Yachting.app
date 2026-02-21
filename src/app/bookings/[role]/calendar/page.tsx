@@ -12,6 +12,7 @@ import { Project } from '@/data/project/types';
 import { Currency } from '@/data/company/types';
 import { bookingsApi, createBookingWithNumber } from '@/lib/supabase/api/bookings';
 import { cabinAllocationsApi } from '@/lib/supabase/api/cabinAllocations';
+import { bookingPaymentsApi } from '@/lib/supabase/api/bookingPayments';
 import { projectCabinsApi } from '@/lib/supabase/api/projectCabins';
 import { yachtProductsApi } from '@/lib/supabase/api/yachtProducts';
 import { useYachtProjects } from '@/hooks/queries/useProjects';
@@ -68,6 +69,16 @@ export default function BookingCalendarPage() {
     cabinAllocationsApi.getCabinCountsByBookingIds(cabinBookingIds)
       .then(setCabinCounts)
       .catch(() => {}); // Silently ignore if table doesn't exist yet
+  }, [bookings]);
+
+  // Load payment totals for balance due display
+  const [paymentTotals, setPaymentTotals] = useState<Map<string, number>>(new Map());
+  useEffect(() => {
+    const ids = bookings.map(b => b.id);
+    if (ids.length === 0) return;
+    bookingPaymentsApi.getPaidTotalsByBookingIds(ids)
+      .then(setPaymentTotals)
+      .catch(() => {});
   }, [bookings]);
 
   // Real-time updates: when another user creates/edits a booking, this calendar auto-refreshes
@@ -412,6 +423,7 @@ export default function BookingCalendarPage() {
         allBookingsDisplayFields={calendarDisplay.allBookingsFields}
         boatTabDisplayFields={calendarDisplay.boatTabFields}
         cabinCounts={cabinCounts}
+        paymentTotals={paymentTotals}
       />
 
       {/* Booking Form Modal */}

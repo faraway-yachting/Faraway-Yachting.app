@@ -125,4 +125,19 @@ export const bookingPaymentsApi = {
       needs_accounting_action: false,
     });
   },
+
+  async getPaidTotalsByBookingIds(bookingIds: string[]): Promise<Map<string, number>> {
+    if (bookingIds.length === 0) return new Map();
+    const supabase = createClient();
+    const { data } = await supabase
+      .from('booking_payments')
+      .select('booking_id, amount, paid_date')
+      .in('booking_id', bookingIds)
+      .not('paid_date', 'is', null);
+    const map = new Map<string, number>();
+    for (const row of (data || []) as { booking_id: string; amount: number; paid_date: string }[]) {
+      map.set(row.booking_id, (map.get(row.booking_id) || 0) + (row.amount || 0));
+    }
+    return map;
+  },
 };

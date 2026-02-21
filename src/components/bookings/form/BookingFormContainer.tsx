@@ -32,6 +32,7 @@ import { useAuth } from '@/components/auth/AuthProvider';
 import { employeesApi } from '@/lib/supabase/api/employees';
 import { meetGreetersApi, MeetGreeter } from '@/lib/supabase/api/meetGreeters';
 import RecordCashModal from '@/components/cash-collections/RecordCashModal';
+import CollectBalanceModal from '@/components/cash-collections/CollectBalanceModal';
 import CommissionSection from './CommissionSection';
 import CrewSection from './CrewSection';
 import CabinSection from './CabinSection';
@@ -199,6 +200,9 @@ export function BookingFormContainer({
   const [showCashModal, setShowCashModal] = useState(false);
   const [editingCash, setEditingCash] = useState<CashCollection | null>(null);
   const [bankAccounts, setBankAccounts] = useState<BankAccountOption[]>([]);
+  const [showCollectBalanceModal, setShowCollectBalanceModal] = useState(false);
+  const [collectBalanceAllocationId, setCollectBalanceAllocationId] = useState<string | null>(null);
+  const [collectBalanceAmount, setCollectBalanceAmount] = useState(0);
 
   // Cabin charter allocations
   const [cabinAllocations, setCabinAllocations] = useState<CabinAllocation[]>([]);
@@ -1194,6 +1198,102 @@ export function BookingFormContainer({
     window.open(url as unknown as string, '_blank');
   };
 
+  // --- Collect Balance handlers ---
+  const handleCollectBalance = () => {
+    const totalCost = (formData.charterFee || 0) + (formData.extraCharges || 0) + (formData.adminFee || 0);
+    const totalPaid = payments.filter(p => p.paidDate && p.amount > 0).reduce((s, p) => s + p.amount, 0);
+    setCollectBalanceAllocationId(null);
+    setCollectBalanceAmount(Math.max(0, totalCost - totalPaid));
+    setShowCollectBalanceModal(true);
+  };
+
+  const handleCollectCabinBalance = (allocationId: string, remainingBalance: number) => {
+    setCollectBalanceAllocationId(allocationId);
+    setCollectBalanceAmount(remainingBalance);
+    setShowCollectBalanceModal(true);
+  };
+
+  const handleCollectBalanceCash = async (data: {
+    amount: number;
+    currency: string;
+    collected_by_id: string;
+    collection_notes?: string;
+  }) => {
+    if (!booking?.id) return;
+    const resolvedCompanyId = projects.find(p => p.id === formData.projectId)?.companyId;
+    if (!resolvedCompanyId) {
+      alert('Cannot record cash: no company associated with this booking.');
+      return;
+    }
+    await cashCollectionsApi.create({
+      company_id: resolvedCompanyId,
+      booking_id: booking.id,
+      cabin_allocation_id: collectBalanceAllocationId || undefined,
+      amount: data.amount,
+      currency: data.currency,
+      collected_by: data.collected_by_id,
+      collection_notes: data.collection_notes,
+    });
+    const updated = await cashCollectionsApi.getByBookingId(booking.id);
+    setCashCollections(updated);
+  };
+
+  const handleCollectBalancePayment = async (data: {
+    amount: number;
+    currency: string;
+    paidDate: string;
+    paymentMethod: string;
+    bankAccountId?: string;
+    paidToCompanyId?: string;
+    note?: string;
+  }) => {
+    if (!booking?.id) return;
+    const { bookingPaymentsApi } = await import('@/lib/supabase/api/bookingPayments');
+    const record: Record<string, unknown> = {
+      booking_id: booking.id,
+      payment_type: 'balance',
+      amount: data.amount,
+      currency: data.currency,
+      paid_date: data.paidDate,
+      payment_method: data.paymentMethod,
+      note: data.note || null,
+    };
+    if (data.bankAccountId) record.bank_account_id = data.bankAccountId;
+    if (data.paidToCompanyId) record.paid_to_company_id = data.paidToCompanyId;
+    if (collectBalanceAllocationId) record.cabin_allocation_id = collectBalanceAllocationId;
+
+    await bookingPaymentsApi.create(record);
+
+    if (!collectBalanceAllocationId) {
+      // Regular booking: reload payments
+      const rows = await bookingPaymentsApi.getByBookingId(booking.id);
+      const mapped: PaymentRecord[] = rows.map((r: any) => ({
+        id: r.id,
+        paymentType: r.payment_type || 'deposit',
+        amount: r.amount || 0,
+        currency: r.currency || 'THB',
+        dueDate: r.due_date || '',
+        paidDate: r.paid_date || '',
+        note: r.note || '',
+        receiptId: r.receipt_id,
+        paymentMethod: r.payment_method,
+        bankAccountId: r.bank_account_id,
+        syncedToReceipt: r.synced_to_receipt || false,
+        needsAccountingAction: r.needs_accounting_action || false,
+      }));
+      setPayments(mapped);
+      // Auto-update payment status
+      const totalPaid = mapped.filter(p => p.paidDate && p.amount > 0).reduce((s, p) => s + p.amount, 0);
+      const totalCost = (formData.charterFee || 0) + (formData.extraCharges || 0) + (formData.adminFee || 0);
+      if (totalCost > 0 && totalPaid >= totalCost) {
+        setFormData(prev => ({ ...prev, paymentStatus: 'paid' as const }));
+      } else if (totalPaid > 0) {
+        setFormData(prev => ({ ...prev, paymentStatus: 'partial' as const }));
+      }
+    }
+    // For cabin allocations, CabinSection reloads its own payments via useEffect
+  };
+
   const handleDelete = async () => {
     if (!onDelete) return;
 
@@ -1347,6 +1447,7 @@ export function BookingFormContainer({
                 companies={companies}
                 onAddPaymentFromInvoice={handleAddPaymentFromInvoice}
                 loadBankAccountsForCompany={loadBankAccountsForCompany}
+                onCollectBalance={handleCollectBalance}
                 isCollapsed={!!collapsedSections.finance}
                 onToggleCollapse={() => toggleSection('finance')}
                 isCompleted={!!(formData.completedSections || {}).finance}
@@ -1400,6 +1501,7 @@ export function BookingFormContainer({
                   setEditingCash(null);
                   setShowCashModal(true);
                 }}
+                onCollectBalance={handleCollectCabinBalance}
                 isCollapsed={!!collapsedSections.cabinAllocations}
                 onToggleCollapse={() => toggleSection('cabinAllocations')}
               />
@@ -1586,6 +1688,32 @@ export function BookingFormContainer({
             setCashCollections(updated);
             setEditingCash(null);
           }}
+        />
+      )}
+      {showCollectBalanceModal && booking?.id && authUser?.id && (
+        <CollectBalanceModal
+          onClose={() => {
+            setShowCollectBalanceModal(false);
+            setCollectBalanceAllocationId(null);
+          }}
+          remainingBalance={collectBalanceAmount}
+          currency={
+            collectBalanceAllocationId
+              ? (cabinAllocations.find(a => a.id === collectBalanceAllocationId)?.currency || formData.currency || 'THB')
+              : (formData.currency || 'THB')
+          }
+          meetGreeterName={meetGreeters.find(g => g.id === formData.meetGreeterId)?.name}
+          currentUserId={authUser.id}
+          users={userProfiles}
+          bankAccounts={bankAccounts}
+          companies={companies}
+          cabinLabel={
+            collectBalanceAllocationId
+              ? (cabinAllocations.find(a => a.id === collectBalanceAllocationId)?.cabinLabel || undefined)
+              : undefined
+          }
+          onSubmitCash={handleCollectBalanceCash}
+          onSubmitPayment={handleCollectBalancePayment}
         />
       )}
     </>
