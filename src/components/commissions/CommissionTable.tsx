@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { Loader2, Plus, Pencil, Trash2, Download, X, Check, AlertCircle, Link2, PenLine, CheckCircle, DollarSign, Calendar, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Loader2, Plus, Pencil, Trash2, Download, FileText, X, Check, AlertCircle, Link2, PenLine, CheckCircle, DollarSign, Calendar, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import { commissionRecordsApi } from '@/lib/supabase/api/commissionRecords';
 import { projectsApi } from '@/lib/supabase/api/projects';
@@ -525,6 +525,65 @@ export default function CommissionTable() {
     URL.revokeObjectURL(url);
   };
 
+  const [exportingPdf, setExportingPdf] = useState(false);
+
+  const handleExportPDF = async () => {
+    setExportingPdf(true);
+    try {
+      const { generateCommissionsPdf } = await import('@/lib/pdf/generateCommissionsPdf');
+
+      const pdfRecords = filteredRecords.map((r) => ({
+        boatName: getBoatName(r),
+        charterDateFrom: r.charter_date_from,
+        charterDateTo: r.charter_date_to,
+        charterType: r.charter_type,
+        charterFee: r.charter_fee,
+        managementFee: r.management_fee,
+        netIncome: r.net_income,
+        ownershipPercentage: r.ownership_percentage,
+        commissionBase: r.commission_base,
+        commissionRate: r.commission_rate,
+        totalCommission: r.total_commission,
+        ownerName: getUserName(r.booking_owner_id),
+        currency: r.currency,
+        isEarned: isEarned(r),
+        paymentStatus: (r as any).payment_status || 'unpaid',
+        source: r.source || 'manual',
+      }));
+
+      // Build filter description
+      const filters: string[] = [];
+      if (filterBoat !== 'all') {
+        const boatName = boatOptions.find(([id]) => id === filterBoat)?.[1];
+        if (boatName) filters.push(`Boat: ${boatName}`);
+      }
+      if (filterOwner !== 'all') {
+        const ownerName = ownerOptions.find(([id]) => id === filterOwner)?.[1];
+        if (ownerName) filters.push(`Sales: ${ownerName}`);
+      }
+      if (filterSource !== 'all') filters.push(`Source: ${filterSource}`);
+      if (filterDateFrom) filters.push(`From: ${filterDateFrom}`);
+      if (filterDateTo) filters.push(`To: ${filterDateTo}`);
+
+      await generateCommissionsPdf({
+        records: pdfRecords,
+        summary: {
+          totalCommission: summary.totalCommission,
+          earnedCommission: summary.earnedCommission,
+          paidCommission: summary.paidCommission,
+          byOwner: summary.byOwner,
+        },
+        periodLabel: monthLabel,
+        filterDescription: filters.length > 0 ? filters.join('  |  ') : undefined,
+      });
+    } catch (err) {
+      console.error('Failed to generate PDF:', err);
+      alert('Failed to generate PDF. Please try again.');
+    } finally {
+      setExportingPdf(false);
+    }
+  };
+
   const formatCurrency = (amount: number, currency: string = 'THB') =>
     `${currency} ${amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
@@ -673,10 +732,16 @@ export default function CommissionTable() {
 
         <div className="flex-1" />
 
+        <button onClick={handleExportPDF} disabled={exportingPdf}
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50">
+          {exportingPdf ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
+          Export PDF
+        </button>
+
         <button onClick={handleExportCSV}
           className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">
           <Download className="h-4 w-4" />
-          Export CSV
+          CSV
         </button>
 
         <button onClick={handleSync} disabled={syncing}
