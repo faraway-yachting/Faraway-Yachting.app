@@ -18,7 +18,7 @@ export const taxiGuestNoteTemplatesApi = {
   async getAll(): Promise<TaxiGuestNoteTemplate[]> {
     const supabase = createClient();
     const { data, error } = await supabase
-      .from('taxi_guest_note_templates')
+      .from('taxi_guest_note_templates' as any)
       .select('*')
       .order('sort_order', { ascending: true });
     if (error) throw error;
@@ -28,7 +28,7 @@ export const taxiGuestNoteTemplatesApi = {
   async getActive(): Promise<TaxiGuestNoteTemplate[]> {
     const supabase = createClient();
     const { data, error } = await supabase
-      .from('taxi_guest_note_templates')
+      .from('taxi_guest_note_templates' as any)
       .select('*')
       .eq('is_active', true)
       .order('sort_order', { ascending: true });
@@ -44,7 +44,7 @@ export const taxiGuestNoteTemplatesApi = {
   }): Promise<TaxiGuestNoteTemplate> {
     const supabase = createClient();
     const { data, error } = await supabase
-      .from('taxi_guest_note_templates')
+      .from('taxi_guest_note_templates' as any)
       .insert([{
         name: template.name,
         content_en: template.contentEn || null,
@@ -75,7 +75,7 @@ export const taxiGuestNoteTemplatesApi = {
     if (updates.sortOrder !== undefined) dbUpdates.sort_order = updates.sortOrder;
 
     const { data, error } = await supabase
-      .from('taxi_guest_note_templates')
+      .from('taxi_guest_note_templates' as any)
       .update(dbUpdates)
       .eq('id', id)
       .select()
@@ -87,7 +87,7 @@ export const taxiGuestNoteTemplatesApi = {
   async delete(id: string): Promise<void> {
     const supabase = createClient();
     const { error } = await supabase
-      .from('taxi_guest_note_templates')
+      .from('taxi_guest_note_templates' as any)
       .delete()
       .eq('id', id);
     if (error) throw error;

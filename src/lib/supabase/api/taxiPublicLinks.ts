@@ -20,7 +20,7 @@ export const taxiPublicLinksApi = {
   async getAll(): Promise<TaxiPublicLink[]> {
     const supabase = createClient();
     const { data, error } = await supabase
-      .from('taxi_public_links')
+      .from('taxi_public_links' as any)
       .select('*')
       .order('created_at', { ascending: false });
     if (error) throw error;
@@ -30,7 +30,7 @@ export const taxiPublicLinksApi = {
   async getByTaxiCompanyId(companyId: string): Promise<TaxiPublicLink[]> {
     const supabase = createClient();
     const { data, error } = await supabase
-      .from('taxi_public_links')
+      .from('taxi_public_links' as any)
       .select('*')
       .eq('taxi_company_id', companyId)
       .order('created_at', { ascending: false });
@@ -47,7 +47,7 @@ export const taxiPublicLinksApi = {
     const supabase = createClient();
     const token = nanoid(12);
     const { data, error } = await supabase
-      .from('taxi_public_links')
+      .from('taxi_public_links' as any)
       .insert({
         token,
         label: input.label,
@@ -78,7 +78,7 @@ export const taxiPublicLinksApi = {
     if (input.expiresAt !== undefined) updates.expires_at = input.expiresAt;
 
     const { error } = await supabase
-      .from('taxi_public_links')
+      .from('taxi_public_links' as any)
       .update(updates)
       .eq('id', id);
     if (error) throw error;
@@ -87,7 +87,7 @@ export const taxiPublicLinksApi = {
   async delete(id: string): Promise<void> {
     const supabase = createClient();
     const { error } = await supabase
-      .from('taxi_public_links')
+      .from('taxi_public_links' as any)
       .delete()
       .eq('id', id);
     if (error) throw error;

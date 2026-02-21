@@ -1,5 +1,5 @@
 import { createClient } from '../client';
-import type { TaxiTransfer, TransferStatus } from '@/data/taxi/types';
+import type { TaxiTransfer } from '@/data/taxi/types';
 
 // DB row shape (snake_case) — we use `as any` for columns not yet in generated types
 type DbRow = Record<string, any>;
@@ -99,7 +99,7 @@ export async function getNextTransferNumber(): Promise<string> {
   const prefix = `TX-${year}${month}`;
 
   const { data, error } = await supabase
-    .from('taxi_transfers')
+    .from('taxi_transfers' as any)
     .select('transfer_number')
     .like('transfer_number', `${prefix}%`)
     .order('transfer_number', { ascending: false })
@@ -107,7 +107,7 @@ export async function getNextTransferNumber(): Promise<string> {
 
   let nextSeq = 1;
   if (!error && data && data.length > 0) {
-    const lastNumber = data[0].transfer_number;
+    const lastNumber = (data[0] as any).transfer_number;
     const seqStr = lastNumber.substring(prefix.length);
     const lastSeq = parseInt(seqStr, 10);
     if (!isNaN(lastSeq)) {
@@ -144,7 +144,7 @@ export const taxiTransfersApi = {
   async getAll(): Promise<TaxiTransfer[]> {
     const supabase = createClient();
     const { data, error } = await supabase
-      .from('taxi_transfers')
+      .from('taxi_transfers' as any)
       .select(SELECT_WITH_COMPANY)
       .order('pickup_date', { ascending: false })
       .limit(500);
@@ -155,7 +155,7 @@ export const taxiTransfersApi = {
   async getById(id: string): Promise<TaxiTransfer | null> {
     const supabase = createClient();
     const { data, error } = await supabase
-      .from('taxi_transfers')
+      .from('taxi_transfers' as any)
       .select(SELECT_WITH_COMPANY)
       .eq('id', id)
       .single();
@@ -169,7 +169,7 @@ export const taxiTransfersApi = {
   async getByBookingId(bookingId: string): Promise<TaxiTransfer[]> {
     const supabase = createClient();
     const { data, error } = await supabase
-      .from('taxi_transfers')
+      .from('taxi_transfers' as any)
       .select(SELECT_WITH_COMPANY)
       .eq('booking_id', bookingId)
       .order('pickup_date', { ascending: true });
@@ -180,7 +180,7 @@ export const taxiTransfersApi = {
   async getByCompanyId(companyId: string): Promise<TaxiTransfer[]> {
     const supabase = createClient();
     const { data, error } = await supabase
-      .from('taxi_transfers')
+      .from('taxi_transfers' as any)
       .select(SELECT_WITH_COMPANY)
       .eq('taxi_company_id', companyId)
       .order('pickup_date', { ascending: true });
@@ -191,7 +191,7 @@ export const taxiTransfersApi = {
   async getByDateRange(from: string, to: string): Promise<TaxiTransfer[]> {
     const supabase = createClient();
     const { data, error } = await supabase
-      .from('taxi_transfers')
+      .from('taxi_transfers' as any)
       .select(SELECT_WITH_COMPANY)
       .or(`pickup_date.gte.${from},return_date.gte.${from}`)
       .or(`pickup_date.lte.${to},return_date.lte.${to}`)
@@ -207,7 +207,7 @@ export const taxiTransfersApi = {
     // This includes transfers where paid_by = 'faraway' with matching payment week
     // OR transfers within the week's date range regardless of paid_by
     const { data, error } = await supabase
-      .from('taxi_transfers')
+      .from('taxi_transfers' as any)
       .select(SELECT_WITH_COMPANY)
       .eq('faraway_paid_week', weekString)
       .order('pickup_date', { ascending: true });
@@ -218,7 +218,7 @@ export const taxiTransfersApi = {
   async getUnpaidByFaraway(): Promise<TaxiTransfer[]> {
     const supabase = createClient();
     const { data, error } = await supabase
-      .from('taxi_transfers')
+      .from('taxi_transfers' as any)
       .select(SELECT_WITH_COMPANY)
       .eq('paid_by', 'faraway')
       .eq('faraway_paid', false)
@@ -236,7 +236,7 @@ export const taxiTransfersApi = {
       dbData.created_by = user?.id || null;
     }
     const { data, error } = await supabase
-      .from('taxi_transfers')
+      .from('taxi_transfers' as any)
       .insert([dbData])
       .select(SELECT_WITH_COMPANY)
       .single();
@@ -248,7 +248,7 @@ export const taxiTransfersApi = {
     const supabase = createClient();
     const dbData = frontendToDb(updates);
     const { data, error } = await supabase
-      .from('taxi_transfers')
+      .from('taxi_transfers' as any)
       .update(dbData)
       .eq('id', id)
       .select(SELECT_WITH_COMPANY)
@@ -260,7 +260,7 @@ export const taxiTransfersApi = {
   async delete(id: string): Promise<void> {
     const supabase = createClient();
     const { error } = await supabase
-      .from('taxi_transfers')
+      .from('taxi_transfers' as any)
       .delete()
       .eq('id', id);
     if (error) throw error;
@@ -288,13 +288,13 @@ export const taxiTransfersApi = {
 
     const supabase = createClient();
     const { data, error } = await supabase
-      .from('taxi_transfers')
+      .from('taxi_transfers' as any)
       .select('booking_id')
       .in('booking_id', bookingIds)
       .neq('status', 'cancelled');
     if (error) throw error;
 
-    for (const row of (data ?? []) as { booking_id: string }[]) {
+    for (const row of (data ?? []) as unknown as { booking_id: string }[]) {
       result.set(row.booking_id, (result.get(row.booking_id) || 0) + 1);
     }
 

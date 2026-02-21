@@ -5,7 +5,7 @@ export const taxiCompaniesApi = {
   async getAll(): Promise<TaxiCompany[]> {
     const supabase = createClient();
     const { data, error } = await supabase
-      .from('taxi_companies')
+      .from('taxi_companies' as any)
       .select('*')
       .order('name');
     if (error) throw error;
@@ -15,7 +15,7 @@ export const taxiCompaniesApi = {
   async getActive(): Promise<TaxiCompany[]> {
     const supabase = createClient();
     const { data, error } = await supabase
-      .from('taxi_companies')
+      .from('taxi_companies' as any)
       .select('*')
       .eq('is_active', true)
       .order('name');
@@ -26,7 +26,7 @@ export const taxiCompaniesApi = {
   async getById(id: string): Promise<TaxiCompany | null> {
     const supabase = createClient();
     const { data, error } = await supabase
-      .from('taxi_companies')
+      .from('taxi_companies' as any)
       .select('*')
       .eq('id', id)
       .single();
@@ -47,7 +47,7 @@ export const taxiCompaniesApi = {
   }): Promise<TaxiCompany> {
     const supabase = createClient();
     const { data, error } = await supabase
-      .from('taxi_companies')
+      .from('taxi_companies' as any)
       .insert([{
         name: company.name,
         contact_person: company.contactPerson || null,
@@ -84,7 +84,7 @@ export const taxiCompaniesApi = {
     if (updates.isActive !== undefined) dbUpdates.is_active = updates.isActive;
 
     const { data, error } = await supabase
-      .from('taxi_companies')
+      .from('taxi_companies' as any)
       .update(dbUpdates)
       .eq('id', id)
       .select()
@@ -96,7 +96,7 @@ export const taxiCompaniesApi = {
   async delete(id: string): Promise<void> {
     const supabase = createClient();
     const { error } = await supabase
-      .from('taxi_companies')
+      .from('taxi_companies' as any)
       .delete()
       .eq('id', id);
     if (error) throw error;
