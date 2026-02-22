@@ -23,6 +23,14 @@ CREATE POLICY "Authenticated users can manage taxi booking links"
   ON taxi_booking_links FOR ALL TO authenticated USING (true) WITH CHECK (true);
 
 -- Updated at trigger
+CREATE OR REPLACE FUNCTION set_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at = now();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
 CREATE TRIGGER set_taxi_booking_links_updated_at
   BEFORE UPDATE ON taxi_booking_links
-  FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+  FOR EACH ROW EXECUTE FUNCTION set_updated_at();

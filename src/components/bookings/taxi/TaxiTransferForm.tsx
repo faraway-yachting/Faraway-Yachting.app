@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { X, Trash2, Search, ExternalLink, Link2, Check } from 'lucide-react';
+import { X, Trash2, Search, ExternalLink, Link2, Check, MapPin, Clock, Users, CreditCard, MessageSquare, Car, User, FileDown } from 'lucide-react';
 import {
   TaxiTransfer,
   TripType,
@@ -98,6 +98,7 @@ export function TaxiTransferForm({ transfer, bookingId, onClose }: TaxiTransferF
   const [error, setError] = useState('');
   const [copiedLink, setCopiedLink] = useState(false);
   const [generatingLink, setGeneratingLink] = useState(false);
+  const [downloadingPdf, setDownloadingPdf] = useState(false);
 
   const handleShareLink = async () => {
     const bId = linkedBookingId;
@@ -116,6 +117,49 @@ export function TaxiTransferForm({ transfer, bookingId, onClose }: TaxiTransferF
       console.error('Failed to generate share link:', err);
     } finally {
       setGeneratingLink(false);
+    }
+  };
+
+  const handleDownloadPdf = async () => {
+    try {
+      setDownloadingPdf(true);
+      const { generateTaxiTransferPdf } = await import('@/lib/pdf/generateTaxiTransferPdf');
+      const selectedCompany = companies.find(c => c.id === taxiCompanyId);
+      await generateTaxiTransferPdf({
+        transferNumber: transfer?.transferNumber,
+        tripType,
+        status,
+        guestName,
+        boatName: boatName || undefined,
+        contactNumber: contactNumber || undefined,
+        numberOfGuests: numberOfGuests ? parseInt(numberOfGuests) : undefined,
+        pickupDate: pickupDate || undefined,
+        pickupTime: pickupTime || undefined,
+        pickupLocation: pickupLocation || undefined,
+        pickupLocationUrl: pickupLocationUrl || undefined,
+        pickupDropoff: pickupDropoff || undefined,
+        pickupDropoffUrl: pickupDropoffUrl || undefined,
+        returnDate: returnDate || undefined,
+        returnTime: returnTime || undefined,
+        returnLocation: returnLocation || undefined,
+        returnLocationUrl: returnLocationUrl || undefined,
+        returnDropoff: returnDropoff || undefined,
+        returnDropoffUrl: returnDropoffUrl || undefined,
+        taxiCompanyName: selectedCompany?.name || undefined,
+        driverName: driverName || undefined,
+        driverPhone: driverPhone || undefined,
+        vanNumberPlate: vanNumberPlate || undefined,
+        paidBy,
+        amount: amount ? parseFloat(amount) : undefined,
+        currency,
+        paymentNote: paymentNote || undefined,
+        guestNote: guestNote || undefined,
+        driverNote: driverNote || undefined,
+      });
+    } catch (err) {
+      console.error('Failed to generate PDF:', err);
+    } finally {
+      setDownloadingPdf(false);
     }
   };
 
@@ -266,394 +310,313 @@ export function TaxiTransferForm({ transfer, bookingId, onClose }: TaxiTransferF
   const showPickup = tripType !== 'return_only';
   const showReturn = tripType !== 'pickup_only';
 
+  const inputClass = 'w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 transition-colors';
+  const labelClass = 'block text-xs font-medium text-gray-500 mb-1.5';
+
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
+    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
         {/* Header */}
-        <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between bg-gray-50">
-          <div>
-            <h2 className="text-lg font-semibold text-gray-900">
-              {isEditing ? `Transfer ${transfer.transferNumber}` : 'New Taxi Transfer'}
-            </h2>
-            {isEditing && (
-              <p className="text-sm text-gray-500">Created {new Date(transfer.createdAt).toLocaleDateString()}</p>
-            )}
+        <div className="px-6 py-4 bg-gradient-to-r from-[#1e3a5f] to-[#2a5280] flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 bg-white/10 rounded-xl flex items-center justify-center">
+              <Car className="h-4.5 w-4.5 text-white" />
+            </div>
+            <div>
+              <h2 className="text-base font-semibold text-white">
+                {isEditing ? `Transfer ${transfer.transferNumber}` : 'New Taxi Transfer'}
+              </h2>
+              <div className="flex items-center gap-2 mt-0.5">
+                {isEditing && (
+                  <span className="text-xs text-blue-200">Created {new Date(transfer.createdAt).toLocaleDateString()}</span>
+                )}
+              </div>
+            </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5">
             {linkedBookingId && (
               <button
                 onClick={handleShareLink}
                 disabled={generatingLink}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg transition-colors"
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition-all ${
+                  copiedLink
+                    ? 'bg-green-500/20 text-green-200 border border-green-400/30'
+                    : 'bg-white/10 text-white border border-white/20 hover:bg-white/20'
+                }`}
                 title="Copy guest link to clipboard"
               >
                 {generatingLink ? (
-                  <div className="animate-spin rounded-full h-4 w-4 border border-gray-400 border-t-transparent" />
+                  <div className="animate-spin rounded-full h-3 w-3 border-2 border-white/40 border-t-white" />
                 ) : copiedLink ? (
-                  <Check className="h-4 w-4 text-green-600" />
+                  <Check className="h-3 w-3" />
                 ) : (
-                  <Link2 className="h-4 w-4" />
+                  <Link2 className="h-3 w-3" />
                 )}
-                {copiedLink ? 'Copied!' : 'Share'}
+                {copiedLink ? 'Copied!' : 'Guest Link'}
+              </button>
+            )}
+            {isEditing && (
+              <button
+                onClick={handleDownloadPdf}
+                disabled={downloadingPdf}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-white/10 text-white border border-white/20 hover:bg-white/20 transition-all"
+                title="Download PDF"
+              >
+                {downloadingPdf ? (
+                  <div className="animate-spin rounded-full h-3 w-3 border-2 border-white/40 border-t-white" />
+                ) : (
+                  <FileDown className="h-3 w-3" />
+                )}
+                PDF
               </button>
             )}
             {isEditing && canDelete && (
               <button
                 onClick={handleDelete}
                 disabled={deleting}
-                className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                className="p-1.5 text-white/60 hover:text-red-300 hover:bg-white/10 rounded-lg transition-colors"
                 title="Delete transfer"
               >
-                <Trash2 className="h-5 w-5" />
+                <Trash2 className="h-4 w-4" />
               </button>
             )}
-            <button onClick={onClose} className="p-2 text-gray-400 hover:text-gray-600 rounded-lg">
-              <X className="h-5 w-5" />
+            <button onClick={onClose} className="p-1.5 text-white/60 hover:text-white hover:bg-white/10 rounded-lg transition-colors">
+              <X className="h-4 w-4" />
             </button>
           </div>
         </div>
 
         {/* Body */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-6">
+        <div className="flex-1 overflow-y-auto p-5 space-y-4 bg-gray-50/50">
           {error && (
-            <div className="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-2 rounded-lg">
+            <div className="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-2.5 rounded-xl flex items-center gap-2">
+              <div className="w-1.5 h-1.5 rounded-full bg-red-500 flex-shrink-0" />
               {error}
             </div>
           )}
 
-          {/* Transfer Info */}
-          <section>
-            <h3 className="text-sm font-semibold text-gray-700 mb-3 uppercase tracking-wider">Transfer Info</h3>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {/* Transfer Info + Booking — compact top bar */}
+          <div className="bg-white rounded-xl border border-gray-200 p-4">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Trip Type</label>
-                <select
-                  value={tripType}
-                  onChange={(e) => setTripType(e.target.value as TripType)}
-                  disabled={!canEdit}
-                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
-                >
+                <label className={labelClass}>Trip Type</label>
+                <select value={tripType} onChange={(e) => setTripType(e.target.value as TripType)} disabled={!canEdit} className={inputClass}>
                   {Object.entries(tripTypeLabels).map(([value, label]) => (
                     <option key={value} value={value}>{label}</option>
                   ))}
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
-                <select
-                  value={status}
-                  onChange={(e) => setStatus(e.target.value as TransferStatus)}
-                  disabled={!canEdit}
-                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
-                >
+                <label className={labelClass}>Status</label>
+                <select value={status} onChange={(e) => setStatus(e.target.value as TransferStatus)} disabled={!canEdit} className={inputClass}>
                   {Object.entries(transferStatusLabels).map(([value, label]) => (
                     <option key={value} value={value}>{label}</option>
                   ))}
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">No. of Guests</label>
-                <input
-                  type="number"
-                  value={numberOfGuests}
-                  onChange={(e) => setNumberOfGuests(e.target.value)}
-                  disabled={!canEdit}
-                  placeholder="e.g. 9"
-                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
-                />
+                <label className={labelClass}>No. of Guests</label>
+                <div className="relative">
+                  <Users className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400" />
+                  <input type="number" value={numberOfGuests} onChange={(e) => setNumberOfGuests(e.target.value)} disabled={!canEdit} placeholder="e.g. 9" className={`${inputClass} pl-8`} />
+                </div>
               </div>
             </div>
-          </section>
 
-          {/* Link to Booking */}
-          <section>
-            <h3 className="text-sm font-semibold text-gray-700 mb-3 uppercase tracking-wider">Link to Booking</h3>
-            {linkedBooking ? (
-              <div className="flex items-center gap-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
-                <div className="flex-1">
-                  <p className="text-sm font-medium text-gray-900">
-                    {linkedBooking.bookingNumber} - {linkedBooking.customerName}
-                  </p>
-                  <p className="text-xs text-gray-500">
-                    {linkedBooking.title} | {linkedBooking.dateFrom}
-                  </p>
-                </div>
-                {canEdit && (
-                  <button
-                    onClick={() => { setLinkedBookingId(''); setLinkedBooking(null); }}
-                    className="text-xs text-red-500 hover:text-red-700"
-                  >
-                    Unlink
-                  </button>
-                )}
-              </div>
-            ) : (
-              <div className="relative">
-                <div className="relative">
-                  <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-                  <input
-                    type="text"
-                    value={bookingSearch}
-                    onChange={(e) => setBookingSearch(e.target.value)}
-                    placeholder="Search booking by guest name, booking #..."
-                    disabled={!canEdit}
-                    className="w-full pl-9 pr-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
-                  />
-                </div>
-                {bookingResults.length > 0 && (
-                  <div className="absolute z-10 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
-                    {bookingResults.map(b => (
-                      <button
-                        key={b.id}
-                        onClick={() => fillFromBooking(b)}
-                        className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 border-b border-gray-100 last:border-b-0"
-                      >
-                        <span className="font-medium">{b.bookingNumber}</span>
-                        <span className="text-gray-500"> - {b.customerName}</span>
-                        <span className="text-gray-400 text-xs ml-2">{b.dateFrom}</span>
-                      </button>
-                    ))}
+            {/* Link to Booking — inline */}
+            <div className="mt-3 pt-3 border-t border-gray-100">
+              <label className={labelClass}>Linked Booking</label>
+              {linkedBooking ? (
+                <div className="flex items-center gap-3 p-2.5 bg-blue-50 border border-blue-100 rounded-lg">
+                  <div className="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center flex-shrink-0">
+                    <Search className="h-3.5 w-3.5 text-blue-600" />
                   </div>
-                )}
-              </div>
-            )}
-          </section>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-gray-900 truncate">
+                      {linkedBooking.bookingNumber} — {linkedBooking.customerName}
+                    </p>
+                    <p className="text-xs text-gray-500 truncate">{linkedBooking.title} | {linkedBooking.dateFrom}</p>
+                  </div>
+                  {canEdit && (
+                    <button onClick={() => { setLinkedBookingId(''); setLinkedBooking(null); }} className="text-xs text-red-500 hover:text-red-700 font-medium px-2 py-1 rounded hover:bg-red-50">
+                      Unlink
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <div className="relative">
+                  <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400" />
+                  <input type="text" value={bookingSearch} onChange={(e) => setBookingSearch(e.target.value)} placeholder="Search booking by guest name, booking #..." disabled={!canEdit} className={`${inputClass} pl-8`} />
+                  {bookingResults.length > 0 && (
+                    <div className="absolute z-10 mt-1 w-full bg-white border border-gray-200 rounded-xl shadow-lg max-h-48 overflow-y-auto">
+                      {bookingResults.map(b => (
+                        <button key={b.id} onClick={() => fillFromBooking(b)} className="w-full text-left px-3 py-2.5 text-sm hover:bg-blue-50 border-b border-gray-50 last:border-b-0 transition-colors">
+                          <span className="font-medium text-gray-900">{b.bookingNumber}</span>
+                          <span className="text-gray-500"> — {b.customerName}</span>
+                          <span className="text-gray-400 text-xs ml-2">{b.dateFrom}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
 
           {/* Guest Info */}
-          <section>
-            <h3 className="text-sm font-semibold text-gray-700 mb-3 uppercase tracking-wider">Guest Info</h3>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="bg-white rounded-xl border border-gray-200 p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <div className="w-6 h-6 bg-gray-100 rounded-md flex items-center justify-center">
+                <User className="h-3.5 w-3.5 text-gray-600" />
+              </div>
+              <h3 className="text-sm font-semibold text-gray-800">Guest Info</h3>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Boat Name</label>
-                <input
-                  type="text"
-                  value={boatName}
-                  onChange={(e) => setBoatName(e.target.value)}
-                  disabled={!canEdit}
-                  placeholder="e.g. MY Hot Chilli"
-                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
-                />
+                <label className={labelClass}>Boat Name</label>
+                <input type="text" value={boatName} onChange={(e) => setBoatName(e.target.value)} disabled={!canEdit} placeholder="e.g. MY Hot Chilli" className={inputClass} />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Guest Name *</label>
-                <input
-                  type="text"
-                  value={guestName}
-                  onChange={(e) => setGuestName(e.target.value)}
-                  disabled={!canEdit}
-                  placeholder="e.g. Valerie/Betti Eric"
-                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
-                />
+                <label className={labelClass}>Guest Name <span className="text-red-400">*</span></label>
+                <input type="text" value={guestName} onChange={(e) => setGuestName(e.target.value)} disabled={!canEdit} placeholder="e.g. Valerie/Betti Eric" className={inputClass} />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Contact Number</label>
-                <input
-                  type="text"
-                  value={contactNumber}
-                  onChange={(e) => setContactNumber(e.target.value)}
-                  disabled={!canEdit}
-                  placeholder="e.g. +33 6 22 38 49 00"
-                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
-                />
+                <label className={labelClass}>Contact Number</label>
+                <input type="text" value={contactNumber} onChange={(e) => setContactNumber(e.target.value)} disabled={!canEdit} placeholder="e.g. +33 6 22 38 49 00" className={inputClass} />
               </div>
             </div>
-          </section>
+          </div>
 
           {/* Pickup Details */}
           {showPickup && (
-            <section>
-              <h3 className="text-sm font-semibold text-gray-700 mb-3 uppercase tracking-wider">Pick-up Details</h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="bg-blue-50/70 rounded-xl border border-blue-100 p-4">
+              <div className="flex items-center gap-2 mb-3">
+                <div className="w-6 h-6 bg-blue-100 rounded-md flex items-center justify-center">
+                  <MapPin className="h-3.5 w-3.5 text-blue-600" />
+                </div>
+                <h3 className="text-sm font-semibold text-blue-800">Pick-up</h3>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Pick-up Date</label>
-                  <input
-                    type="date"
-                    value={pickupDate}
-                    onChange={(e) => setPickupDate(e.target.value)}
-                    disabled={!canEdit}
-                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
-                  />
+                  <label className={labelClass}>Date</label>
+                  <div className="relative">
+                    <Clock className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-blue-400" />
+                    <input type="date" value={pickupDate} onChange={(e) => setPickupDate(e.target.value)} disabled={!canEdit} className={`${inputClass} pl-8`} />
+                  </div>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Pick-up Time</label>
-                  <input
-                    type="text"
-                    value={pickupTime}
-                    onChange={(e) => setPickupTime(e.target.value)}
-                    disabled={!canEdit}
-                    placeholder="e.g. 9:15 AM"
-                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
-                  />
+                  <label className={labelClass}>Time</label>
+                  <input type="text" value={pickupTime} onChange={(e) => setPickupTime(e.target.value)} disabled={!canEdit} placeholder="e.g. 9:15 AM" className={inputClass} />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Pick-up Location</label>
-                  <input
-                    type="text"
-                    value={pickupLocation}
-                    onChange={(e) => setPickupLocation(e.target.value)}
-                    disabled={!canEdit}
-                    placeholder="Hotel name / address"
-                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
-                  />
+                  <label className={labelClass}>Pick-up Location</label>
+                  <input type="text" value={pickupLocation} onChange={(e) => setPickupLocation(e.target.value)} disabled={!canEdit} placeholder="Hotel name / address" className={inputClass} />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Google Maps Link
+                  <label className={labelClass}>
+                    Maps Link
                     {pickupLocationUrl && (
-                      <a href={pickupLocationUrl} target="_blank" rel="noopener noreferrer" className="ml-1 text-blue-500 hover:text-blue-700">
+                      <a href={pickupLocationUrl} target="_blank" rel="noopener noreferrer" className="ml-1 text-blue-500 hover:text-blue-700 inline-flex items-center">
                         <ExternalLink className="inline h-3 w-3" />
                       </a>
                     )}
                   </label>
-                  <input
-                    type="url"
-                    value={pickupLocationUrl}
-                    onChange={(e) => setPickupLocationUrl(e.target.value)}
-                    disabled={!canEdit}
-                    placeholder="https://maps.app.goo.gl/..."
-                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
-                  />
+                  <input type="url" value={pickupLocationUrl} onChange={(e) => setPickupLocationUrl(e.target.value)} disabled={!canEdit} placeholder="https://maps.app.goo.gl/..." className={inputClass} />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Drop-off Location</label>
-                  <input
-                    type="text"
-                    value={pickupDropoff}
-                    onChange={(e) => setPickupDropoff(e.target.value)}
-                    disabled={!canEdit}
-                    placeholder="e.g. Chalong Pier Meeting Point"
-                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
-                  />
+                  <label className={labelClass}>Drop-off Location</label>
+                  <input type="text" value={pickupDropoff} onChange={(e) => setPickupDropoff(e.target.value)} disabled={!canEdit} placeholder="e.g. Chalong Pier Meeting Point" className={inputClass} />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                  <label className={labelClass}>
                     Drop-off Maps Link
                     {pickupDropoffUrl && (
-                      <a href={pickupDropoffUrl} target="_blank" rel="noopener noreferrer" className="ml-1 text-blue-500 hover:text-blue-700">
+                      <a href={pickupDropoffUrl} target="_blank" rel="noopener noreferrer" className="ml-1 text-blue-500 hover:text-blue-700 inline-flex items-center">
                         <ExternalLink className="inline h-3 w-3" />
                       </a>
                     )}
                   </label>
-                  <input
-                    type="url"
-                    value={pickupDropoffUrl}
-                    onChange={(e) => setPickupDropoffUrl(e.target.value)}
-                    disabled={!canEdit}
-                    placeholder="https://maps.app.goo.gl/..."
-                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
-                  />
+                  <input type="url" value={pickupDropoffUrl} onChange={(e) => setPickupDropoffUrl(e.target.value)} disabled={!canEdit} placeholder="https://maps.app.goo.gl/..." className={inputClass} />
                 </div>
               </div>
-            </section>
+            </div>
           )}
 
           {/* Return Details */}
           {showReturn && (
-            <section>
-              <h3 className="text-sm font-semibold text-gray-700 mb-3 uppercase tracking-wider">Return Details</h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="bg-orange-50/70 rounded-xl border border-orange-100 p-4">
+              <div className="flex items-center gap-2 mb-3">
+                <div className="w-6 h-6 bg-orange-100 rounded-md flex items-center justify-center">
+                  <MapPin className="h-3.5 w-3.5 text-orange-600" />
+                </div>
+                <h3 className="text-sm font-semibold text-orange-800">Return</h3>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Return Date</label>
-                  <input
-                    type="date"
-                    value={returnDate}
-                    onChange={(e) => setReturnDate(e.target.value)}
-                    disabled={!canEdit}
-                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
-                  />
+                  <label className={labelClass}>Date</label>
+                  <div className="relative">
+                    <Clock className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-orange-400" />
+                    <input type="date" value={returnDate} onChange={(e) => setReturnDate(e.target.value)} disabled={!canEdit} className={`${inputClass} pl-8`} />
+                  </div>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Return Time</label>
-                  <input
-                    type="text"
-                    value={returnTime}
-                    onChange={(e) => setReturnTime(e.target.value)}
-                    disabled={!canEdit}
-                    placeholder="e.g. 6:00 PM"
-                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
-                  />
+                  <label className={labelClass}>Time</label>
+                  <input type="text" value={returnTime} onChange={(e) => setReturnTime(e.target.value)} disabled={!canEdit} placeholder="e.g. 6:00 PM" className={inputClass} />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Pick-up Location (Return)</label>
-                  <input
-                    type="text"
-                    value={returnLocation}
-                    onChange={(e) => setReturnLocation(e.target.value)}
-                    disabled={!canEdit}
-                    placeholder="e.g. Chalong Pier"
-                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
-                  />
+                  <label className={labelClass}>Pick-up Location (Return)</label>
+                  <input type="text" value={returnLocation} onChange={(e) => setReturnLocation(e.target.value)} disabled={!canEdit} placeholder="e.g. Chalong Pier" className={inputClass} />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Google Maps Link
+                  <label className={labelClass}>
+                    Maps Link
                     {returnLocationUrl && (
-                      <a href={returnLocationUrl} target="_blank" rel="noopener noreferrer" className="ml-1 text-blue-500 hover:text-blue-700">
+                      <a href={returnLocationUrl} target="_blank" rel="noopener noreferrer" className="ml-1 text-blue-500 hover:text-blue-700 inline-flex items-center">
                         <ExternalLink className="inline h-3 w-3" />
                       </a>
                     )}
                   </label>
-                  <input
-                    type="url"
-                    value={returnLocationUrl}
-                    onChange={(e) => setReturnLocationUrl(e.target.value)}
-                    disabled={!canEdit}
-                    placeholder="https://maps.app.goo.gl/..."
-                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
-                  />
+                  <input type="url" value={returnLocationUrl} onChange={(e) => setReturnLocationUrl(e.target.value)} disabled={!canEdit} placeholder="https://maps.app.goo.gl/..." className={inputClass} />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Drop-off Location (Return)</label>
-                  <input
-                    type="text"
-                    value={returnDropoff}
-                    onChange={(e) => setReturnDropoff(e.target.value)}
-                    disabled={!canEdit}
-                    placeholder="e.g. Veranda Resort Phuket"
-                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
-                  />
+                  <label className={labelClass}>Drop-off Location (Return)</label>
+                  <input type="text" value={returnDropoff} onChange={(e) => setReturnDropoff(e.target.value)} disabled={!canEdit} placeholder="e.g. Veranda Resort Phuket" className={inputClass} />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                  <label className={labelClass}>
                     Drop-off Maps Link
                     {returnDropoffUrl && (
-                      <a href={returnDropoffUrl} target="_blank" rel="noopener noreferrer" className="ml-1 text-blue-500 hover:text-blue-700">
+                      <a href={returnDropoffUrl} target="_blank" rel="noopener noreferrer" className="ml-1 text-blue-500 hover:text-blue-700 inline-flex items-center">
                         <ExternalLink className="inline h-3 w-3" />
                       </a>
                     )}
                   </label>
-                  <input
-                    type="url"
-                    value={returnDropoffUrl}
-                    onChange={(e) => setReturnDropoffUrl(e.target.value)}
-                    disabled={!canEdit}
-                    placeholder="https://maps.app.goo.gl/..."
-                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
-                  />
+                  <input type="url" value={returnDropoffUrl} onChange={(e) => setReturnDropoffUrl(e.target.value)} disabled={!canEdit} placeholder="https://maps.app.goo.gl/..." className={inputClass} />
                 </div>
               </div>
-            </section>
+            </div>
           )}
 
           {/* Taxi Company & Driver */}
-          <section>
-            <h3 className="text-sm font-semibold text-gray-700 mb-3 uppercase tracking-wider">Taxi Company & Driver</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="bg-green-50/70 rounded-xl border border-green-100 p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <div className="w-6 h-6 bg-green-100 rounded-md flex items-center justify-center">
+                <Car className="h-3.5 w-3.5 text-green-600" />
+              </div>
+              <h3 className="text-sm font-semibold text-green-800">Taxi Company & Driver</h3>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Taxi Company</label>
+                <label className={labelClass}>Taxi Company</label>
                 <select
                   value={taxiCompanyId}
                   onChange={(e) => {
                     setTaxiCompanyId(e.target.value);
-                    // Reset driver/vehicle selections when company changes
-                    setTaxiDriverId('');
-                    setTaxiVehicleId('');
-                    setDriverName('');
-                    setDriverPhone('');
-                    setVanNumberPlate('');
+                    setTaxiDriverId(''); setTaxiVehicleId('');
+                    setDriverName(''); setDriverPhone(''); setVanNumberPlate('');
                   }}
                   disabled={!canEdit}
-                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  className={inputClass}
                 >
                   <option value="">Select company...</option>
                   {companies.map(c => (
@@ -661,37 +624,29 @@ export function TaxiTransferForm({ transfer, bookingId, onClose }: TaxiTransferF
                   ))}
                 </select>
               </div>
-
-              {/* Driver dropdown */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Driver</label>
+                <label className={labelClass}>Driver</label>
                 <select
                   value={taxiDriverId || '__custom'}
                   onChange={(e) => {
                     const val = e.target.value;
                     if (val === '__custom' || val === '') {
-                      setTaxiDriverId('');
-                      setDriverName('');
-                      setDriverPhone('');
+                      setTaxiDriverId(''); setDriverName(''); setDriverPhone('');
                     } else {
                       setTaxiDriverId(val);
                       const driver = companyDrivers.find(d => d.id === val);
                       if (driver) {
                         setDriverName(driver.name);
                         setDriverPhone(driver.phone || '');
-                        // Auto-select driver's default vehicle
                         if (driver.defaultVehicleId) {
                           const vehicle = companyVehicles.find(v => v.id === driver.defaultVehicleId);
-                          if (vehicle) {
-                            setTaxiVehicleId(driver.defaultVehicleId);
-                            setVanNumberPlate(vehicle.plateNumber);
-                          }
+                          if (vehicle) { setTaxiVehicleId(driver.defaultVehicleId); setVanNumberPlate(vehicle.plateNumber); }
                         }
                       }
                     }
                   }}
                   disabled={!canEdit || !taxiCompanyId}
-                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  className={inputClass}
                 >
                   {companyDrivers.length > 0 ? (
                     <>
@@ -706,50 +661,30 @@ export function TaxiTransferForm({ transfer, bookingId, onClose }: TaxiTransferF
                   )}
                 </select>
               </div>
-
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Driver Name</label>
-                <input
-                  type="text"
-                  value={driverName}
-                  onChange={(e) => { setDriverName(e.target.value); if (taxiDriverId) setTaxiDriverId(''); }}
-                  disabled={!canEdit}
-                  placeholder="Assigned by taxi company"
-                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
-                />
+                <label className={labelClass}>Driver Name</label>
+                <input type="text" value={driverName} onChange={(e) => { setDriverName(e.target.value); if (taxiDriverId) setTaxiDriverId(''); }} disabled={!canEdit} placeholder="Assigned by taxi company" className={inputClass} />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Driver Phone</label>
-                <input
-                  type="text"
-                  value={driverPhone}
-                  onChange={(e) => { setDriverPhone(e.target.value); if (taxiDriverId) setTaxiDriverId(''); }}
-                  disabled={!canEdit}
-                  placeholder="Driver phone number"
-                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
-                />
+                <label className={labelClass}>Driver Phone</label>
+                <input type="text" value={driverPhone} onChange={(e) => { setDriverPhone(e.target.value); if (taxiDriverId) setTaxiDriverId(''); }} disabled={!canEdit} placeholder="Driver phone number" className={inputClass} />
               </div>
-
-              {/* Vehicle dropdown */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Vehicle</label>
+                <label className={labelClass}>Vehicle</label>
                 <select
                   value={taxiVehicleId || '__custom'}
                   onChange={(e) => {
                     const val = e.target.value;
                     if (val === '__custom' || val === '') {
-                      setTaxiVehicleId('');
-                      setVanNumberPlate('');
+                      setTaxiVehicleId(''); setVanNumberPlate('');
                     } else {
                       setTaxiVehicleId(val);
                       const vehicle = companyVehicles.find(v => v.id === val);
-                      if (vehicle) {
-                        setVanNumberPlate(vehicle.plateNumber);
-                      }
+                      if (vehicle) setVanNumberPlate(vehicle.plateNumber);
                     }
                   }}
                   disabled={!canEdit || !taxiCompanyId}
-                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  className={inputClass}
                 >
                   {companyVehicles.length > 0 ? (
                     <>
@@ -765,31 +700,24 @@ export function TaxiTransferForm({ transfer, bookingId, onClose }: TaxiTransferF
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Van Number Plate</label>
-                <input
-                  type="text"
-                  value={vanNumberPlate}
-                  onChange={(e) => { setVanNumberPlate(e.target.value); if (taxiVehicleId) setTaxiVehicleId(''); }}
-                  disabled={!canEdit}
-                  placeholder="e.g. กข 1234"
-                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
-                />
+                <label className={labelClass}>Van Number Plate</label>
+                <input type="text" value={vanNumberPlate} onChange={(e) => { setVanNumberPlate(e.target.value); if (taxiVehicleId) setTaxiVehicleId(''); }} disabled={!canEdit} placeholder="e.g. กข 1234" className={inputClass} />
               </div>
             </div>
-          </section>
+          </div>
 
           {/* Payment */}
-          <section>
-            <h3 className="text-sm font-semibold text-gray-700 mb-3 uppercase tracking-wider">Payment</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="bg-white rounded-xl border border-gray-200 p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <div className="w-6 h-6 bg-purple-100 rounded-md flex items-center justify-center">
+                <CreditCard className="h-3.5 w-3.5 text-purple-600" />
+              </div>
+              <h3 className="text-sm font-semibold text-gray-800">Payment</h3>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Paid By</label>
-                <select
-                  value={paidBy}
-                  onChange={(e) => setPaidBy(e.target.value as PaidBy)}
-                  disabled={!canEdit}
-                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
-                >
+                <label className={labelClass}>Paid By</label>
+                <select value={paidBy} onChange={(e) => setPaidBy(e.target.value as PaidBy)} disabled={!canEdit} className={inputClass}>
                   {Object.entries(paidByLabels).map(([value, label]) => (
                     <option key={value} value={value}>{label}</option>
                   ))}
@@ -797,24 +725,12 @@ export function TaxiTransferForm({ transfer, bookingId, onClose }: TaxiTransferF
               </div>
               <div className="flex gap-3">
                 <div className="flex-1">
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Amount</label>
-                  <input
-                    type="number"
-                    value={amount}
-                    onChange={(e) => setAmount(e.target.value)}
-                    disabled={!canEdit}
-                    placeholder="e.g. 1400"
-                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
-                  />
+                  <label className={labelClass}>Amount</label>
+                  <input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} disabled={!canEdit} placeholder="e.g. 1400" className={inputClass} />
                 </div>
                 <div className="w-24">
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Currency</label>
-                  <select
-                    value={currency}
-                    onChange={(e) => setCurrency(e.target.value)}
-                    disabled={!canEdit}
-                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
-                  >
+                  <label className={labelClass}>Currency</label>
+                  <select value={currency} onChange={(e) => setCurrency(e.target.value)} disabled={!canEdit} className={inputClass}>
                     <option value="THB">THB</option>
                     <option value="USD">USD</option>
                     <option value="EUR">EUR</option>
@@ -822,48 +738,35 @@ export function TaxiTransferForm({ transfer, bookingId, onClose }: TaxiTransferF
                 </div>
               </div>
               <div className="md:col-span-2">
-                <label className="block text-sm font-medium text-gray-700 mb-1">Payment Note</label>
-                <input
-                  type="text"
-                  value={paymentNote}
-                  onChange={(e) => setPaymentNote(e.target.value)}
-                  disabled={!canEdit}
-                  placeholder="e.g. Guests will pay 1400 THB cash to the driver for the round trip"
-                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
-                />
+                <label className={labelClass}>Payment Note</label>
+                <input type="text" value={paymentNote} onChange={(e) => setPaymentNote(e.target.value)} disabled={!canEdit} placeholder="e.g. Guests will pay 1400 THB cash to the driver for the round trip" className={inputClass} />
               </div>
               {paidBy === 'faraway' && (
                 <div className="md:col-span-2">
-                  <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
-                    <input
-                      type="checkbox"
-                      checked={farawayPaid}
-                      onChange={(e) => setFarawayPaid(e.target.checked)}
-                      disabled={!canEdit}
-                      className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                    />
+                  <label className="flex items-center gap-2 text-sm text-gray-700">
+                    <input type="checkbox" checked={farawayPaid} onChange={(e) => setFarawayPaid(e.target.checked)} disabled={!canEdit} className="rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
                     Faraway has paid the taxi company for this transfer
                   </label>
                 </div>
               )}
             </div>
-          </section>
+          </div>
 
           {/* Notes */}
-          <section>
-            <h3 className="text-sm font-semibold text-gray-700 mb-3 uppercase tracking-wider">Notes</h3>
-            <div className="space-y-4">
+          <div className="bg-white rounded-xl border border-gray-200 p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <div className="w-6 h-6 bg-amber-100 rounded-md flex items-center justify-center">
+                <MessageSquare className="h-3.5 w-3.5 text-amber-600" />
+              </div>
+              <h3 className="text-sm font-semibold text-gray-800">Notes</h3>
+            </div>
+            <div className="space-y-3">
               <div>
-                <div className="flex items-center justify-between mb-1">
-                  <label className="block text-sm font-medium text-gray-700">Note for Guest</label>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className={labelClass}>Note for Guest</label>
                   <div className="flex items-center gap-2">
                     {noteTemplates.length > 0 && (
-                      <select
-                        value={selectedTemplateId}
-                        onChange={(e) => handleTemplateSelect(e.target.value)}
-                        disabled={!canEdit}
-                        className="text-xs px-2 py-1 border border-gray-200 rounded-md"
-                      >
+                      <select value={selectedTemplateId} onChange={(e) => handleTemplateSelect(e.target.value)} disabled={!canEdit} className="text-xs px-2 py-1 border border-gray-200 rounded-md bg-white">
                         <option value="">Use template...</option>
                         {noteTemplates.map(t => (
                           <option key={t.id} value={t.id}>{t.name}</option>
@@ -871,58 +774,31 @@ export function TaxiTransferForm({ transfer, bookingId, onClose }: TaxiTransferF
                       </select>
                     )}
                     <div className="flex border border-gray-200 rounded-md overflow-hidden">
-                      <button
-                        onClick={() => setTemplateLang('en')}
-                        className={`text-xs px-2 py-1 ${templateLang === 'en' ? 'bg-blue-50 text-blue-700' : 'text-gray-500'}`}
-                      >
-                        EN
-                      </button>
-                      <button
-                        onClick={() => setTemplateLang('th')}
-                        className={`text-xs px-2 py-1 ${templateLang === 'th' ? 'bg-blue-50 text-blue-700' : 'text-gray-500'}`}
-                      >
-                        TH
-                      </button>
+                      <button onClick={() => setTemplateLang('en')} className={`text-xs px-2 py-1 ${templateLang === 'en' ? 'bg-blue-50 text-blue-700 font-medium' : 'text-gray-500 hover:bg-gray-50'}`}>EN</button>
+                      <button onClick={() => setTemplateLang('th')} className={`text-xs px-2 py-1 ${templateLang === 'th' ? 'bg-blue-50 text-blue-700 font-medium' : 'text-gray-500 hover:bg-gray-50'}`}>TH</button>
                     </div>
                   </div>
                 </div>
-                <textarea
-                  value={guestNote}
-                  onChange={(e) => setGuestNote(e.target.value)}
-                  disabled={!canEdit}
-                  rows={3}
-                  placeholder="Note to send to the guest..."
-                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
-                />
+                <textarea value={guestNote} onChange={(e) => setGuestNote(e.target.value)} disabled={!canEdit} rows={3} placeholder="Note to send to the guest..." className={inputClass} />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Note for Driver</label>
-                <textarea
-                  value={driverNote}
-                  onChange={(e) => setDriverNote(e.target.value)}
-                  disabled={!canEdit}
-                  rows={2}
-                  placeholder="Instructions for the driver..."
-                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
-                />
+                <label className={labelClass}>Note for Driver</label>
+                <textarea value={driverNote} onChange={(e) => setDriverNote(e.target.value)} disabled={!canEdit} rows={2} placeholder="Instructions for the driver..." className={inputClass} />
               </div>
             </div>
-          </section>
+          </div>
         </div>
 
         {/* Footer */}
-        <div className="px-6 py-4 border-t border-gray-200 bg-gray-50 flex items-center justify-end gap-3">
-          <button
-            onClick={onClose}
-            className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50"
-          >
+        <div className="px-5 py-3.5 border-t border-gray-200 bg-white flex items-center justify-end gap-2.5">
+          <button onClick={onClose} className="px-4 py-2 text-sm font-medium text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors">
             Cancel
           </button>
           {canEdit && (
             <button
               onClick={handleSave}
               disabled={saving}
-              className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50"
+              className="px-5 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors shadow-sm"
             >
               {saving ? 'Saving...' : isEditing ? 'Save Changes' : 'Create Transfer'}
             </button>
