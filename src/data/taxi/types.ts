@@ -115,6 +115,7 @@ export interface TaxiDriver {
   name: string;
   phone?: string;
   notes?: string;
+  defaultVehicleId?: string;
   isActive: boolean;
   createdAt: string;
   updatedAt: string;

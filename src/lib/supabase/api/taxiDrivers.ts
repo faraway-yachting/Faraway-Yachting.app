@@ -8,6 +8,7 @@ function dbToFrontend(db: Record<string, any>): TaxiDriver {
     name: db.name,
     phone: db.phone ?? undefined,
     notes: db.notes ?? undefined,
+    defaultVehicleId: db.default_vehicle_id ?? undefined,
     isActive: db.is_active,
     createdAt: db.created_at,
     updatedAt: db.updated_at,
@@ -43,6 +44,7 @@ export const taxiDriversApi = {
     name: string;
     phone?: string;
     notes?: string;
+    defaultVehicleId?: string;
   }): Promise<TaxiDriver> {
     const supabase = createClient();
     const { data, error } = await supabase
@@ -52,6 +54,7 @@ export const taxiDriversApi = {
         name: driver.name,
         phone: driver.phone || null,
         notes: driver.notes || null,
+        default_vehicle_id: driver.defaultVehicleId || null,
       }])
       .select()
       .single();
@@ -63,6 +66,7 @@ export const taxiDriversApi = {
     name: string;
     phone: string;
     notes: string;
+    defaultVehicleId: string;
     isActive: boolean;
   }>): Promise<TaxiDriver> {
     const supabase = createClient();
@@ -72,6 +76,7 @@ export const taxiDriversApi = {
     if (updates.name !== undefined) dbUpdates.name = updates.name;
     if (updates.phone !== undefined) dbUpdates.phone = updates.phone || null;
     if (updates.notes !== undefined) dbUpdates.notes = updates.notes || null;
+    if (updates.defaultVehicleId !== undefined) dbUpdates.default_vehicle_id = updates.defaultVehicleId || null;
     if (updates.isActive !== undefined) dbUpdates.is_active = updates.isActive;
 
     const { data, error } = await supabase

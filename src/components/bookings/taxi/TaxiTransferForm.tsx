@@ -639,6 +639,14 @@ export function TaxiTransferForm({ transfer, bookingId, onClose }: TaxiTransferF
                       if (driver) {
                         setDriverName(driver.name);
                         setDriverPhone(driver.phone || '');
+                        // Auto-select driver's default vehicle
+                        if (driver.defaultVehicleId) {
+                          const vehicle = companyVehicles.find(v => v.id === driver.defaultVehicleId);
+                          if (vehicle) {
+                            setTaxiVehicleId(driver.defaultVehicleId);
+                            setVanNumberPlate(vehicle.plateNumber);
+                          }
+                        }
                       }
                     }
                   }}

@@ -23,6 +23,7 @@ function CompanyDriversVehicles({ companyId }: { companyId: string }) {
   const [driverName, setDriverName] = useState('');
   const [driverPhone, setDriverPhone] = useState('');
   const [driverNotes, setDriverNotes] = useState('');
+  const [driverDefaultVehicleId, setDriverDefaultVehicleId] = useState('');
   const [savingDriver, setSavingDriver] = useState(false);
 
   // Vehicle form
@@ -35,11 +36,11 @@ function CompanyDriversVehicles({ companyId }: { companyId: string }) {
   const [vehiclePhotoFile, setVehiclePhotoFile] = useState<File | null>(null);
   const [vehiclePhotoPreview, setVehiclePhotoPreview] = useState<string | null>(null);
 
-  const resetDriverForm = () => { setDriverName(''); setDriverPhone(''); setDriverNotes(''); setEditingDriverId(null); setShowDriverForm(false); };
+  const resetDriverForm = () => { setDriverName(''); setDriverPhone(''); setDriverNotes(''); setDriverDefaultVehicleId(''); setEditingDriverId(null); setShowDriverForm(false); };
   const resetVehicleForm = () => { setPlateNumber(''); setVehicleDescription(''); setVehicleNotes(''); setEditingVehicleId(null); setShowVehicleForm(false); setVehiclePhotoFile(null); setVehiclePhotoPreview(null); };
 
   const startEditDriver = (d: TaxiDriver) => {
-    setEditingDriverId(d.id); setDriverName(d.name); setDriverPhone(d.phone || ''); setDriverNotes(d.notes || ''); setShowDriverForm(true);
+    setEditingDriverId(d.id); setDriverName(d.name); setDriverPhone(d.phone || ''); setDriverNotes(d.notes || ''); setDriverDefaultVehicleId(d.defaultVehicleId || ''); setShowDriverForm(true);
   };
   const startEditVehicle = (v: TaxiVehicle) => {
     setEditingVehicleId(v.id); setPlateNumber(v.plateNumber); setVehicleDescription(v.description || ''); setVehicleNotes(v.notes || ''); setShowVehicleForm(true);
@@ -51,9 +52,9 @@ function CompanyDriversVehicles({ companyId }: { companyId: string }) {
     setSavingDriver(true);
     try {
       if (editingDriverId) {
-        await taxiDriversApi.update(editingDriverId, { name: driverName, phone: driverPhone, notes: driverNotes });
+        await taxiDriversApi.update(editingDriverId, { name: driverName, phone: driverPhone, notes: driverNotes, defaultVehicleId: driverDefaultVehicleId });
       } else {
-        await taxiDriversApi.create({ taxiCompanyId: companyId, name: driverName, phone: driverPhone, notes: driverNotes });
+        await taxiDriversApi.create({ taxiCompanyId: companyId, name: driverName, phone: driverPhone, notes: driverNotes, defaultVehicleId: driverDefaultVehicleId });
       }
       queryClient.invalidateQueries({ queryKey: ['taxiDrivers'] });
       resetDriverForm();
@@ -139,7 +140,7 @@ function CompanyDriversVehicles({ companyId }: { companyId: string }) {
 
         {showDriverForm && (
           <div className="mb-2 p-3 border border-gray-200 rounded-lg bg-gray-50">
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-2 gap-2">
               <div>
                 <label className="block text-xs text-gray-500 mb-0.5">Name *</label>
                 <input type="text" value={driverName} onChange={(e) => setDriverName(e.target.value)} className={inputClass} />
@@ -147,6 +148,15 @@ function CompanyDriversVehicles({ companyId }: { companyId: string }) {
               <div>
                 <label className="block text-xs text-gray-500 mb-0.5">Phone</label>
                 <input type="text" value={driverPhone} onChange={(e) => setDriverPhone(e.target.value)} className={inputClass} />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-0.5">Default Vehicle</label>
+                <select value={driverDefaultVehicleId} onChange={(e) => setDriverDefaultVehicleId(e.target.value)} className={inputClass}>
+                  <option value="">None</option>
+                  {vehicles.map(v => (
+                    <option key={v.id} value={v.id}>{v.plateNumber}{v.description ? ` — ${v.description}` : ''}</option>
+                  ))}
+                </select>
               </div>
               <div>
                 <label className="block text-xs text-gray-500 mb-0.5">Notes</label>
@@ -171,6 +181,10 @@ function CompanyDriversVehicles({ companyId }: { companyId: string }) {
                 <div className="flex items-center gap-3">
                   <span className="font-medium text-gray-800">{d.name}</span>
                   {d.phone && <span className="text-xs text-gray-500">{d.phone}</span>}
+                  {d.defaultVehicleId && (() => {
+                    const v = vehicles.find(vh => vh.id === d.defaultVehicleId);
+                    return v ? <span className="text-xs text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded">{v.plateNumber}</span> : null;
+                  })()}
                   {d.notes && <span className="text-xs text-gray-400 italic">{d.notes}</span>}
                 </div>
                 <div className="flex items-center gap-1">

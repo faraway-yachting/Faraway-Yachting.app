@@ -33,7 +33,7 @@ interface PublicTransfer {
   driverNote?: string;
 }
 
-interface CompanyDriver { id: string; name: string; phone?: string; }
+interface CompanyDriver { id: string; name: string; phone?: string; defaultVehicleId?: string; }
 interface CompanyVehicle { id: string; plateNumber: string; description?: string; photoUrl?: string; }
 
 const statusLabels: Record<string, string> = {
@@ -324,7 +324,14 @@ export default function PublicTaxiSchedulePage() {
                               } else {
                                 setSelectedDriverId(val);
                                 const d = drivers.find(dr => dr.id === val);
-                                if (d) { setDriverName(d.name); setDriverPhone(d.phone || ''); }
+                                if (d) {
+                                  setDriverName(d.name); setDriverPhone(d.phone || '');
+                                  // Auto-select driver's default vehicle
+                                  if (d.defaultVehicleId) {
+                                    const v = vehicles.find(vh => vh.id === d.defaultVehicleId);
+                                    if (v) { setSelectedVehicleId(d.defaultVehicleId); setVanNumberPlate(v.plateNumber); }
+                                  }
+                                }
                               }
                             }}
                             className="px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"

@@ -62,7 +62,7 @@ export async function GET(
   // Fetch active drivers and vehicles for this company
   const { data: drivers } = await supabase
     .from('taxi_drivers')
-    .select('id, name, phone')
+    .select('id, name, phone, default_vehicle_id')
     .eq('taxi_company_id', link.taxi_company_id)
     .eq('is_active', true)
     .order('name');
@@ -104,7 +104,7 @@ export async function GET(
       driverNote: t.driver_note,
     })),
     companyName: company?.name || link.label,
-    drivers: (drivers ?? []).map((d: any) => ({ id: d.id, name: d.name, phone: d.phone })),
+    drivers: (drivers ?? []).map((d: any) => ({ id: d.id, name: d.name, phone: d.phone, defaultVehicleId: d.default_vehicle_id })),
     vehicles: (vehicles ?? []).map((v: any) => ({ id: v.id, plateNumber: v.plate_number, description: v.description, photoUrl: v.photo_url })),
   });
 }
