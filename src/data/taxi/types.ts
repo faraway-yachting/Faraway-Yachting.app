@@ -98,6 +98,18 @@ export interface TaxiPublicLink {
   updatedAt: string;
 }
 
+export interface TaxiBookingLink {
+  id: string;
+  token: string;
+  bookingId: string;
+  label: string;
+  isActive: boolean;
+  expiresAt?: string;
+  createdBy?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface TaxiGuestNoteTemplate {
   id: string;
   name: string;

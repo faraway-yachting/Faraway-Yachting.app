@@ -2,7 +2,7 @@
 
 import { useState, useMemo } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { Search, Plus, Car, Building2 } from 'lucide-react';
+import { Search, Plus, Car, Building2, List, CalendarDays } from 'lucide-react';
 import {
   TaxiTransfer,
   TransferStatus,
@@ -14,6 +14,7 @@ import {
 import { useAllTaxiTransfers } from '@/hooks/queries/useTaxiTransfers';
 import { TaxiTransferForm } from '@/components/bookings/taxi/TaxiTransferForm';
 import { TaxiCompanyManager } from '@/components/bookings/taxi/TaxiCompanyManager';
+import { TaxiCalendarView } from '@/components/bookings/taxi/TaxiCalendarView';
 import { useAuth } from '@/components/auth';
 
 export default function TaxiPage() {
@@ -31,6 +32,9 @@ export default function TaxiPage() {
   const [search, setSearch] = useState('');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
+
+  // View mode
+  const [viewMode, setViewMode] = useState<'list' | 'calendar'>('list');
 
   // Modals
   const [showForm, setShowForm] = useState(false);
@@ -109,6 +113,23 @@ export default function TaxiPage() {
           Taxi Transfers
         </h1>
         <div className="flex items-center gap-2">
+          {/* View mode toggle */}
+          <div className="flex rounded-lg border border-gray-300 overflow-hidden">
+            <button
+              onClick={() => setViewMode('list')}
+              className={`p-1.5 ${viewMode === 'list' ? 'bg-blue-600 text-white' : 'bg-white text-gray-500 hover:bg-gray-50'}`}
+              title="List view"
+            >
+              <List className="h-4 w-4" />
+            </button>
+            <button
+              onClick={() => setViewMode('calendar')}
+              className={`p-1.5 ${viewMode === 'calendar' ? 'bg-blue-600 text-white' : 'bg-white text-gray-500 hover:bg-gray-50'}`}
+              title="Calendar view"
+            >
+              <CalendarDays className="h-4 w-4" />
+            </button>
+          </div>
           <button
             onClick={() => setShowCompanyManager(true)}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50"
@@ -204,68 +225,72 @@ export default function TaxiPage() {
         </div>
       </div>
 
-      {/* Table */}
-      <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Transfer #</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Guest</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Boat</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Trip</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Pick-up</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Company</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Driver</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Paid By</th>
-                <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Amount</th>
-              </tr>
-            </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
-              {filteredTransfers.length === 0 ? (
+      {/* Content: Table or Calendar */}
+      {viewMode === 'calendar' ? (
+        <TaxiCalendarView transfers={filteredTransfers} onTransferClick={handleRowClick} />
+      ) : (
+        <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="min-w-full divide-y divide-gray-200">
+              <thead className="bg-gray-50">
                 <tr>
-                  <td colSpan={11} className="px-4 py-12 text-center text-gray-500">
-                    No taxi transfers found
-                  </td>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Transfer #</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Guest</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Boat</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Trip</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Pick-up</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Company</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Driver</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Paid By</th>
+                  <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Amount</th>
                 </tr>
-              ) : (
-                filteredTransfers.map((transfer) => {
-                  const statusColor = transferStatusColors[transfer.status];
-                  return (
-                    <tr
-                      key={transfer.id}
-                      onClick={() => handleRowClick(transfer)}
-                      className="hover:bg-gray-50 cursor-pointer transition-colors"
-                    >
-                      <td className="px-4 py-3 text-sm font-mono text-gray-600">{transfer.transferNumber}</td>
-                      <td className="px-4 py-3">
-                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${statusColor.bg} ${statusColor.text}`}>
-                          {transferStatusLabels[transfer.status]}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-sm text-gray-600 whitespace-nowrap">{formatDate(transfer.pickupDate || transfer.returnDate)}</td>
-                      <td className="px-4 py-3 text-sm font-medium text-gray-900 max-w-[150px] truncate">{transfer.guestName}</td>
-                      <td className="px-4 py-3 text-sm text-gray-600 max-w-[120px] truncate">{transfer.boatName || '-'}</td>
-                      <td className="px-4 py-3 text-sm text-gray-600">{tripTypeLabels[transfer.tripType]}</td>
-                      <td className="px-4 py-3 text-sm text-gray-600 max-w-[150px] truncate">
-                        {transfer.pickupLocation || '-'}
-                      </td>
-                      <td className="px-4 py-3 text-sm text-gray-600">{transfer.taxiCompanyName || '-'}</td>
-                      <td className="px-4 py-3 text-sm text-gray-600">{transfer.driverName || '-'}</td>
-                      <td className="px-4 py-3 text-sm text-gray-600">{paidByLabels[transfer.paidBy]}</td>
-                      <td className="px-4 py-3 text-sm text-gray-900 text-right whitespace-nowrap">
-                        {transfer.amount ? `${transfer.currency} ${transfer.amount.toLocaleString()}` : '-'}
-                      </td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
+              </thead>
+              <tbody className="bg-white divide-y divide-gray-200">
+                {filteredTransfers.length === 0 ? (
+                  <tr>
+                    <td colSpan={11} className="px-4 py-12 text-center text-gray-500">
+                      No taxi transfers found
+                    </td>
+                  </tr>
+                ) : (
+                  filteredTransfers.map((transfer) => {
+                    const statusColor = transferStatusColors[transfer.status];
+                    return (
+                      <tr
+                        key={transfer.id}
+                        onClick={() => handleRowClick(transfer)}
+                        className="hover:bg-gray-50 cursor-pointer transition-colors"
+                      >
+                        <td className="px-4 py-3 text-sm font-mono text-gray-600">{transfer.transferNumber}</td>
+                        <td className="px-4 py-3">
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${statusColor.bg} ${statusColor.text}`}>
+                            {transferStatusLabels[transfer.status]}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-sm text-gray-600 whitespace-nowrap">{formatDate(transfer.pickupDate || transfer.returnDate)}</td>
+                        <td className="px-4 py-3 text-sm font-medium text-gray-900 max-w-[150px] truncate">{transfer.guestName}</td>
+                        <td className="px-4 py-3 text-sm text-gray-600 max-w-[120px] truncate">{transfer.boatName || '-'}</td>
+                        <td className="px-4 py-3 text-sm text-gray-600">{tripTypeLabels[transfer.tripType]}</td>
+                        <td className="px-4 py-3 text-sm text-gray-600 max-w-[150px] truncate">
+                          {transfer.pickupLocation || '-'}
+                        </td>
+                        <td className="px-4 py-3 text-sm text-gray-600">{transfer.taxiCompanyName || '-'}</td>
+                        <td className="px-4 py-3 text-sm text-gray-600">{transfer.driverName || '-'}</td>
+                        <td className="px-4 py-3 text-sm text-gray-600">{paidByLabels[transfer.paidBy]}</td>
+                        <td className="px-4 py-3 text-sm text-gray-900 text-right whitespace-nowrap">
+                          {transfer.amount ? `${transfer.currency} ${transfer.amount.toLocaleString()}` : '-'}
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Transfer Form Modal */}
       {showForm && (
