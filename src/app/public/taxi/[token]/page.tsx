@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useParams } from 'next/navigation';
-import { Car, MapPin, Clock, Users, Phone, ExternalLink, Check, Search, List, CalendarDays, TrendingUp, AlertCircle, DollarSign, CheckCircle2, CreditCard } from 'lucide-react';
+import { Car, MapPin, Clock, Users, Phone, ExternalLink, Check, Search, List, CalendarDays, TrendingUp, AlertCircle, DollarSign, CheckCircle2, CreditCard, Download, Copy, CheckCheck } from 'lucide-react';
 import { TaxiCalendarView } from '@/components/bookings/taxi/TaxiCalendarView';
 
 interface PublicTransfer {
@@ -113,6 +113,8 @@ export default function PublicTaxiSchedulePage() {
   const [vanNumberPlate, setVanNumberPlate] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [submitSuccess, setSubmitSuccess] = useState<string | null>(null);
+  const [downloadingPdfId, setDownloadingPdfId] = useState<string | null>(null);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
 
   const cardRefs = useRef<Map<string, HTMLDivElement>>(new Map());
 
@@ -241,6 +243,93 @@ export default function PublicTaxiSchedulePage() {
   };
 
   const fmtMoney = (n: number) => n.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+
+  const handleDownloadPdf = async (transfer: PublicTransfer) => {
+    try {
+      setDownloadingPdfId(transfer.id);
+      const { generateTaxiTransferPdf } = await import('@/lib/pdf/generateTaxiTransferPdf');
+      await generateTaxiTransferPdf({
+        transferNumber: transfer.transferNumber,
+        tripType: transfer.tripType,
+        status: transfer.status,
+        guestName: transfer.guestName,
+        boatName: transfer.boatName || undefined,
+        contactNumber: transfer.contactNumber || undefined,
+        numberOfGuests: transfer.numberOfGuests || undefined,
+        pickupDate: transfer.pickupDate || undefined,
+        pickupTime: transfer.pickupTime || undefined,
+        pickupLocation: transfer.pickupLocation || undefined,
+        pickupLocationUrl: transfer.pickupLocationUrl || undefined,
+        pickupDropoff: transfer.pickupDropoff || undefined,
+        pickupDropoffUrl: transfer.pickupDropoffUrl || undefined,
+        returnDate: transfer.returnDate || undefined,
+        returnTime: transfer.returnTime || undefined,
+        returnLocation: transfer.returnLocation || undefined,
+        returnLocationUrl: transfer.returnLocationUrl || undefined,
+        returnDropoff: transfer.returnDropoff || undefined,
+        returnDropoffUrl: transfer.returnDropoffUrl || undefined,
+        taxiCompanyName: companyName || undefined,
+        driverName: transfer.driverName || undefined,
+        driverPhone: transfer.driverPhone || undefined,
+        vanNumberPlate: transfer.vanNumberPlate || undefined,
+        paidBy: transfer.paidBy || 'guest',
+        amount: transfer.amount || undefined,
+        currency: transfer.currency || 'THB',
+        driverNote: transfer.driverNote || undefined,
+      });
+    } catch (err) {
+      console.error('Failed to generate PDF:', err);
+    } finally {
+      setDownloadingPdfId(null);
+    }
+  };
+
+  const handleCopyDetails = async (transfer: PublicTransfer) => {
+    const lines: string[] = [];
+    lines.push(`🚖 TAXI TRANSFER — ${transfer.transferNumber}`);
+    lines.push(`Status: ${statusLabels[transfer.status] || transfer.status}`);
+    lines.push(`Trip: ${tripTypeLabels[transfer.tripType] || transfer.tripType}`);
+    lines.push('');
+    lines.push(`👤 Guest: ${transfer.guestName}`);
+    if (transfer.boatName) lines.push(`🚢 Boat: ${transfer.boatName}`);
+    if (transfer.contactNumber) lines.push(`📱 Contact: ${transfer.contactNumber}`);
+    if (transfer.numberOfGuests) lines.push(`👥 Guests: ${transfer.numberOfGuests}`);
+
+    if (transfer.tripType !== 'return_only' && transfer.pickupDate) {
+      lines.push('');
+      lines.push('📍 PICK-UP');
+      lines.push(`Date: ${formatDate(transfer.pickupDate)}${transfer.pickupTime ? ` at ${transfer.pickupTime}` : ''}`);
+      if (transfer.pickupLocation) lines.push(`From: ${transfer.pickupLocation}`);
+      if (transfer.pickupLocationUrl) lines.push(`Map: ${transfer.pickupLocationUrl}`);
+      if (transfer.pickupDropoff) lines.push(`Drop-off: ${transfer.pickupDropoff}`);
+      if (transfer.pickupDropoffUrl) lines.push(`Map: ${transfer.pickupDropoffUrl}`);
+    }
+
+    if (transfer.tripType !== 'pickup_only' && transfer.returnDate) {
+      lines.push('');
+      lines.push('📍 RETURN');
+      lines.push(`Date: ${formatDate(transfer.returnDate)}${transfer.returnTime ? ` at ${transfer.returnTime}` : ''}`);
+      if (transfer.returnLocation) lines.push(`From: ${transfer.returnLocation}`);
+      if (transfer.returnLocationUrl) lines.push(`Map: ${transfer.returnLocationUrl}`);
+      if (transfer.returnDropoff) lines.push(`Drop-off: ${transfer.returnDropoff}`);
+      if (transfer.returnDropoffUrl) lines.push(`Map: ${transfer.returnDropoffUrl}`);
+    }
+
+    if (transfer.driverNote) {
+      lines.push('');
+      lines.push(`📝 Note: ${transfer.driverNote}`);
+    }
+
+    if (transfer.paidBy || transfer.amount) {
+      lines.push('');
+      if (transfer.paidBy) lines.push(`💰 Paid by: ${paidByLabels[transfer.paidBy] || transfer.paidBy}`);
+      if (transfer.amount && transfer.currency) lines.push(`Amount: ${transfer.currency} ${transfer.amount.toLocaleString()}`);
+    }
+
+    await navigator.clipboard.writeText(lines.join('\n'));
+    setCopiedId(transfer.id);
+    setTimeout(() => setCopiedId(null), 2000);
+  };
 
   if (loading) {
     return (
@@ -422,9 +511,26 @@ export default function PublicTaxiSchedulePage() {
                         {tripTypeLabels[transfer.tripType] || transfer.tripType}
                       </span>
                     </div>
-                    {transfer.boatName && (
-                      <span className="text-sm font-medium text-gray-700">{transfer.boatName}</span>
-                    )}
+                    <div className="flex items-center gap-2">
+                      {transfer.boatName && (
+                        <span className="text-sm font-medium text-gray-700 mr-2">{transfer.boatName}</span>
+                      )}
+                      <button
+                        onClick={() => handleCopyDetails(transfer)}
+                        className="p-1.5 rounded-md text-gray-400 hover:text-gray-600 hover:bg-gray-200 transition-colors"
+                        title="Copy details"
+                      >
+                        {copiedId === transfer.id ? <CheckCheck className="h-4 w-4 text-green-600" /> : <Copy className="h-4 w-4" />}
+                      </button>
+                      <button
+                        onClick={() => handleDownloadPdf(transfer)}
+                        disabled={downloadingPdfId === transfer.id}
+                        className="p-1.5 rounded-md text-gray-400 hover:text-gray-600 hover:bg-gray-200 transition-colors disabled:opacity-50"
+                        title="Download PDF"
+                      >
+                        <Download className={`h-4 w-4 ${downloadingPdfId === transfer.id ? 'animate-pulse' : ''}`} />
+                      </button>
+                    </div>
                   </div>
 
                   {/* Card body */}
