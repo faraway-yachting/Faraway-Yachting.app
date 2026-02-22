@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { X, Trash2, Search, ExternalLink } from 'lucide-react';
+import { X, Trash2, Search, ExternalLink, Link2, Check } from 'lucide-react';
 import {
   TaxiTransfer,
   TripType,
@@ -13,6 +13,7 @@ import {
 } from '@/data/taxi/types';
 import { Booking } from '@/data/booking/types';
 import { taxiTransfersApi, createTransferWithNumber } from '@/lib/supabase/api/taxiTransfers';
+import { taxiBookingLinksApi } from '@/lib/supabase/api/taxiBookingLinks';
 import { bookingsApi } from '@/lib/supabase/api/bookings';
 import { useTaxiCompanies, useTaxiGuestNoteTemplates, useTaxiDriversByCompany, useTaxiVehiclesByCompany } from '@/hooks/queries/useTaxiTransfers';
 import { useYachtProjects } from '@/hooks/queries/useProjects';
@@ -95,6 +96,28 @@ export function TaxiTransferForm({ transfer, bookingId, onClose }: TaxiTransferF
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState('');
+  const [copiedLink, setCopiedLink] = useState(false);
+  const [generatingLink, setGeneratingLink] = useState(false);
+
+  const handleShareLink = async () => {
+    const bId = linkedBookingId;
+    if (!bId) return;
+    try {
+      setGeneratingLink(true);
+      const existing = await taxiBookingLinksApi.getByBookingId(bId);
+      const link = existing.length > 0
+        ? existing[0]
+        : await taxiBookingLinksApi.create({ bookingId: bId, label: 'Guest Link' });
+      const url = `${window.location.origin}/public/taxi-guest/${link.token}`;
+      await navigator.clipboard.writeText(url);
+      setCopiedLink(true);
+      setTimeout(() => setCopiedLink(false), 2000);
+    } catch (err) {
+      console.error('Failed to generate share link:', err);
+    } finally {
+      setGeneratingLink(false);
+    }
+  };
 
   // Load linked booking and auto-fill for new transfers
   useEffect(() => {
@@ -257,6 +280,23 @@ export function TaxiTransferForm({ transfer, bookingId, onClose }: TaxiTransferF
             )}
           </div>
           <div className="flex items-center gap-2">
+            {linkedBookingId && (
+              <button
+                onClick={handleShareLink}
+                disabled={generatingLink}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg transition-colors"
+                title="Copy guest link to clipboard"
+              >
+                {generatingLink ? (
+                  <div className="animate-spin rounded-full h-4 w-4 border border-gray-400 border-t-transparent" />
+                ) : copiedLink ? (
+                  <Check className="h-4 w-4 text-green-600" />
+                ) : (
+                  <Link2 className="h-4 w-4" />
+                )}
+                {copiedLink ? 'Copied!' : 'Share'}
+              </button>
+            )}
             {isEditing && canDelete && (
               <button
                 onClick={handleDelete}
