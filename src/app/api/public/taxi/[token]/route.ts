@@ -38,14 +38,16 @@ export async function GET(
     return NextResponse.json({ error: 'This link has expired' }, { status: 403 });
   }
 
-  // Fetch upcoming transfers for this taxi company
-  const today = new Date().toISOString().split('T')[0];
+  // Fetch transfers for this taxi company (last 6 months + future)
+  const cutoff = new Date();
+  cutoff.setMonth(cutoff.getMonth() - 6);
+  const cutoffDate = cutoff.toISOString().split('T')[0];
   const { data: transfers, error: transfersError } = await supabase
     .from('taxi_transfers')
     .select('*')
     .eq('taxi_company_id', link.taxi_company_id)
     .neq('status', 'cancelled')
-    .or(`pickup_date.gte.${today},return_date.gte.${today}`)
+    .or(`pickup_date.gte.${cutoffDate},return_date.gte.${cutoffDate}`)
     .order('pickup_date', { ascending: true });
 
   if (transfersError) {
@@ -102,6 +104,11 @@ export async function GET(
       taxiDriverId: t.taxi_driver_id,
       taxiVehicleId: t.taxi_vehicle_id,
       driverNote: t.driver_note,
+      amount: t.amount,
+      currency: t.currency,
+      paidBy: t.paid_by,
+      farawayPaid: t.faraway_paid,
+      farawayPaidDate: t.faraway_paid_date,
     })),
     companyName: company?.name || link.label,
     drivers: (drivers ?? []).map((d: any) => ({ id: d.id, name: d.name, phone: d.phone, defaultVehicleId: d.default_vehicle_id })),

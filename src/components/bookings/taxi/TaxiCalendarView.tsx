@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
-import { TaxiTransfer, transferStatusColors } from '@/data/taxi/types';
+import { TaxiTransfer, TransferStatus, transferStatusColors } from '@/data/taxi/types';
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const MONTH_NAMES = [
@@ -10,18 +10,31 @@ const MONTH_NAMES = [
   'July', 'August', 'September', 'October', 'November', 'December',
 ];
 
-interface TransferEntry {
-  transfer: TaxiTransfer;
+export interface CalendarTransfer {
+  id: string;
+  tripType: string;
+  status: string;
+  guestName: string;
+  pickupDate?: string;
+  pickupTime?: string;
+  returnDate?: string;
+  returnTime?: string;
+}
+
+interface TransferEntry<T extends CalendarTransfer> {
+  transfer: T;
   type: 'pickup' | 'return';
   time?: string;
 }
 
-interface TaxiCalendarViewProps {
-  transfers: TaxiTransfer[];
-  onTransferClick: (transfer: TaxiTransfer) => void;
+const defaultStatusColor = { bg: 'bg-gray-50', text: 'text-gray-600', border: 'border-gray-200' };
+
+interface TaxiCalendarViewProps<T extends CalendarTransfer = TaxiTransfer> {
+  transfers: T[];
+  onTransferClick: (transfer: T) => void;
 }
 
-export function TaxiCalendarView({ transfers, onTransferClick }: TaxiCalendarViewProps) {
+export function TaxiCalendarView<T extends CalendarTransfer = TaxiTransfer>({ transfers, onTransferClick }: TaxiCalendarViewProps<T>) {
   const now = new Date();
   const [currentYear, setCurrentYear] = useState(now.getFullYear());
   const [currentMonth, setCurrentMonth] = useState(now.getMonth() + 1);
@@ -43,8 +56,8 @@ export function TaxiCalendarView({ transfers, onTransferClick }: TaxiCalendarVie
 
   // Build date -> entries map
   const dateMap = useMemo(() => {
-    const map = new Map<string, TransferEntry[]>();
-    const addEntry = (date: string | undefined, entry: TransferEntry) => {
+    const map = new Map<string, TransferEntry<T>[]>();
+    const addEntry = (date: string | undefined, entry: TransferEntry<T>) => {
       if (!date) return;
       const existing = map.get(date) || [];
       existing.push(entry);
@@ -163,7 +176,7 @@ export function TaxiCalendarView({ transfers, onTransferClick }: TaxiCalendarVie
                   {/* Transfer entries */}
                   <div className="space-y-0.5">
                     {entries.slice(0, 4).map((entry, ei) => {
-                      const statusColor = transferStatusColors[entry.transfer.status];
+                      const statusColor = transferStatusColors[entry.transfer.status as TransferStatus] || defaultStatusColor;
                       return (
                         <button
                           key={`${entry.transfer.id}-${entry.type}-${ei}`}
