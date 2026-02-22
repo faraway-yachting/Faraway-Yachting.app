@@ -69,7 +69,7 @@ export async function GET(
 
   const { data: vehicles } = await supabase
     .from('taxi_vehicles')
-    .select('id, plate_number, description')
+    .select('id, plate_number, description, photo_url')
     .eq('taxi_company_id', link.taxi_company_id)
     .eq('is_active', true)
     .order('plate_number');
@@ -105,7 +105,7 @@ export async function GET(
     })),
     companyName: company?.name || link.label,
     drivers: (drivers ?? []).map((d: any) => ({ id: d.id, name: d.name, phone: d.phone })),
-    vehicles: (vehicles ?? []).map((v: any) => ({ id: v.id, plateNumber: v.plate_number, description: v.description })),
+    vehicles: (vehicles ?? []).map((v: any) => ({ id: v.id, plateNumber: v.plate_number, description: v.description, photoUrl: v.photo_url })),
   });
 }
 

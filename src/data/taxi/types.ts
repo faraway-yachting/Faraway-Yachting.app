@@ -126,6 +126,7 @@ export interface TaxiVehicle {
   plateNumber: string;
   description?: string;
   notes?: string;
+  photoUrl?: string;
   isActive: boolean;
   createdAt: string;
   updatedAt: string;

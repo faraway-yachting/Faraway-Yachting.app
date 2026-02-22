@@ -8,6 +8,7 @@ function dbToFrontend(db: Record<string, any>): TaxiVehicle {
     plateNumber: db.plate_number,
     description: db.description ?? undefined,
     notes: db.notes ?? undefined,
+    photoUrl: db.photo_url ?? undefined,
     isActive: db.is_active,
     createdAt: db.created_at,
     updatedAt: db.updated_at,
@@ -63,6 +64,7 @@ export const taxiVehiclesApi = {
     plateNumber: string;
     description: string;
     notes: string;
+    photoUrl: string;
     isActive: boolean;
   }>): Promise<TaxiVehicle> {
     const supabase = createClient();
@@ -72,6 +74,7 @@ export const taxiVehiclesApi = {
     if (updates.plateNumber !== undefined) dbUpdates.plate_number = updates.plateNumber;
     if (updates.description !== undefined) dbUpdates.description = updates.description || null;
     if (updates.notes !== undefined) dbUpdates.notes = updates.notes || null;
+    if (updates.photoUrl !== undefined) dbUpdates.photo_url = updates.photoUrl || null;
     if (updates.isActive !== undefined) dbUpdates.is_active = updates.isActive;
 
     const { data, error } = await supabase

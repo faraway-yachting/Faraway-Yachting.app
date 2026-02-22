@@ -1,7 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import { X, Plus, Edit2, Trash2, Link2, Copy, Check, ChevronDown, ChevronRight, Car, User } from 'lucide-react';
+import { X, Plus, Edit2, Trash2, Link2, Copy, Check, ChevronDown, ChevronRight, Car, User, ImageIcon } from 'lucide-react';
+import { createClient } from '@/lib/supabase/client';
 import { TaxiCompany, TaxiPublicLink, TaxiDriver, TaxiVehicle } from '@/data/taxi/types';
 import { taxiCompaniesApi } from '@/lib/supabase/api/taxiCompanies';
 import { taxiPublicLinksApi } from '@/lib/supabase/api/taxiPublicLinks';
@@ -31,15 +32,18 @@ function CompanyDriversVehicles({ companyId }: { companyId: string }) {
   const [vehicleDescription, setVehicleDescription] = useState('');
   const [vehicleNotes, setVehicleNotes] = useState('');
   const [savingVehicle, setSavingVehicle] = useState(false);
+  const [vehiclePhotoFile, setVehiclePhotoFile] = useState<File | null>(null);
+  const [vehiclePhotoPreview, setVehiclePhotoPreview] = useState<string | null>(null);
 
   const resetDriverForm = () => { setDriverName(''); setDriverPhone(''); setDriverNotes(''); setEditingDriverId(null); setShowDriverForm(false); };
-  const resetVehicleForm = () => { setPlateNumber(''); setVehicleDescription(''); setVehicleNotes(''); setEditingVehicleId(null); setShowVehicleForm(false); };
+  const resetVehicleForm = () => { setPlateNumber(''); setVehicleDescription(''); setVehicleNotes(''); setEditingVehicleId(null); setShowVehicleForm(false); setVehiclePhotoFile(null); setVehiclePhotoPreview(null); };
 
   const startEditDriver = (d: TaxiDriver) => {
     setEditingDriverId(d.id); setDriverName(d.name); setDriverPhone(d.phone || ''); setDriverNotes(d.notes || ''); setShowDriverForm(true);
   };
   const startEditVehicle = (v: TaxiVehicle) => {
     setEditingVehicleId(v.id); setPlateNumber(v.plateNumber); setVehicleDescription(v.description || ''); setVehicleNotes(v.notes || ''); setShowVehicleForm(true);
+    setVehiclePhotoFile(null); setVehiclePhotoPreview(v.photoUrl || null);
   };
 
   const handleSaveDriver = async () => {
@@ -56,14 +60,38 @@ function CompanyDriversVehicles({ companyId }: { companyId: string }) {
     } finally { setSavingDriver(false); }
   };
 
+  const uploadVehiclePhoto = async (vehicleId: string): Promise<string | null> => {
+    if (!vehiclePhotoFile) return vehiclePhotoPreview;
+    const supabase = createClient();
+    const ext = vehiclePhotoFile.name.split('.').pop() || 'jpg';
+    const path = `${companyId}/${vehicleId}.${ext}`;
+    const { error } = await supabase.storage
+      .from('taxi-vehicles')
+      .upload(path, vehiclePhotoFile, { upsert: true });
+    if (error) {
+      console.error('Failed to upload vehicle photo:', error);
+      return vehiclePhotoPreview;
+    }
+    const { data: urlData } = supabase.storage.from('taxi-vehicles').getPublicUrl(path);
+    return urlData.publicUrl;
+  };
+
   const handleSaveVehicle = async () => {
     if (!plateNumber.trim()) return;
     setSavingVehicle(true);
     try {
+      let vehicle;
       if (editingVehicleId) {
-        await taxiVehiclesApi.update(editingVehicleId, { plateNumber, description: vehicleDescription, notes: vehicleNotes });
+        vehicle = await taxiVehiclesApi.update(editingVehicleId, { plateNumber, description: vehicleDescription, notes: vehicleNotes });
       } else {
-        await taxiVehiclesApi.create({ taxiCompanyId: companyId, plateNumber, description: vehicleDescription, notes: vehicleNotes });
+        vehicle = await taxiVehiclesApi.create({ taxiCompanyId: companyId, plateNumber, description: vehicleDescription, notes: vehicleNotes });
+      }
+      // Upload photo if a new file was selected
+      if (vehiclePhotoFile) {
+        const photoUrl = await uploadVehiclePhoto(vehicle.id);
+        if (photoUrl) {
+          await taxiVehiclesApi.update(vehicle.id, { photoUrl });
+        }
       }
       queryClient.invalidateQueries({ queryKey: ['taxiVehicles'] });
       resetVehicleForm();
@@ -187,6 +215,37 @@ function CompanyDriversVehicles({ companyId }: { companyId: string }) {
                 <input type="text" value={vehicleNotes} onChange={(e) => setVehicleNotes(e.target.value)} className={inputClass} />
               </div>
             </div>
+            {/* Photo upload */}
+            <div className="mt-2 flex items-center gap-3">
+              {vehiclePhotoPreview ? (
+                <div className="relative">
+                  <img src={vehiclePhotoPreview} alt="Vehicle" className="h-16 w-24 object-cover rounded-md border border-gray-200" />
+                  <button
+                    type="button"
+                    onClick={() => { setVehiclePhotoFile(null); setVehiclePhotoPreview(null); }}
+                    className="absolute -top-1.5 -right-1.5 bg-red-500 text-white rounded-full p-0.5"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </div>
+              ) : (
+                <label className="flex items-center gap-1.5 px-3 py-2 text-xs text-gray-500 border border-dashed border-gray-300 rounded-md cursor-pointer hover:border-blue-400 hover:text-blue-600">
+                  <ImageIcon className="h-4 w-4" />
+                  Add Photo
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (!file) return;
+                      setVehiclePhotoFile(file);
+                      setVehiclePhotoPreview(URL.createObjectURL(file));
+                    }}
+                  />
+                </label>
+              )}
+            </div>
             <div className="flex justify-end gap-2 mt-2">
               <button onClick={resetVehicleForm} className="px-2 py-1 text-xs text-gray-600 hover:text-gray-800">Cancel</button>
               <button onClick={handleSaveVehicle} disabled={savingVehicle || !plateNumber.trim()} className="px-2 py-1 text-xs font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 disabled:opacity-50">
@@ -203,6 +262,13 @@ function CompanyDriversVehicles({ companyId }: { companyId: string }) {
             {vehicles.map((v) => (
               <div key={v.id} className={`flex items-center justify-between py-1.5 px-2 rounded text-sm ${v.isActive ? '' : 'opacity-50'}`}>
                 <div className="flex items-center gap-3">
+                  {v.photoUrl ? (
+                    <img src={v.photoUrl} alt={v.plateNumber} className="h-8 w-12 object-cover rounded border border-gray-200" />
+                  ) : (
+                    <div className="h-8 w-12 bg-gray-100 rounded border border-gray-200 flex items-center justify-center">
+                      <Car className="h-4 w-4 text-gray-300" />
+                    </div>
+                  )}
                   <span className="font-medium text-gray-800">{v.plateNumber}</span>
                   {v.description && <span className="text-xs text-gray-500">{v.description}</span>}
                   {v.notes && <span className="text-xs text-gray-400 italic">{v.notes}</span>}

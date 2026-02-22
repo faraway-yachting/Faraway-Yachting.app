@@ -34,7 +34,7 @@ interface PublicTransfer {
 }
 
 interface CompanyDriver { id: string; name: string; phone?: string; }
-interface CompanyVehicle { id: string; plateNumber: string; description?: string; }
+interface CompanyVehicle { id: string; plateNumber: string; description?: string; photoUrl?: string; }
 
 const statusLabels: Record<string, string> = {
   pending: 'Pending',
@@ -360,6 +360,16 @@ export default function PublicTaxiSchedulePage() {
                           </select>
                         )}
                       </div>
+                      {/* Vehicle photo preview */}
+                      {selectedVehicleId && (() => {
+                        const sv = vehicles.find(vh => vh.id === selectedVehicleId);
+                        return sv?.photoUrl ? (
+                          <div className="flex items-center gap-2">
+                            <img src={sv.photoUrl} alt={sv.plateNumber} className="h-16 w-24 object-cover rounded-md border border-gray-200" />
+                            <span className="text-xs text-gray-500">{sv.plateNumber}{sv.description ? ` — ${sv.description}` : ''}</span>
+                          </div>
+                        ) : null;
+                      })()}
                       <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                         <input
                           type="text"
