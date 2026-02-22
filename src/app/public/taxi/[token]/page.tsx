@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useParams } from 'next/navigation';
-import { Car, MapPin, Clock, Users, Phone, ExternalLink, Check, Search, List, CalendarDays, TrendingUp, AlertCircle, DollarSign, CheckCircle2 } from 'lucide-react';
+import { Car, MapPin, Clock, Users, Phone, ExternalLink, Check, Search, List, CalendarDays, TrendingUp, AlertCircle, DollarSign, CheckCircle2, CreditCard } from 'lucide-react';
 import { TaxiCalendarView } from '@/components/bookings/taxi/TaxiCalendarView';
 
 interface PublicTransfer {
@@ -54,6 +54,18 @@ const statusColors: Record<string, string> = {
   confirmed: 'bg-blue-100 text-blue-800',
   assigned: 'bg-green-100 text-green-800',
   completed: 'bg-gray-100 text-gray-600',
+};
+
+const tripTypeLabels: Record<string, string> = {
+  pickup_only: 'Pick-up Only',
+  return_only: 'Return Only',
+  round_trip: 'Round Trip',
+};
+
+const paidByLabels: Record<string, string> = {
+  guest: 'Guest',
+  agency: 'Agency',
+  faraway: 'Faraway',
 };
 
 function getWeekBounds() {
@@ -401,10 +413,13 @@ export default function PublicTaxiSchedulePage() {
                 >
                   {/* Card header */}
                   <div className="px-5 py-3 bg-gray-50 border-b border-gray-200 flex items-center justify-between">
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-3 flex-wrap">
                       <span className="text-sm font-mono text-gray-500">{transfer.transferNumber}</span>
                       <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${statusColors[transfer.status] || 'bg-gray-100 text-gray-600'}`}>
                         {statusLabels[transfer.status] || transfer.status}
+                      </span>
+                      <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-600">
+                        {tripTypeLabels[transfer.tripType] || transfer.tripType}
                       </span>
                     </div>
                     {transfer.boatName && (
@@ -441,27 +456,43 @@ export default function PublicTaxiSchedulePage() {
                             {formatDate(transfer.pickupDate)} {transfer.pickupTime && `at ${transfer.pickupTime}`}
                           </span>
                         </div>
-                        {transfer.pickupLocation && (
+                        {(transfer.pickupLocation || transfer.pickupLocationUrl) && (
                           <div className="flex items-start gap-2">
                             <MapPin className="h-4 w-4 text-blue-500 mt-0.5" />
                             <div>
-                              <span className="text-sm text-gray-900">{transfer.pickupLocation}</span>
-                              {transfer.pickupLocationUrl && (
-                                <a href={transfer.pickupLocationUrl} target="_blank" rel="noopener noreferrer" className="ml-1 text-blue-600 hover:text-blue-800 inline-flex items-center">
-                                  <ExternalLink className="h-3 w-3" />
+                              {transfer.pickupLocation ? (
+                                <>
+                                  <span className="text-sm text-gray-900">{transfer.pickupLocation}</span>
+                                  {transfer.pickupLocationUrl && (
+                                    <a href={transfer.pickupLocationUrl} target="_blank" rel="noopener noreferrer" className="ml-1 text-blue-600 hover:text-blue-800 inline-flex items-center">
+                                      <ExternalLink className="h-3 w-3" />
+                                    </a>
+                                  )}
+                                </>
+                              ) : (
+                                <a href={transfer.pickupLocationUrl} target="_blank" rel="noopener noreferrer" className="text-sm text-blue-600 hover:text-blue-800 inline-flex items-center gap-1">
+                                  View on Google Maps <ExternalLink className="h-3 w-3" />
                                 </a>
                               )}
                             </div>
                           </div>
                         )}
-                        {transfer.pickupDropoff && (
+                        {(transfer.pickupDropoff || transfer.pickupDropoffUrl) && (
                           <div className="flex items-start gap-2">
                             <MapPin className="h-4 w-4 text-green-500 mt-0.5" />
                             <div>
-                              <span className="text-sm text-gray-600">Drop-off: {transfer.pickupDropoff}</span>
-                              {transfer.pickupDropoffUrl && (
-                                <a href={transfer.pickupDropoffUrl} target="_blank" rel="noopener noreferrer" className="ml-1 text-blue-600 hover:text-blue-800 inline-flex items-center">
-                                  <ExternalLink className="h-3 w-3" />
+                              {transfer.pickupDropoff ? (
+                                <>
+                                  <span className="text-sm text-gray-600">Drop-off: {transfer.pickupDropoff}</span>
+                                  {transfer.pickupDropoffUrl && (
+                                    <a href={transfer.pickupDropoffUrl} target="_blank" rel="noopener noreferrer" className="ml-1 text-blue-600 hover:text-blue-800 inline-flex items-center">
+                                      <ExternalLink className="h-3 w-3" />
+                                    </a>
+                                  )}
+                                </>
+                              ) : (
+                                <a href={transfer.pickupDropoffUrl} target="_blank" rel="noopener noreferrer" className="text-sm text-blue-600 hover:text-blue-800 inline-flex items-center gap-1">
+                                  Drop-off: View on Google Maps <ExternalLink className="h-3 w-3" />
                                 </a>
                               )}
                             </div>
@@ -480,27 +511,43 @@ export default function PublicTaxiSchedulePage() {
                             {formatDate(transfer.returnDate)} {transfer.returnTime && `at ${transfer.returnTime}`}
                           </span>
                         </div>
-                        {transfer.returnLocation && (
+                        {(transfer.returnLocation || transfer.returnLocationUrl) && (
                           <div className="flex items-start gap-2">
                             <MapPin className="h-4 w-4 text-orange-500 mt-0.5" />
                             <div>
-                              <span className="text-sm text-gray-900">{transfer.returnLocation}</span>
-                              {transfer.returnLocationUrl && (
-                                <a href={transfer.returnLocationUrl} target="_blank" rel="noopener noreferrer" className="ml-1 text-blue-600 hover:text-blue-800 inline-flex items-center">
-                                  <ExternalLink className="h-3 w-3" />
+                              {transfer.returnLocation ? (
+                                <>
+                                  <span className="text-sm text-gray-900">{transfer.returnLocation}</span>
+                                  {transfer.returnLocationUrl && (
+                                    <a href={transfer.returnLocationUrl} target="_blank" rel="noopener noreferrer" className="ml-1 text-blue-600 hover:text-blue-800 inline-flex items-center">
+                                      <ExternalLink className="h-3 w-3" />
+                                    </a>
+                                  )}
+                                </>
+                              ) : (
+                                <a href={transfer.returnLocationUrl} target="_blank" rel="noopener noreferrer" className="text-sm text-blue-600 hover:text-blue-800 inline-flex items-center gap-1">
+                                  View on Google Maps <ExternalLink className="h-3 w-3" />
                                 </a>
                               )}
                             </div>
                           </div>
                         )}
-                        {transfer.returnDropoff && (
+                        {(transfer.returnDropoff || transfer.returnDropoffUrl) && (
                           <div className="flex items-start gap-2">
                             <MapPin className="h-4 w-4 text-green-500 mt-0.5" />
                             <div>
-                              <span className="text-sm text-gray-600">Drop-off: {transfer.returnDropoff}</span>
-                              {transfer.returnDropoffUrl && (
-                                <a href={transfer.returnDropoffUrl} target="_blank" rel="noopener noreferrer" className="ml-1 text-blue-600 hover:text-blue-800 inline-flex items-center">
-                                  <ExternalLink className="h-3 w-3" />
+                              {transfer.returnDropoff ? (
+                                <>
+                                  <span className="text-sm text-gray-600">Drop-off: {transfer.returnDropoff}</span>
+                                  {transfer.returnDropoffUrl && (
+                                    <a href={transfer.returnDropoffUrl} target="_blank" rel="noopener noreferrer" className="ml-1 text-blue-600 hover:text-blue-800 inline-flex items-center">
+                                      <ExternalLink className="h-3 w-3" />
+                                    </a>
+                                  )}
+                                </>
+                              ) : (
+                                <a href={transfer.returnDropoffUrl} target="_blank" rel="noopener noreferrer" className="text-sm text-blue-600 hover:text-blue-800 inline-flex items-center gap-1">
+                                  Drop-off: View on Google Maps <ExternalLink className="h-3 w-3" />
                                 </a>
                               )}
                             </div>
@@ -514,6 +561,23 @@ export default function PublicTaxiSchedulePage() {
                       <div className="bg-gray-50 rounded-lg p-3">
                         <p className="text-xs font-semibold text-gray-500 uppercase mb-1">Note</p>
                         <p className="text-sm text-gray-700">{transfer.driverNote}</p>
+                      </div>
+                    )}
+
+                    {/* Payment info */}
+                    {(transfer.paidBy || transfer.amount) && (
+                      <div className="flex items-center gap-3 px-3 py-2 bg-gray-50 rounded-lg text-sm">
+                        <CreditCard className="h-4 w-4 text-gray-400 flex-shrink-0" />
+                        {transfer.paidBy && (
+                          <span className="text-gray-600">
+                            Paid by: <span className="font-medium text-gray-800">{paidByLabels[transfer.paidBy] || transfer.paidBy}</span>
+                          </span>
+                        )}
+                        {transfer.amount && transfer.currency && (
+                          <span className="text-gray-600">
+                            Amount: <span className="font-medium text-gray-800">{transfer.currency} {transfer.amount.toLocaleString()}</span>
+                          </span>
+                        )}
                       </div>
                     )}
 
